@@ -123,6 +123,30 @@ export class DocumentIngestionService {
     };
   }
 
+  async listAllDocuments(): Promise<DocumentResponseDto[]> {
+    const docs = await this.repository.findAll();
+    return docs.map((doc) => ({
+      id: doc.id,
+      title: doc.title,
+      fileUrl: doc.fileUrl,
+      mimeType: doc.mimeType,
+      checksumHash: doc.checksumHash,
+      status: doc.status,
+      createdAt: doc.createdAt,
+      metadata: doc.metadata
+        ? {
+            fileSizeBytes: doc.metadata.fileSizeBytes.toString(),
+            pageCount: doc.metadata.pageCount,
+            totalTokenCount: doc.metadata.totalTokenCount,
+            category: doc.metadata.category,
+            uploadedBy: doc.metadata.uploadedBy,
+          }
+        : undefined,
+      chunkCount: doc._count?.chunks ?? 0,
+      extractedLocationsCount: 0,
+    }));
+  }
+
   async getDocumentDetails(documentId: string): Promise<DocumentResponseDto> {
     const doc = await this.repository.findById(documentId);
     if (!doc) {

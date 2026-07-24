@@ -55,6 +55,16 @@ export class DocumentRepository {
     });
   }
 
+  async findAll() {
+    return this.prisma.reportDocument.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: {
+        metadata: true,
+        _count: { select: { chunks: true } },
+      },
+    });
+  }
+
   /**
    * Vector Retrieval Engine: Parameterized Raw SQL query using Cosine Distance <=> in pgvector with fallback
    */

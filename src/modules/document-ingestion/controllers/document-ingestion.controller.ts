@@ -40,6 +40,15 @@ export class DocumentIngestionController {
     };
   }
 
+  @Get()
+  async listDocuments(): Promise<{ success: boolean; data: DocumentResponseDto[] }> {
+    const result = await this.ingestionService.listAllDocuments();
+    return {
+      success: true,
+      data: result,
+    };
+  }
+
   @Get(':id')
   async getDocumentDetails(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
