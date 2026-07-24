@@ -55,6 +55,8 @@ model ReportDocument {
   chatSessions ChatSession[]
   generatedReportSources ReportSourceRef[]
   chatSessionSources ChatSessionSourceRef[]
+  baselines IndicatorBaseline[]
+  realizations IndicatorRealization[]
 
   @@map("report_documents")
 }
@@ -67,6 +69,7 @@ model DocumentMetadata {
   totalTokenCount Int            @default(0)
   category        String         @default("General Report")
   uploadedBy      String         @default("SYSTEM_STAF")
+  docType         String         @default("REALIZATION")
   createdAt       DateTime       @default(now())
 
   document        ReportDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
@@ -209,4 +212,50 @@ model ReportSourceRef {
   @@unique([reportId, documentId])
   @@map("report_source_refs")
 }
+
+model IndicatorBaseline {
+  id            String         @id @default(uuid()) @db.Uuid
+  documentId    String         @map("document_id") @db.Uuid
+  indicatorName String         @map("indicator_name")
+  targetValue   Float          @map("target_value")
+  unit          String         @default("M")
+  timeframe     String         @default("2026")
+  createdAt     DateTime       @default(now()) @map("created_at")
+
+  document      ReportDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@map("indicator_baselines")
+}
+
+model IndicatorRealization {
+  id               String         @id @default(uuid()) @db.Uuid
+  documentId       String         @map("document_id") @db.Uuid
+  indicatorName    String         @map("indicator_name")
+  realizationValue Float          @map("realization_value")
+  unit             String         @default("M")
+  timeframe        String         @default("2026")
+  createdAt        DateTime       @default(now()) @map("created_at")
+
+  document         ReportDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@map("indicator_realizations")
+}
+
+model DeviationAnalysis {
+  id                  String   @id @default(uuid()) @db.Uuid
+  baselineDocId       String?  @map("baseline_doc_id") @db.Uuid
+  realizationDocId    String?  @map("realization_doc_id") @db.Uuid
+  indicatorName       String   @map("indicator_name")
+  targetValue         Float    @map("target_value")
+  realizationValue    Float    @map("realization_value")
+  deviationValue      Float    @map("deviation_value")
+  deviationPercentage Float    @map("deviation_percentage")
+  urgencyStatus       String   @map("urgency_status")
+  causalFactors       Json     @map("causal_factors")
+  recommendations     Json     @map("recommendations")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  @@map("deviation_analyses")
+}
+
 

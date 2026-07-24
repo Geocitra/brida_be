@@ -12,4 +12,8 @@ export class UploadDocumentDto {
   @IsString()
   @IsOptional()
   uploadedBy?: string;
+
+  @IsString()
+  @IsOptional()
+  docType?: string; // 'BASELINE' | 'REALIZATION' | 'GENERAL_REFERENCE'
 }

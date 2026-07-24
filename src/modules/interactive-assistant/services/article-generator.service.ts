@@ -97,7 +97,7 @@ PANDUAN PENULISAN:
       tokenCount: this.tokenEstimator.estimateTokenCount(userPromptMessage),
     });
 
-    // 3. Call LLM to generate structured article text
+    // 3. Call LLM to generate structured article text with creative temperature 0.7
     let fullArticleText = '';
     try {
       const llmResult = await this.llmAdapter.generateStructuredAnalysis<any>(
@@ -106,6 +106,7 @@ PANDUAN PENULISAN:
           { role: 'user', content: userPromptMessage },
         ],
         ARTICLE_OUTPUT_SCHEMA,
+        0.7,
       );
 
       fullArticleText = llmResult.fullText || formatArticleFromLlm(llmResult, articleTitle);
@@ -168,6 +169,7 @@ Perbarui / revisi draf artikel berdasarkan instruksi revisi terbaru dari penggun
           { role: 'user', content: `Instruksi Revisi Terbaru: ${userInstruction}` },
         ],
         ARTICLE_OUTPUT_SCHEMA,
+        0.7,
       );
 
       revisedArticleText = llmResult.fullText || formatArticleFromLlm(llmResult, session.articleTitle || session.title);

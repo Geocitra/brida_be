@@ -22,6 +22,7 @@ export interface CreateDocumentTransactionInput {
   totalTokenCount: number;
   category: string;
   uploadedBy: string;
+  docType?: string;
   chunks: ChunkWithVectorInput[];
   executionTimeMs: number;
 }
@@ -148,6 +149,7 @@ export class DocumentRepository {
           totalTokenCount: input.totalTokenCount,
           category: input.category,
           uploadedBy: input.uploadedBy,
+          docType: input.docType || 'REALIZATION',
         },
       });
 

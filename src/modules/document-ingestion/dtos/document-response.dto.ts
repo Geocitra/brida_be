@@ -12,6 +12,7 @@ export interface DocumentResponseDto {
     totalTokenCount: number;
     category: string;
     uploadedBy: string;
+    docType?: string;
   };
   chunkCount?: number;
   extractedLocationsCount?: number;

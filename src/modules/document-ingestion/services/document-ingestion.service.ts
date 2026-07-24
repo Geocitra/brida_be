@@ -99,6 +99,7 @@ export class DocumentIngestionService {
       totalTokenCount,
       category: dto.category || 'General Report',
       uploadedBy: dto.uploadedBy || 'SYSTEM_STAF',
+      docType: dto.docType || 'REALIZATION',
       chunks: chunkItems,
       executionTimeMs,
     });
@@ -117,6 +118,7 @@ export class DocumentIngestionService {
         totalTokenCount,
         category: dto.category || 'General Report',
         uploadedBy: dto.uploadedBy || 'SYSTEM_STAF',
+        docType: dto.docType || 'REALIZATION',
       },
       chunkCount: chunkObjects.length,
       extractedLocationsCount: totalLocationsCount,
@@ -140,6 +142,7 @@ export class DocumentIngestionService {
             totalTokenCount: doc.metadata.totalTokenCount,
             category: doc.metadata.category,
             uploadedBy: doc.metadata.uploadedBy,
+            docType: doc.metadata.docType,
           }
         : undefined,
       chunkCount: doc._count?.chunks ?? 0,
@@ -176,6 +179,7 @@ export class DocumentIngestionService {
             totalTokenCount: doc.metadata.totalTokenCount,
             category: doc.metadata.category,
             uploadedBy: doc.metadata.uploadedBy,
+            docType: doc.metadata.docType,
           }
         : undefined,
       chunkCount: doc.chunks ? doc.chunks.length : 0,

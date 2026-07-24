@@ -1,5 +1,6 @@
 import { Injectable, Logger, UnprocessableEntityException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { jsonrepair } from 'jsonrepair';
 import { ILlmProvider } from '../interfaces/llm-provider.interface';
 import { LlmChatMessage } from '../utils/prompt-assembly.builder';
 import { NetworkResilienceUtil } from '../utils/network-resilience.util';
@@ -22,11 +23,12 @@ export class VendorLlmAdapter implements ILlmProvider {
   async generateStructuredAnalysis<T = AnalysisResponseDto>(
     messages: LlmChatMessage[],
     jsonSchema: any,
+    temperature: number = 0.0,
   ): Promise<T> {
     const apiKey = this.configService.get<string>('GEMINI_API_KEY');
 
     this.logger.log(
-      `[VendorLlmAdapter] Mengirim ${messages.length} pesan ke Gemini LLM API (temperature=0.0)...`,
+      `[VendorLlmAdapter] Mengirim ${messages.length} pesan ke Gemini LLM API (temperature=${temperature})...`,
     );
 
     // Execute with Exponential Backoff Resilience (Max 3 Retries)
@@ -34,7 +36,7 @@ export class VendorLlmAdapter implements ILlmProvider {
       let rawResponse: string;
 
       if (apiKey && apiKey.trim().length > 0) {
-        rawResponse = await this.callRealGeminiApi(apiKey, messages, jsonSchema);
+        rawResponse = await this.callRealGeminiApi(apiKey, messages, jsonSchema, temperature);
       } else {
         this.logger.warn(
           `[GEMINI_API_KEY Kosong] Menggunakan mock response terstruktur untuk fase testing. Masukkan GEMINI_API_KEY pada .env untuk memanggil API sungguhan.`,
@@ -47,7 +49,12 @@ export class VendorLlmAdapter implements ILlmProvider {
     }, 3, 2000); // 2s initial backoff (2s, 4s, 8s) for Gemini high-demand tolerance
   }
 
-  private async callRealGeminiApi(apiKey: string, messages: LlmChatMessage[], jsonSchema?: any): Promise<string> {
+  private async callRealGeminiApi(
+    apiKey: string,
+    messages: LlmChatMessage[],
+    jsonSchema?: any,
+    temperature: number = 0.0,
+  ): Promise<string> {
     const modelName = this.configService.get<string>('GEMINI_MODEL') || 'gemini-1.5-flash';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
@@ -63,7 +70,8 @@ export class VendorLlmAdapter implements ILlmProvider {
       body: JSON.stringify({
         contents,
         generationConfig: {
-          temperature: 0.0,
+          temperature,
+          maxOutputTokens: 8192,
           responseMimeType: 'application/json',
           // Enforce native structured output at token-generation level
           responseSchema: jsonSchema,
@@ -127,43 +135,28 @@ export class VendorLlmAdapter implements ILlmProvider {
   }
 
   private validateAndParseOutput<T>(rawString: string): T {
+    const sanitized = this.stripMarkdownFences(rawString);
+
     try {
-      const sanitizedJsonString = this.stripMarkdownFences(rawString);
-      const parsed = JSON.parse(sanitizedJsonString);
-
-      if (!parsed || typeof parsed !== 'object') {
-        throw new UnprocessableEntityException('Output LLM bukan objek JSON yang valid.');
-      }
-
-      // Tolerant normalization: fallback to safe defaults if LLM skips a key
-      // instead of hard-failing and triggering expensive retry loops
-      const normalized = {
-        ringkasanEksekutif:
-          typeof parsed.ringkasanEksekutif === 'string' && parsed.ringkasanEksekutif.trim()
-            ? parsed.ringkasanEksekutif
-            : parsed.answer || parsed.summary || 'Tidak ada ringkasan tersedia dari dokumen ini.',
-        entitasTerlibat: Array.isArray(parsed.entitasTerlibat) ? parsed.entitasTerlibat : [],
-        kronologiPeristiwa: Array.isArray(parsed.kronologiPeristiwa) ? parsed.kronologiPeristiwa : [],
-        indikasiPelanggaran: Array.isArray(parsed.indikasiPelanggaran) ? parsed.indikasiPelanggaran : [],
-        kesimpulanAnalisis:
-          typeof parsed.kesimpulanAnalisis === 'string' && parsed.kesimpulanAnalisis.trim()
-            ? parsed.kesimpulanAnalisis
-            : parsed.conclusion || 'Tidak ada kesimpulan tambahan.',
-      };
-
-      this.logger.log(`[Tolerant Validation Pass] Output JSON LLM berhasil dinormalisasi dan siap dikembalikan ke klien.`);
-      return normalized as T;
+      return JSON.parse(sanitized) as T;
     } catch (err: any) {
-      this.logger.error(`[Post-Generation Validation Failed]: ${err.message}`);
-      // Last-resort fallback: return safe empty structure instead of throwing 422
-      this.logger.warn(`[Fallback Activated] Mengembalikan struktur kosong aman daripada melempar exception.`);
-      return {
-        ringkasanEksekutif: 'Sistem tidak dapat memproses respons AI saat ini. Silakan coba kembali dalam beberapa saat.',
-        entitasTerlibat: [],
-        kronologiPeristiwa: [],
-        indikasiPelanggaran: [],
-        kesimpulanAnalisis: 'Terjadi kendala teknis sementara pada engine AI. Pastikan backend terhubung dan coba ulangi pertanyaan Anda.',
-      } as T;
+      this.logger.warn(`[JSON Parse Warning]: ${err.message}. Running jsonrepair engine...`);
+
+      try {
+        const repairedString = jsonrepair(sanitized);
+        const parsedRepaired = JSON.parse(repairedString);
+        this.logger.log(`[JSON Auto-Repair Pass] Successfully recovered valid JSON structure via jsonrepair.`);
+        return parsedRepaired as T;
+      } catch (repairErr: any) {
+        this.logger.error(`[Post-Generation Validation Warning]: ${repairErr.message}`);
+        return {
+          fullText: rawString,
+          summary: rawString,
+          executiveSummary: rawString,
+          ringkasanEksekutif: rawString,
+          kesimpulanAnalisis: 'Hasil generasi AI telah diterima dalam format narasi.',
+        } as any as T;
+      }
     }
   }
 

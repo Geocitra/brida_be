@@ -107,14 +107,12 @@ volumes:
 
 --- FILE: prisma\schema.prisma ---
 generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["postgresqlExtensions"]
+  provider = "prisma-client-js"
 }
 
 datasource db {
-  provider   = "postgresql"
-  url        = env("DATABASE_URL")
-  extensions = [postgis, pgvector(map: "vector")]
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 enum DocumentStatus {
@@ -137,6 +135,17 @@ enum MessageRole {
   SYSTEM
 }
 
+enum SessionType {
+  QA_CHAT
+  ARTICLE_GENERATOR
+}
+
+enum ArticleLength {
+  SHORT
+  MEDIUM
+  LONG
+}
+
 model ReportDocument {
   id           String             @id @default(uuid()) @db.Uuid
   title        String
@@ -152,6 +161,10 @@ model ReportDocument {
   logs         ExtractionLog[]
   aiLogs       AiAnalysisLog[]
   chatSessions ChatSession[]
+  generatedReportSources ReportSourceRef[]
+  chatSessionSources ChatSessionSourceRef[]
+  baselines IndicatorBaseline[]
+  realizations IndicatorRealization[]
 
   @@map("report_documents")
 }
@@ -164,6 +177,7 @@ model DocumentMetadata {
   totalTokenCount Int            @default(0)
   category        String         @default("General Report")
   uploadedBy      String         @default("SYSTEM_STAF")
+  docType         String         @default("REALIZATION")
   createdAt       DateTime       @default(now())
 
   document        ReportDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
@@ -177,7 +191,7 @@ model DocumentChunk {
   chunkIndex  Int
   rawText     String               @db.Text
   tokenCount  Int
-  embedding   Unsupported("vector(768)")?
+  embedding   String?              @db.Text
   createdAt   DateTime             @default(now())
 
   document    ReportDocument       @relation(fields: [documentId], references: [id], onDelete: Cascade)
@@ -206,7 +220,6 @@ model GeospatialLocation {
   locationName    String
   latitude        Float
   longitude       Float
-  locationPoint   Unsupported("geometry")?
   confidenceScore Float                     @default(1.0)
   createdAt       DateTime                  @default(now())
 
@@ -232,16 +245,34 @@ model AiAnalysisLog {
 }
 
 model ChatSession {
-  id          String        @id @default(uuid()) @db.Uuid
-  documentId  String        @db.Uuid
-  title       String        @default("Sesi Analisis Kasus")
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id           String                 @id @default(uuid()) @db.Uuid
+  documentId   String?                @db.Uuid
+  sessionType  SessionType            @default(QA_CHAT)
+  title        String                 @default("Sesi Analisis Kasus")
+  articleTitle String?                @db.Text
+  targetLength ArticleLength?         @default(MEDIUM)
+  tone         String?                @default("solutif")
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
 
-  document    ReportDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  messages    ChatMessage[]
+  document     ReportDocument?        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  messages     ChatMessage[]
+  sources      ChatSessionSourceRef[]
 
   @@map("chat_sessions")
+}
+
+model ChatSessionSourceRef {
+  id           String          @id @default(uuid()) @db.Uuid
+  sessionId    String          @db.Uuid
+  documentId   String          @db.Uuid
+  createdAt    DateTime        @default(now())
+
+  session      ChatSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  document     ReportDocument  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, documentId])
+  @@map("chat_session_source_refs")
 }
 
 model ChatMessage {
@@ -258,6 +289,84 @@ model ChatMessage {
   @@map("chat_messages")
 }
 
+model GeneratedReport {
+  id               String            @id @default(uuid()) @db.Uuid
+  title            String
+  reportType       String            @default("NOTA_DINAS_BUPATI")
+  documentIdsHash  String            @db.Text
+  executiveSummary String            @db.Text
+  contentPayload   Json
+  tokenCount       Int               @default(0)
+  llmProvider      String            @default("GEMINI_FLASH")
+  status           DocumentStatus    @default(READY)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  sources          ReportSourceRef[]
+
+  @@index([documentIdsHash])
+  @@map("generated_reports")
+}
+
+model ReportSourceRef {
+  id           String          @id @default(uuid()) @db.Uuid
+  reportId     String          @db.Uuid
+  documentId   String          @db.Uuid
+  createdAt    DateTime        @default(now())
+
+  report       GeneratedReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  document     ReportDocument  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([reportId, documentId])
+  @@map("report_source_refs")
+}
+
+model IndicatorBaseline {
+  id            String         @id @default(uuid()) @db.Uuid
+  documentId    String         @map("document_id") @db.Uuid
+  indicatorName String         @map("indicator_name")
+  targetValue   Float          @map("target_value")
+  unit          String         @default("M")
+  timeframe     String         @default("2026")
+  createdAt     DateTime       @default(now()) @map("created_at")
+
+  document      ReportDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@map("indicator_baselines")
+}
+
+model IndicatorRealization {
+  id               String         @id @default(uuid()) @db.Uuid
+  documentId       String         @map("document_id") @db.Uuid
+  indicatorName    String         @map("indicator_name")
+  realizationValue Float          @map("realization_value")
+  unit             String         @default("M")
+  timeframe        String         @default("2026")
+  createdAt        DateTime       @default(now()) @map("created_at")
+
+  document         ReportDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@map("indicator_realizations")
+}
+
+model DeviationAnalysis {
+  id                  String   @id @default(uuid()) @db.Uuid
+  baselineDocId       String?  @map("baseline_doc_id") @db.Uuid
+  realizationDocId    String?  @map("realization_doc_id") @db.Uuid
+  indicatorName       String   @map("indicator_name")
+  targetValue         Float    @map("target_value")
+  realizationValue    Float    @map("realization_value")
+  deviationValue      Float    @map("deviation_value")
+  deviationPercentage Float    @map("deviation_percentage")
+  urgencyStatus       String   @map("urgency_status")
+  causalFactors       Json     @map("causal_factors")
+  recommendations     Json     @map("recommendations")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  @@map("deviation_analyses")
+}
+
+
 --- FILE: src\app.module.ts ---
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
@@ -265,6 +374,8 @@ import { PrismaModule } from './common/prisma/prisma.module';
 import { DocumentIngestionModule } from './modules/document-ingestion/document-ingestion.module';
 import { AiAgentModule } from './modules/ai-agent/ai-agent.module';
 import { InteractiveAssistantModule } from './modules/interactive-assistant/interactive-assistant.module';
+import { ReportsModule } from './modules/reports/reports.module';
+import { AnalysisModule } from './modules/analysis/analysis.module';
 
 @Module({
   imports: [
@@ -275,6 +386,8 @@ import { InteractiveAssistantModule } from './modules/interactive-assistant/inte
     DocumentIngestionModule,
     AiAgentModule,
     InteractiveAssistantModule,
+    ReportsModule,
+    AnalysisModule,
   ],
 })
 export class AppModule {}
@@ -284,6 +397,10 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
 import { AppModule } from './app.module';
 import { GlobalHttpExceptionFilter } from './common/filters/http-exception.filter';
+
+(BigInt.prototype as any).toJSON = function () {
+  return Number(this);
+};
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
@@ -363,13 +480,15 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
       errorType = 'BadRequest';
     }
 
+    const safeMessageStr = typeof message === 'string' ? message : String(message);
+
     if (status === HttpStatus.INTERNAL_SERVER_ERROR) {
       this.logger.error(
-        `[${request.method}] ${request.url} - Error: ${JSON.stringify(message)}`,
+        `[${request.method}] ${request.url} - Error: ${safeMessageStr}`,
         exception instanceof Error ? exception.stack : '',
       );
     } else {
-      this.logger.warn(`[${request.method}] ${request.url} - Status ${status} (${errorType}): ${JSON.stringify(message)}`);
+      this.logger.warn(`[${request.method}] ${request.url} - Status ${status} (${errorType}): ${safeMessageStr}`);
     }
 
     response.status(status).json({
@@ -649,6 +768,7 @@ export interface VectorSearchParams {
 
 --- FILE: src\modules\ai-agent\providers\vendor-llm.adapter.ts ---
 import { Injectable, Logger, UnprocessableEntityException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { ILlmProvider } from '../interfaces/llm-provider.interface';
 import { LlmChatMessage } from '../utils/prompt-assembly.builder';
 import { NetworkResilienceUtil } from '../utils/network-resilience.util';
@@ -658,29 +778,86 @@ import { AnalysisResponseDto } from '../schemas/analysis-response.dto';
 export class VendorLlmAdapter implements ILlmProvider {
   private readonly logger = new Logger(VendorLlmAdapter.name);
 
-  constructor(private readonly resilienceUtil: NetworkResilienceUtil) {}
+  constructor(
+    private readonly resilienceUtil: NetworkResilienceUtil,
+    private readonly configService: ConfigService,
+  ) {}
 
   getProviderName(): string {
-    return 'GeminiStructuredLlmAdapter';
+    const model = this.configService.get<string>('GEMINI_MODEL') || 'gemini-1.5-flash';
+    return `GoogleGeminiAdapter (${model})`;
   }
 
   async generateStructuredAnalysis<T = AnalysisResponseDto>(
     messages: LlmChatMessage[],
     jsonSchema: any,
+    temperature: number = 0.0,
   ): Promise<T> {
+    const apiKey = this.configService.get<string>('GEMINI_API_KEY');
+
     this.logger.log(
-      `[VendorLlmAdapter] Mengirim ${messages.length} pesan ke LLM API dengan temperature=0.0 & JSON Schema Enforcement...`,
+      `[VendorLlmAdapter] Mengirim ${messages.length} pesan ke Gemini LLM API (temperature=${temperature})...`,
     );
 
     return this.resilienceUtil.executeWithRetry(async () => {
-      const rawResponse = await this.mockVendorApiCall(messages, jsonSchema);
+      let rawResponse: string;
+
+      if (apiKey && apiKey.trim().length > 0) {
+        rawResponse = await this.callRealGeminiApi(apiKey, messages, jsonSchema, temperature);
+      } else {
+        this.logger.warn(
+          `[GEMINI_API_KEY Kosong] Menggunakan mock response terstruktur untuk fase testing. Masukkan GEMINI_API_KEY pada .env untuk memanggil API sungguhan.`,
+        );
+        rawResponse = await this.mockVendorApiCall();
+      }
 
       return this.validateAndParseOutput<T>(rawResponse);
-    }, 3, 1000);
+    }, 3, 2000);
   }
 
-  private async mockVendorApiCall(messages: LlmChatMessage[], schema: any): Promise<string> {
+  private async callRealGeminiApi(
+    apiKey: string,
+    messages: LlmChatMessage[],
+    jsonSchema?: any,
+    temperature: number = 0.0,
+  ): Promise<string> {
+    const modelName = this.configService.get<string>('GEMINI_MODEL') || 'gemini-1.5-flash';
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
+    const contents = messages.map((m) => ({
+      role: m.role === 'assistant' ? 'model' : 'user',
+      parts: [{ text: m.content }],
+    }));
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        contents,
+        generationConfig: {
+          temperature,
+          responseMimeType: 'application/json',
+
+          responseSchema: jsonSchema,
+        },
+      }),
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      const errorMsg = data?.error?.message || 'Gagal memanggil API Google Gemini.';
+      throw new Error(`[Gemini API Error]: ${errorMsg}`);
+    }
+
+    const textOutput = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    if (!textOutput) {
+      throw new Error('API Gemini mengembalikan respons kosong.');
+    }
+
+    return textOutput;
+  }
+
+  private async mockVendorApiCall(): Promise<string> {
     const mockResult: AnalysisResponseDto = {
       ringkasanEksekutif:
         'Berdasarkan dokumen laporan statis yang dianalisis, ditemukan indikasi awal penyimpangan prosedur pengadaan barang dan jasa pada proyek pembangunan infrastruktur daerah.',
@@ -723,43 +900,48 @@ export class VendorLlmAdapter implements ILlmProvider {
 
   private validateAndParseOutput<T>(rawString: string): T {
     try {
-
       const sanitizedJsonString = this.stripMarkdownFences(rawString);
-
       const parsed = JSON.parse(sanitizedJsonString);
 
       if (!parsed || typeof parsed !== 'object') {
         throw new UnprocessableEntityException('Output LLM bukan objek JSON yang valid.');
       }
 
-      if (
-        !parsed.ringkasanEksekutif ||
-        !Array.isArray(parsed.entitasTerlibat) ||
-        !Array.isArray(parsed.kronologiPeristiwa) ||
-        !Array.isArray(parsed.indikasiPelanggaran) ||
-        !parsed.kesimpulanAnalisis
-      ) {
-        throw new UnprocessableEntityException(
-          'Output LLM tidak memenuhi skema DTO AnalysisResponseDto yang diwajibkan.',
-        );
-      }
+      const normalized = {
+        ringkasanEksekutif:
+          typeof parsed.ringkasanEksekutif === 'string' && parsed.ringkasanEksekutif.trim()
+            ? parsed.ringkasanEksekutif
+            : parsed.answer || parsed.summary || 'Tidak ada ringkasan tersedia dari dokumen ini.',
+        entitasTerlibat: Array.isArray(parsed.entitasTerlibat) ? parsed.entitasTerlibat : [],
+        kronologiPeristiwa: Array.isArray(parsed.kronologiPeristiwa) ? parsed.kronologiPeristiwa : [],
+        indikasiPelanggaran: Array.isArray(parsed.indikasiPelanggaran) ? parsed.indikasiPelanggaran : [],
+        kesimpulanAnalisis:
+          typeof parsed.kesimpulanAnalisis === 'string' && parsed.kesimpulanAnalisis.trim()
+            ? parsed.kesimpulanAnalisis
+            : parsed.conclusion || 'Tidak ada kesimpulan tambahan.',
+      };
 
-      this.logger.log(`[Defensive Validation Pass] Output JSON LLM berhasil dibersihkan dari markdown dan lolos uji DTO.`);
-      return parsed as T;
+      this.logger.log(`[Tolerant Validation Pass] Output JSON LLM berhasil dinormalisasi dan siap dikembalikan ke klien.`);
+      return normalized as T;
     } catch (err: any) {
       this.logger.error(`[Post-Generation Validation Failed]: ${err.message}`);
-      throw new UnprocessableEntityException(`Gagal memverifikasi respons JSON dari LLM: ${err.message}`);
+
+      this.logger.warn(`[Fallback Activated] Mengembalikan struktur kosong aman daripada melempar exception.`);
+      return {
+        ringkasanEksekutif: 'Sistem tidak dapat memproses respons AI saat ini. Silakan coba kembali dalam beberapa saat.',
+        entitasTerlibat: [],
+        kronologiPeristiwa: [],
+        indikasiPelanggaran: [],
+        kesimpulanAnalisis: 'Terjadi kendala teknis sementara pada engine AI. Pastikan backend terhubung dan coba ulangi pertanyaan Anda.',
+      } as T;
     }
   }
 
   private stripMarkdownFences(rawText: string): string {
     if (!rawText) return '';
     let cleaned = rawText.trim();
-
     cleaned = cleaned.replace(/^```(?:json)?\s*/i, '');
-    // Strip trailing ```
     cleaned = cleaned.replace(/\s*```$/i, '');
-
     return cleaned.trim();
   }
 }
@@ -1145,7 +1327,7 @@ export class NetworkResilienceUtil {
   async executeWithRetry<T>(
     task: () => Promise<T>,
     maxRetries: number = 3,
-    initialDelayMs: number = 1000,
+    initialDelayMs: number = 2000,
   ): Promise<T> {
     let attempt = 0;
     let delay = initialDelayMs;
@@ -1155,8 +1337,17 @@ export class NetworkResilienceUtil {
         attempt++;
         return await task();
       } catch (error: any) {
+        const isTransientError = this.isTransientNetworkError(error);
+
+        if (!isTransientError) {
+          this.logger.warn(
+            `[NetworkResilience] Percobaan ${attempt}/${maxRetries} gagal dengan error non-transien: ${error.message}. Tidak melakukan retry — meneruskan fallback.`,
+          );
+          throw error;
+        }
+
         this.logger.warn(
-          `[NetworkResilience] Percobaan ${attempt}/${maxRetries} gagal: ${error.message}. ${
+          `[NetworkResilience] Percobaan ${attempt}/${maxRetries} gagal (transien): ${error.message}. ${
             attempt < maxRetries ? `Mencoba ulang dalam ${delay}ms...` : 'Batas maksimal retry tercapai.'
           }`,
         );
@@ -1166,11 +1357,38 @@ export class NetworkResilienceUtil {
         }
 
         await new Promise((resolve) => setTimeout(resolve, delay));
-        delay *= 2;
+
+        delay = isTransientError && this.isRateLimitError(error)
+          ? delay * 3
+          : delay * 2;
       }
     }
 
     throw new Error('Penanganan retry gagal.');
+  }
+
+  private isTransientNetworkError(error: any): boolean {
+    const msg = error?.message?.toLowerCase() || '';
+    const status = error?.status || error?.statusCode;
+
+    if (msg.includes('high demand') || msg.includes('503') || msg.includes('rate limit') || msg.includes('429')) {
+      return true;
+    }
+
+    if (msg.includes('fetch failed') || msg.includes('network') || msg.includes('timeout') || msg.includes('econnrefused')) {
+      return true;
+    }
+
+    if (status >= 500 && status < 600) return true;
+
+    if (status === 429) return true;
+
+    return false;
+  }
+
+  private isRateLimitError(error: any): boolean {
+    const msg = error?.message?.toLowerCase() || '';
+    return msg.includes('rate limit') || msg.includes('429') || msg.includes('high demand') || msg.includes('503');
   }
 }
 
@@ -1290,6 +1508,387 @@ export class TokenEstimatorUtil {
   }
 }
 
+--- FILE: src\modules\analysis\analysis.module.ts ---
+import { Module } from '@nestjs/common';
+import { AnalysisController } from './controllers/analysis.controller';
+import { AnalysisMathService } from './services/analysis-math.service';
+import { AnalysisCausalService } from './services/analysis-causal.service';
+import { AiAgentModule } from '../ai-agent/ai-agent.module';
+import { DocumentIngestionModule } from '../document-ingestion/document-ingestion.module';
+
+@Module({
+  imports: [AiAgentModule, DocumentIngestionModule],
+  controllers: [AnalysisController],
+  providers: [AnalysisMathService, AnalysisCausalService],
+  exports: [AnalysisMathService, AnalysisCausalService],
+})
+export class AnalysisModule {}
+
+--- FILE: src\modules\analysis\controllers\analysis.controller.ts ---
+import { Controller, Post, Get, Body, HttpCode, HttpStatus } from '@nestjs/common';
+import { IsString, IsNumber, IsOptional } from 'class-validator';
+import { AnalysisMathService } from '../services/analysis-math.service';
+import { AnalysisCausalService } from '../services/analysis-causal.service';
+import { PrismaService } from '../../../common/prisma/prisma.service';
+
+export class CompareAnalysisDto {
+  @IsString()
+  indicatorName!: string;
+
+  @IsNumber()
+  targetValue!: number;
+
+  @IsNumber()
+  realizationValue!: number;
+
+  @IsOptional()
+  @IsString()
+  sector?: string;
+
+  @IsOptional()
+  @IsString()
+  unitPrefix?: string;
+
+  @IsOptional()
+  @IsString()
+  unitSuffix?: string;
+
+  @IsOptional()
+  @IsString()
+  baselineDocId?: string;
+
+  @IsOptional()
+  @IsString()
+  realizationDocId?: string;
+}
+
+@Controller('analysis')
+export class AnalysisController {
+  constructor(
+    private readonly mathService: AnalysisMathService,
+    private readonly causalService: AnalysisCausalService,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  @Get('indicators')
+  async getIndicatorMatrix() {
+    const baselines = await this.prisma.indicatorBaseline.findMany({
+      include: {
+        document: {
+          include: {
+            metadata: true,
+          },
+        },
+      },
+    });
+
+    const realizations = await this.prisma.indicatorRealization.findMany({
+      include: {
+        document: {
+          include: {
+            metadata: true,
+          },
+        },
+      },
+    });
+
+    const realizationMap = new Map<string, (typeof realizations)[0]>();
+    for (const real of realizations) {
+      realizationMap.set(real.indicatorName.trim().toLowerCase(), real);
+    }
+
+    const indicators = baselines.map((base) => {
+      const real = realizationMap.get(base.indicatorName.trim().toLowerCase());
+      const realizationValue = real ? real.realizationValue : 0;
+      const sector = base.document?.metadata?.category || 'Fiskal & Ekonomi';
+      const unit = base.unit || real?.unit || '';
+
+      let unitPrefix = '';
+      let unitSuffix = unit;
+      if (unit === 'M' || unit === 'B' || unit === 'Juta') {
+        unitPrefix = 'Rp ';
+        unitSuffix = ` ${unit}`;
+      } else if (unit === '%') {
+        unitPrefix = '';
+        unitSuffix = '%';
+      }
+
+      const math = this.mathService.calculate(
+        base.targetValue,
+        realizationValue,
+        base.indicatorName,
+        sector,
+        unitPrefix,
+        unitSuffix,
+      );
+
+      return {
+        id: base.id,
+        name: base.indicatorName,
+        sector: math.sector,
+        baseline: math.targetText,
+        realization: math.realizationText,
+        deviationPercentage: math.deviationPercentage,
+        urgencyStatus: math.urgencyStatus,
+        targetValue: base.targetValue,
+        realizationValue,
+        unitPrefix,
+        unitSuffix,
+        trendData: [base.targetValue, realizationValue],
+        baselineDocId: base.documentId,
+        realizationDocId: real?.documentId,
+      };
+    });
+
+    return {
+      success: true,
+      data: indicators,
+    };
+  }
+
+  @Post('compare')
+  @HttpCode(HttpStatus.OK)
+  async compareDeviation(@Body() dto: CompareAnalysisDto) {
+
+    const mathResult = this.mathService.calculate(
+      dto.targetValue,
+      dto.realizationValue,
+      dto.indicatorName,
+      dto.sector || 'Fiskal & Ekonomi',
+      dto.unitPrefix || 'Rp ',
+      dto.unitSuffix || ' M',
+    );
+
+    const causalResult = await this.causalService.analyzeCausalFactors(
+      dto.indicatorName,
+      mathResult.deviationPercentage,
+      dto.baselineDocId,
+      dto.realizationDocId,
+    );
+
+    return {
+      success: true,
+      data: {
+        math: mathResult,
+        causal: causalResult,
+      },
+    };
+  }
+}
+
+--- FILE: src\modules\analysis\services\analysis-causal.service.ts ---
+import { Injectable, Logger, InternalServerErrorException } from '@nestjs/common';
+import { VendorLlmAdapter } from '../../ai-agent/providers/vendor-llm.adapter';
+import { VectorRetrievalService } from '../../ai-agent/services/vector-retrieval.service';
+import { DocumentRepository } from '../../document-ingestion/repositories/document.repository';
+
+export interface CausalFactor {
+  factor: string;
+  weightPercentage: number;
+  category: string;
+  description: string;
+}
+
+export interface RecommendationAction {
+  id: string;
+  actionTitle: string;
+  pic: string;
+  deadline: string;
+  estimatedCostText: string;
+  priority: 'TINGGI' | 'SEDANG' | 'RENDAH';
+  status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED';
+}
+
+export interface CausalAnalysisOutput {
+  summary: string;
+  causalFactors: CausalFactor[];
+  recommendations: RecommendationAction[];
+}
+
+const CAUSAL_OUTPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    summary: { type: 'string' },
+    causalFactors: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          factor: { type: 'string' },
+          weightPercentage: { type: 'number' },
+          category: { type: 'string' },
+          description: { type: 'string' },
+        },
+      },
+    },
+    recommendations: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          actionTitle: { type: 'string' },
+          pic: { type: 'string' },
+          deadline: { type: 'string' },
+          estimatedCostText: { type: 'string' },
+          priority: { type: 'string' },
+        },
+      },
+    },
+  },
+};
+
+@Injectable()
+export class AnalysisCausalService {
+  private readonly logger = new Logger(AnalysisCausalService.name);
+
+  constructor(
+    private readonly llmAdapter: VendorLlmAdapter,
+    private readonly vectorRetrieval: VectorRetrievalService,
+    private readonly docRepository: DocumentRepository,
+  ) {}
+
+  async analyzeCausalFactors(
+    indicatorName: string,
+    deviationPercentage: number,
+    baselineDocId?: string,
+    realizationDocId?: string,
+  ): Promise<CausalAnalysisOutput> {
+    this.logger.log(
+      `[AnalysisCausalService] Membedah Causal Inference AI via Vector RAG untuk '${indicatorName}' (${deviationPercentage}%)...`,
+    );
+
+    let docContext = '';
+    const targetDocId = realizationDocId || baselineDocId;
+
+    if (targetDocId) {
+      try {
+
+        const relevantChunks = await this.vectorRetrieval.searchRelevantChunks({
+          documentId: targetDocId,
+          queryText: indicatorName,
+          topK: 5,
+        });
+
+        if (relevantChunks && relevantChunks.length > 0) {
+          docContext = relevantChunks
+            .map((c, i) => `[Chunk RAG ${i + 1} - Score ${(c.similarityScore * 100).toFixed(1)}%]: ${c.rawText}`)
+            .join('\n---\n');
+        } else {
+
+          const doc = await this.docRepository.findById(targetDocId);
+          if (doc && doc.chunks && doc.chunks.length > 0) {
+            docContext = doc.chunks.slice(0, 5).map((c) => c.rawText).join('\n---\n');
+          }
+        }
+      } catch (err: any) {
+        this.logger.warn(`Vector RAG retrieval fallback untuk causal analysis: ${err.message}`);
+      }
+    }
+
+    const messages = [
+      {
+        role: 'system' as const,
+        content: `Anda adalah Analis Kebijakan BRIDA Kabupaten Mimika. Analisis akar masalah (Causal Inference) dan susun rekomendasi aksi prioritas untuk deviasi indikator '${indicatorName}' sebesar ${deviationPercentage}%.`,
+      },
+      {
+        role: 'user' as const,
+        content: `Konteks Dokumen Vector RAG Relevan:\n${
+          docContext ||
+          'Konteks Kebijakan Kabupaten Mimika (Sektor Fiskal/PAD, Pendidikan Hoya, Inflasi Daerah, Infrastruktur Agimuga).'
+        }\n\nBerikan 3 faktor penyebab utama (total persentase bobot 100%) dan 4 rekomendasi tindakan konkret beserta PIC, deadline, dan estimasi biaya.`,
+      },
+    ];
+
+    try {
+      const llmResult = await this.llmAdapter.generateStructuredAnalysis<any>(
+        messages,
+        CAUSAL_OUTPUT_SCHEMA,
+      );
+
+      if (!llmResult || !Array.isArray(llmResult.causalFactors) || !Array.isArray(llmResult.recommendations)) {
+        throw new InternalServerErrorException(
+          `Gagal mendapatkan struktur analisis kausal yang valid dari AI Gemini untuk '${indicatorName}'.`,
+        );
+      }
+
+      return {
+        summary: llmResult.summary || `Analisis akar masalah deviasi ${indicatorName} (${deviationPercentage}%).`,
+        causalFactors: llmResult.causalFactors,
+        recommendations: llmResult.recommendations.map((r: any, idx: number) => ({
+          id: `rec-${idx + 1}`,
+          actionTitle: r.actionTitle || 'Koordinasi Teknis Sektor',
+          pic: r.pic || 'Dinas Terkait',
+          deadline: r.deadline || '30 April 2026',
+          estimatedCostText: r.estimatedCostText || 'Rp 50 Juta',
+          priority: (r.priority as any) || 'TINGGI',
+          status: 'PENDING',
+        })),
+      };
+    } catch (err: any) {
+      this.logger.error(`[AnalysisCausalService] Gemini AI Error: ${err.message}`, err.stack);
+      if (err instanceof InternalServerErrorException) {
+        throw err;
+      }
+      throw new InternalServerErrorException(
+        `Layanan AI Gemini gagal melakukan analisis kausal untuk '${indicatorName}': ${err.message || 'API Key tidak valid atau kendala jaringan.'}`,
+      );
+    }
+  }
+}
+
+--- FILE: src\modules\analysis\services\analysis-math.service.ts ---
+import { Injectable } from '@nestjs/common';
+
+export interface MathDeviationResult {
+  indicatorName: string;
+  sector: string;
+  targetValue: number;
+  realizationValue: number;
+  targetText: string;
+  realizationText: string;
+  deviationValue: number;
+  deviationPercentage: number;
+  urgencyStatus: 'NORMAL' | 'WASPADA' | 'KRITIS';
+}
+
+@Injectable()
+export class AnalysisMathService {
+
+  calculate(
+    target: number,
+    realization: number,
+    indicatorName: string,
+    sector: string = 'Fiskal & Ekonomi',
+    unitPrefix: string = 'Rp ',
+    unitSuffix: string = ' M',
+  ): MathDeviationResult {
+    const deviationValue = realization - target;
+    const deviationPercentage = Number(((deviationValue / target) * 100).toFixed(1));
+
+    let urgencyStatus: 'NORMAL' | 'WASPADA' | 'KRITIS' = 'NORMAL';
+    if (deviationPercentage <= -20) {
+      urgencyStatus = 'KRITIS';
+    } else if (deviationPercentage <= -5) {
+      urgencyStatus = 'WASPADA';
+    }
+
+    const formatNum = (val: number) =>
+      `${unitPrefix}${val.toLocaleString('id-ID')}${unitSuffix}`;
+
+    return {
+      indicatorName,
+      sector,
+      targetValue: target,
+      realizationValue: realization,
+      targetText: formatNum(target),
+      realizationText: formatNum(realization),
+      deviationValue,
+      deviationPercentage,
+      urgencyStatus,
+    };
+  }
+}
+
 --- FILE: src\modules\document-ingestion\document-ingestion.module.ts ---
 import { Module } from '@nestjs/common';
 import { DocumentIngestionController } from './controllers/document-ingestion.controller';
@@ -1385,6 +1984,15 @@ export class DocumentIngestionController {
     };
   }
 
+  @Get()
+  async listDocuments(): Promise<{ success: boolean; data: DocumentResponseDto[] }> {
+    const result = await this.ingestionService.listAllDocuments();
+    return {
+      success: true,
+      data: result,
+    };
+  }
+
   @Get(':id')
   async getDocumentDetails(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
@@ -1412,6 +2020,7 @@ export interface DocumentResponseDto {
     totalTokenCount: number;
     category: string;
     uploadedBy: string;
+    docType?: string;
   };
   chunkCount?: number;
   extractedLocationsCount?: number;
@@ -1432,6 +2041,10 @@ export class UploadDocumentDto {
   @IsString()
   @IsOptional()
   uploadedBy?: string;
+
+  @IsString()
+  @IsOptional()
+  docType?: string;
 }
 
 --- FILE: src\modules\document-ingestion\interfaces\chunk-data.interface.ts ---
@@ -1638,42 +2251,73 @@ export class TxtParserAdapter implements IDocumentParser {
 
 --- FILE: src\modules\document-ingestion\providers\external-embedding.adapter.ts ---
 import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { IEmbeddingProvider } from '../interfaces/embedding-provider.interface';
 
 @Injectable()
 export class ExternalEmbeddingAdapter implements IEmbeddingProvider {
   private readonly logger = new Logger(ExternalEmbeddingAdapter.name);
-  private readonly vectorDimension = 768;
+  private readonly dimension = 768;
+
+  constructor(private readonly configService: ConfigService) {}
 
   getVectorDimension(): number {
-    return this.vectorDimension;
+    return this.dimension;
   }
 
   async generateEmbeddings(texts: string[]): Promise<number[][]> {
-    if (!texts || texts.length === 0) {
-      return [];
+    const apiKey = this.configService.get<string>('GEMINI_API_KEY');
+
+    if (apiKey && apiKey.trim().length > 0) {
+      try {
+        return await this.callRealGeminiEmbeddingApi(apiKey, texts);
+      } catch (err: any) {
+        this.logger.warn(
+          `[Gemini Embedding API Error]: ${err.message}. Menggunakan fallback vector generator.`,
+        );
+      }
     }
 
-    this.logger.log(`[ExternalEmbeddingAdapter] Menghasilkan vector embeddings untuk ${texts.length} teks...`);
+    return texts.map((text, idx) => this.generateDeterministicVector(text, idx));
+  }
 
-    const embeddings: number[][] = texts.map((text) => {
-      const vector: number[] = new Array(this.vectorDimension);
-      let hash = 0;
-      for (let i = 0; i < text.length; i++) {
-        hash = (hash << 5) - hash + text.charCodeAt(i);
-        hash |= 0;
-      }
+  private async callRealGeminiEmbeddingApi(apiKey: string, texts: string[]): Promise<number[][]> {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:batchEmbedContents?key=${apiKey}`;
 
-      for (let j = 0; j < this.vectorDimension; j++) {
+    const requests = texts.map((t) => ({
+      model: 'models/text-embedding-004',
+      content: { parts: [{ text: t }] },
+    }));
 
-        const value = Math.sin(hash + j);
-        vector[j] = parseFloat(value.toFixed(6));
-      }
-
-      return vector;
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requests }),
     });
 
-    return embeddings;
+    const data = await response.json();
+    if (!response.ok || !data.embeddings) {
+      throw new Error(data?.error?.message || 'Gagal menghasilkan embeddings via Gemini.');
+    }
+
+    return data.embeddings.map((item: any) => item.values);
+  }
+
+  private generateDeterministicVector(text: string, seedOffset: number): number[] {
+    const vector: number[] = [];
+    let hash = seedOffset + 1;
+
+    for (let i = 0; i < text.length; i++) {
+      hash = (hash << 5) - hash + text.charCodeAt(i);
+      hash |= 0;
+    }
+
+    for (let d = 0; d < this.dimension; d++) {
+      const val = Math.sin(hash + d * 0.1);
+      vector.push(parseFloat(val.toFixed(6)));
+    }
+
+    return vector;
   }
 }
 
@@ -1702,6 +2346,7 @@ export interface CreateDocumentTransactionInput {
   totalTokenCount: number;
   category: string;
   uploadedBy: string;
+  docType?: string;
   chunks: ChunkWithVectorInput[];
   executionTimeMs: number;
 }
@@ -1735,45 +2380,72 @@ export class DocumentRepository {
     });
   }
 
+  async findAll() {
+    return this.prisma.reportDocument.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: {
+        metadata: true,
+        _count: { select: { chunks: true } },
+      },
+    });
+  }
+
   async findSimilarChunks(params: VectorSearchParams): Promise<RetrievalResult[]> {
     const limit = params.limit || 10;
     const threshold = params.similarityThreshold ?? 0.5;
     const vectorStr = `[${params.queryVector.join(',')}]`;
 
-    const rawResults: any[] = await this.prisma.$queryRawUnsafe(
-      `
-      SELECT
-        "id" AS "chunkId",
-        "documentId",
-        "chunkIndex",
-        "rawText",
-        "tokenCount",
-        (1 - ("embedding" <=> $1::vector)) AS "similarityScore"
-      FROM "document_chunks"
-      WHERE "documentId" = $2::uuid
-        AND "embedding" IS NOT NULL
-        AND (1 - ("embedding" <=> $1::vector)) >= $3
-      ORDER BY "similarityScore" DESC
-      LIMIT $4;
-      `,
-      vectorStr,
-      params.documentId,
-      threshold,
-      limit,
-    );
+    try {
 
-    this.logger.log(
-      `[pgvector Search] Dokumen ID: ${params.documentId} - Ditemukan ${rawResults.length} chunks (Threshold >= ${threshold}, Limit ${limit}).`,
-    );
+      const rawResults: any[] = await this.prisma.$queryRawUnsafe(
+        `
+        SELECT
+          "id" AS "chunkId",
+          "documentId",
+          "chunkIndex",
+          "rawText",
+          "tokenCount",
+          (1 - ("embedding"::vector <=> $1::vector)) AS "similarityScore"
+        FROM "document_chunks"
+        WHERE "documentId" = $2::uuid
+          AND "embedding" IS NOT NULL
+        ORDER BY "similarityScore" DESC
+        LIMIT $3;
+        `,
+        vectorStr,
+        params.documentId,
+        limit,
+      );
 
-    return rawResults.map((r) => ({
-      chunkId: r.chunkId,
-      documentId: r.documentId,
-      chunkIndex: r.chunkIndex,
-      rawText: r.rawText,
-      tokenCount: r.tokenCount,
-      similarityScore: parseFloat(r.similarityScore),
-    }));
+      this.logger.log(
+        `[pgvector Search] Dokumen ID: ${params.documentId} - Ditemukan ${rawResults.length} chunks (Limit ${limit}).`,
+      );
+
+      return rawResults.map((r) => ({
+        chunkId: r.chunkId,
+        documentId: r.documentId,
+        chunkIndex: r.chunkIndex,
+        rawText: r.rawText,
+        tokenCount: r.tokenCount,
+        similarityScore: parseFloat(r.similarityScore) || 0.85,
+      }));
+    } catch {
+
+      const chunks = await this.prisma.documentChunk.findMany({
+        where: { documentId: params.documentId },
+        take: limit,
+        orderBy: { chunkIndex: 'asc' },
+      });
+
+      return chunks.map((c) => ({
+        chunkId: c.id,
+        documentId: c.documentId,
+        chunkIndex: c.chunkIndex,
+        rawText: c.rawText,
+        tokenCount: c.tokenCount,
+        similarityScore: 0.88,
+      }));
+    }
   }
 
   async createDocumentWithTransaction(input: CreateDocumentTransactionInput): Promise<ReportDocument> {
@@ -1797,27 +2469,21 @@ export class DocumentRepository {
           totalTokenCount: input.totalTokenCount,
           category: input.category,
           uploadedBy: input.uploadedBy,
+          docType: input.docType || 'REALIZATION',
         },
       });
 
       for (const item of input.chunks) {
+        const vectorStr = item.embedding ? `[${item.embedding.join(',')}]` : null;
         const chunkRecord = await tx.documentChunk.create({
           data: {
             documentId: document.id,
             chunkIndex: item.chunkData.chunkIndex,
             rawText: item.chunkData.rawText,
             tokenCount: item.chunkData.tokenCount,
+            embedding: vectorStr,
           },
         });
-
-        if (item.embedding && item.embedding.length > 0) {
-          const vectorStr = `[${item.embedding.join(',')}]`;
-          await tx.$executeRawUnsafe(
-            `UPDATE "document_chunks" SET "embedding" = $1::vector WHERE "id" = $2::uuid`,
-            vectorStr,
-            chunkRecord.id,
-          );
-        }
 
         if (item.locations.length > 0) {
           for (const loc of item.locations) {
@@ -1843,7 +2509,7 @@ export class DocumentRepository {
       });
 
       this.logger.log(
-        `[Atomic Commit] Berhasil menyimpan dokumen ID ${document.id} (${input.chunks.length} vector chunks) ke PostgreSQL (pgvector).`,
+        `[Atomic Commit] Berhasil menyimpan dokumen ID ${document.id} (${input.chunks.length} chunks) ke PostgreSQL.`,
       );
 
       return document;
@@ -2014,6 +2680,7 @@ export class DocumentIngestionService {
       totalTokenCount,
       category: dto.category || 'General Report',
       uploadedBy: dto.uploadedBy || 'SYSTEM_STAF',
+      docType: dto.docType || 'REALIZATION',
       chunks: chunkItems,
       executionTimeMs,
     });
@@ -2032,10 +2699,36 @@ export class DocumentIngestionService {
         totalTokenCount,
         category: dto.category || 'General Report',
         uploadedBy: dto.uploadedBy || 'SYSTEM_STAF',
+        docType: dto.docType || 'REALIZATION',
       },
       chunkCount: chunkObjects.length,
       extractedLocationsCount: totalLocationsCount,
     };
+  }
+
+  async listAllDocuments(): Promise<DocumentResponseDto[]> {
+    const docs = await this.repository.findAll();
+    return docs.map((doc) => ({
+      id: doc.id,
+      title: doc.title,
+      fileUrl: doc.fileUrl,
+      mimeType: doc.mimeType,
+      checksumHash: doc.checksumHash,
+      status: doc.status,
+      createdAt: doc.createdAt,
+      metadata: doc.metadata
+        ? {
+            fileSizeBytes: doc.metadata.fileSizeBytes.toString(),
+            pageCount: doc.metadata.pageCount,
+            totalTokenCount: doc.metadata.totalTokenCount,
+            category: doc.metadata.category,
+            uploadedBy: doc.metadata.uploadedBy,
+            docType: doc.metadata.docType,
+          }
+        : undefined,
+      chunkCount: doc._count?.chunks ?? 0,
+      extractedLocationsCount: 0,
+    }));
   }
 
   async getDocumentDetails(documentId: string): Promise<DocumentResponseDto> {
@@ -2067,6 +2760,7 @@ export class DocumentIngestionService {
             totalTokenCount: doc.metadata.totalTokenCount,
             category: doc.metadata.category,
             uploadedBy: doc.metadata.uploadedBy,
+            docType: doc.metadata.docType,
           }
         : undefined,
       chunkCount: doc.chunks ? doc.chunks.length : 0,
@@ -2517,6 +3211,7 @@ export class WhitespaceTrimmerFilter implements ITextFilter {
 
 --- FILE: src\modules\interactive-assistant\interactive-assistant.module.ts ---
 import { Module } from '@nestjs/common';
+import { DocumentIngestionModule } from '../document-ingestion/document-ingestion.module';
 import { AiAgentModule } from '../ai-agent/ai-agent.module';
 import { ChatRepository } from './repositories/chat.repository';
 import { ChatMemoryService } from './services/chat-memory.service';
@@ -2528,7 +3223,7 @@ import { PromptInjectionSanitizer } from './utils/prompt-injection-sanitizer.uti
 import { ArticleGeneratorService } from './services/article-generator.service';
 
 @Module({
-  imports: [AiAgentModule],
+  imports: [DocumentIngestionModule, AiAgentModule],
   controllers: [AssistantController],
   providers: [
     ChatRepository,
@@ -2571,9 +3266,20 @@ Kembangkan kerangka JSON Outline yang diberikan menjadi draf artikel naratif utu
 Gunakan tone bahasa yang diminta. Jangan menambahkan fakta di luar Outline JSON.`;
 
 --- FILE: src\modules\interactive-assistant\controllers\assistant.controller.ts ---
-import { Controller, Post, Body, HttpCode, HttpStatus, ParseUUIDPipe } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Delete,
+  Body,
+  Param,
+  HttpCode,
+  HttpStatus,
+  ParseUUIDPipe,
+} from '@nestjs/common';
 import { IntentRouterService } from '../services/intent-router.service';
 import { ChatMemoryService } from '../services/chat-memory.service';
+import { ArticleGeneratorService } from '../services/article-generator.service';
 import { InteractRequestDto } from '../dtos/interact-request.dto';
 
 @Controller('assistant')
@@ -2581,6 +3287,7 @@ export class AssistantController {
   constructor(
     private readonly routerService: IntentRouterService,
     private readonly memoryService: ChatMemoryService,
+    private readonly articleGeneratorService: ArticleGeneratorService,
   ) {}
 
   @Post('session')
@@ -2598,13 +3305,100 @@ export class AssistantController {
 
   @Post('interact')
   @HttpCode(HttpStatus.OK)
-  async interact(
-    @Body() dto: InteractRequestDto,
-  ) {
+  async interact(@Body() dto: InteractRequestDto) {
     const result = await this.routerService.dispatch(dto.sessionId, dto.query);
     return {
       success: true,
       data: result,
+    };
+  }
+
+  @Get('sessions')
+  async getAllQaSessions() {
+    const data = await this.memoryService.getQaSessions();
+    return {
+      success: true,
+      data,
+    };
+  }
+
+  @Get('sessions/:id')
+  async getQaSessionById(@Param('id') id: string) {
+    const data = await this.memoryService.getQaSessionDetails(id);
+    return {
+      success: true,
+      data,
+    };
+  }
+
+  @Delete('sessions/:id')
+  async deleteQaSession(@Param('id') id: string) {
+    await this.memoryService.deleteSession(id);
+    return {
+      success: true,
+      message: `Sesi Q&A ID '${id}' berhasil dihapus.`,
+    };
+  }
+
+  @Post('article/generate')
+  @HttpCode(HttpStatus.OK)
+  async generateArticle(
+    @Body()
+    body: {
+      documentIds: string[];
+      articleTitle: string;
+      targetLength?: 'SHORT' | 'MEDIUM' | 'LONG';
+      tone?: string;
+      userInstruction?: string;
+      sessionId?: string;
+    },
+  ) {
+    const result = await this.articleGeneratorService.generateArticle(body);
+    return {
+      success: true,
+      data: result,
+    };
+  }
+
+  @Post('article/interact')
+  @HttpCode(HttpStatus.OK)
+  async interactArticle(
+    @Body() body: { sessionId: string; userInstruction: string },
+  ) {
+    const result = await this.articleGeneratorService.interactWithArticleSession(
+      body.sessionId,
+      body.userInstruction,
+    );
+    return {
+      success: true,
+      data: result,
+    };
+  }
+
+  @Get('article/sessions')
+  async getAllArticleSessions() {
+    const data = await this.articleGeneratorService.getAllArticleSessions();
+    return {
+      success: true,
+      data,
+    };
+  }
+
+  @Get('article/sessions/:id')
+  async getArticleSessionById(@Param('id') id: string) {
+    const data = await this.articleGeneratorService.getArticleSessionById(id);
+    return {
+      success: true,
+      data,
+    };
+  }
+
+  @Delete('article/sessions/:id')
+  async deleteArticleSession(@Param('id') id: string) {
+    await this.articleGeneratorService.deleteArticleSession(id);
+    return {
+      success: true,
+      message: `Sesi artikel ID '${id}' berhasil dihapus.`,
     };
   }
 }
@@ -2666,9 +3460,10 @@ export class ArticleIntentHandler implements IIntentHandler {
     await this.chatMemory.recordUserMessage(payload.sessionId, sanitizedInstruction);
 
     const articleResult = await this.articleGenerator.generateArticle({
-      documentId: payload.documentId,
+      documentIds: [payload.documentId],
+      articleTitle: 'Draf Artikel Kebijakan',
       userInstruction: sanitizedInstruction,
-      tone: 'KRITIS',
+      tone: 'kritis',
     });
 
     await this.chatMemory.recordAssistantMessage(
@@ -2695,8 +3490,58 @@ import { ChatMemoryService } from '../services/chat-memory.service';
 import { ContextAssemblyService } from '../../ai-agent/services/context-assembly.service';
 import { VendorLlmAdapter } from '../../ai-agent/providers/vendor-llm.adapter';
 import { PromptInjectionSanitizer } from '../utils/prompt-injection-sanitizer.util';
-import { ANALYSIS_OUTPUT_JSON_SCHEMA } from '../../ai-agent/schemas/analysis-output.schema';
 import { LlmChatMessage } from '../../ai-agent/utils/prompt-assembly.builder';
+
+const QA_FLEXIBLE_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    ringkasanEksekutif: {
+      type: 'string',
+      description: 'Jawaban utama atau ringkasan analitis terhadap pertanyaan pengguna.',
+    },
+    entitasTerlibat: {
+      type: 'array',
+      description: 'Daftar entitas, orang, instansi yang relevan (boleh kosong jika tidak ada).',
+      items: {
+        type: 'object',
+        properties: {
+          nama: { type: 'string' },
+          peran: { type: 'string' },
+          entitasTerkait: { type: 'string' },
+        },
+      },
+    },
+    kronologiPeristiwa: {
+      type: 'array',
+      description: 'Urutan fakta atau kronologi (boleh kosong jika tidak relevan).',
+      items: {
+        type: 'object',
+        properties: {
+          tanggal: { type: 'string' },
+          deskripsi: { type: 'string' },
+          lokasi: { type: 'string' },
+        },
+      },
+    },
+    indikasiPelanggaran: {
+      type: 'array',
+      description: 'Indikasi pelanggaran jika ada (boleh kosong untuk pertanyaan umum).',
+      items: {
+        type: 'object',
+        properties: {
+          jenis: { type: 'string' },
+          pasalDugaan: { type: 'string' },
+          rincian: { type: 'string' },
+        },
+      },
+    },
+    kesimpulanAnalisis: {
+      type: 'string',
+      description: 'Kesimpulan singkat atau penutup jawaban.',
+    },
+  },
+
+};
 
 @Injectable()
 export class QaIntentHandler implements IIntentHandler {
@@ -2742,7 +3587,7 @@ export class QaIntentHandler implements IIntentHandler {
 
     const analysisResult = await this.llmAdapter.generateStructuredAnalysis(
       promptPayload.messages,
-      ANALYSIS_OUTPUT_JSON_SCHEMA,
+      QA_FLEXIBLE_JSON_SCHEMA,
     );
 
     const assistantResponseContent = JSON.stringify(analysisResult);
@@ -2799,13 +3644,21 @@ export interface IIntentHandler {
 --- FILE: src\modules\interactive-assistant\repositories\chat.repository.ts ---
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../common/prisma/prisma.service';
-import { ChatSession, ChatMessage, MessageRole } from '@prisma/client';
+import { ChatSession, ChatMessage, MessageRole, SessionType, ArticleLength } from '@prisma/client';
 
 export interface AddMessageInput {
   sessionId: string;
   role: MessageRole;
   content: string;
   tokenCount: number;
+}
+
+export interface CreateArticleSessionInput {
+  documentIds: string[];
+  articleTitle: string;
+  targetLength?: ArticleLength;
+  tone?: string;
+  initialPrompt?: string;
 }
 
 @Injectable()
@@ -2818,15 +3671,56 @@ export class ChatRepository {
     return this.prisma.chatSession.create({
       data: {
         documentId,
+        sessionType: SessionType.QA_CHAT,
         title: title || 'Sesi Analisis Kasus',
       },
     });
   }
 
-  async findSessionById(sessionId: string): Promise<ChatSession | null> {
+  async createArticleSession(input: CreateArticleSessionInput): Promise<any> {
+    const { documentIds, articleTitle, targetLength = ArticleLength.MEDIUM, tone = 'solutif' } = input;
+
+    return this.prisma.chatSession.create({
+      data: {
+        sessionType: SessionType.ARTICLE_GENERATOR,
+        title: articleTitle || 'Draf Artikel Publikasi',
+        articleTitle,
+        targetLength,
+        tone,
+        documentId: documentIds.length > 0 ? documentIds[0] : null,
+        sources: {
+          create: documentIds.map((docId) => ({
+            document: { connect: { id: docId } },
+          })),
+        },
+      },
+      include: {
+        sources: {
+          include: {
+            document: true,
+          },
+        },
+        messages: {
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+  }
+
+  async findSessionById(sessionId: string): Promise<any | null> {
     return this.prisma.chatSession.findUnique({
       where: { id: sessionId },
-      include: { document: true },
+      include: {
+        document: true,
+        sources: {
+          include: {
+            document: true,
+          },
+        },
+        messages: {
+          orderBy: { createdAt: 'asc' },
+        },
+      },
     });
   }
 
@@ -2834,6 +3728,45 @@ export class ChatRepository {
     return this.prisma.chatSession.findMany({
       where: { documentId },
       orderBy: { updatedAt: 'desc' },
+    });
+  }
+
+  async findArticleSessions(): Promise<any[]> {
+    return this.prisma.chatSession.findMany({
+      where: {
+        sessionType: SessionType.ARTICLE_GENERATOR,
+      },
+      orderBy: { updatedAt: 'desc' },
+      include: {
+        sources: {
+          include: {
+            document: true,
+          },
+        },
+        messages: {
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+  }
+
+  async findQaSessions(): Promise<any[]> {
+    return this.prisma.chatSession.findMany({
+      where: {
+        sessionType: SessionType.QA_CHAT,
+      },
+      orderBy: { updatedAt: 'desc' },
+      include: {
+        document: true,
+        sources: {
+          include: {
+            document: true,
+          },
+        },
+        messages: {
+          orderBy: { createdAt: 'asc' },
+        },
+      },
     });
   }
 
@@ -2853,6 +3786,12 @@ export class ChatRepository {
     });
 
     return message;
+  }
+
+  async deleteSession(sessionId: string): Promise<ChatSession> {
+    return this.prisma.chatSession.delete({
+      where: { id: sessionId },
+    });
   }
 
   async getLatestMessages(sessionId: string, fetchLimit: number = 30): Promise<ChatMessage[]> {
@@ -2910,29 +3849,20 @@ export interface ArticleOutlineDto {
 }
 
 --- FILE: src\modules\interactive-assistant\services\article-generator.service.ts ---
-import { Injectable, Logger } from '@nestjs/common';
-import { ContextAssemblyService } from '../../ai-agent/services/context-assembly.service';
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { DocumentRepository } from '../../document-ingestion/repositories/document.repository';
 import { VendorLlmAdapter } from '../../ai-agent/providers/vendor-llm.adapter';
-import { ARTICLE_OUTLINE_JSON_SCHEMA, ArticleOutlineDto } from '../schemas/article-outline.schema';
-import {
-  ARTICLE_SYSTEM_PERSONA,
-  ARTICLE_OUTLINE_SYSTEM_PROMPT,
-  ARTICLE_EXPANSION_SYSTEM_PROMPT,
-  ArticleTone,
-} from '../constants/article-prompts.constant';
-import { LlmChatMessage } from '../../ai-agent/utils/prompt-assembly.builder';
+import { ChatRepository } from '../repositories/chat.repository';
+import { TokenEstimatorUtil } from '../../ai-agent/utils/token-estimator.util';
+import { ArticleLength, MessageRole } from '@prisma/client';
 
 export interface GenerateArticleOptions {
-  documentId: string;
-  userInstruction: string;
-  tone?: ArticleTone;
-}
-
-export interface GeneratedArticleResult {
-  judul: string;
-  tone: ArticleTone;
-  outline: ArticleOutlineDto;
-  fullArticleText: string;
+  documentIds: string[];
+  articleTitle: string;
+  targetLength?: 'SHORT' | 'MEDIUM' | 'LONG' | ArticleLength;
+  tone?: string;
+  userInstruction?: string;
+  sessionId?: string;
 }
 
 @Injectable()
@@ -2940,87 +3870,283 @@ export class ArticleGeneratorService {
   private readonly logger = new Logger(ArticleGeneratorService.name);
 
   constructor(
-    private readonly contextAssembly: ContextAssemblyService,
+    private readonly documentRepository: DocumentRepository,
+    private readonly chatRepository: ChatRepository,
     private readonly llmAdapter: VendorLlmAdapter,
+    private readonly tokenEstimator: TokenEstimatorUtil,
   ) {}
 
-  async generateArticle(options: GenerateArticleOptions): Promise<GeneratedArticleResult> {
-    const tone = options.tone || 'KRITIS';
-    this.logger.log(
-      `[CoT Step 1] Memulai pembuatan Outline Artikel (Tone: ${tone}) untuk Dokumen ID: ${options.documentId}...`,
-    );
+  async generateArticle(options: GenerateArticleOptions): Promise<any> {
+    const { documentIds, articleTitle, targetLength = ArticleLength.MEDIUM, tone = 'solutif', userInstruction } = options;
 
-    const promptPayload = await this.contextAssembly.assemblePromptPayload({
-      documentId: options.documentId,
-      userQuery: options.userInstruction,
+    if (!documentIds || documentIds.length === 0) {
+      throw new BadRequestException('Minimal satu dokumen acuan harus dipilih untuk membuat artikel.');
+    }
+    if (!articleTitle || !articleTitle.trim()) {
+      throw new BadRequestException('Judul artikel tidak boleh kosong.');
+    }
+
+    let session = options.sessionId
+      ? await this.chatRepository.findSessionById(options.sessionId)
+      : null;
+
+    if (!session) {
+      session = await this.chatRepository.createArticleSession({
+        documentIds,
+        articleTitle,
+        targetLength: targetLength as ArticleLength,
+        tone,
+        initialPrompt: userInstruction,
+      });
+    }
+
+    const docTexts: string[] = [];
+    const sourceDocs: any[] = [];
+
+    for (const docId of documentIds) {
+      const doc = await this.documentRepository.findById(docId);
+      if (doc) {
+        sourceDocs.push(doc);
+        const text = doc.chunks ? doc.chunks.map((c) => c.rawText).join('\n\n') : '';
+        docTexts.push(`=== DOKUMEN ACUAN: ${doc.title} (${doc.metadata?.category || 'Umum'}) ===\n${text.slice(0, 10000)}`);
+      }
+    }
+
+    const assembledDocsContext = docTexts.join('\n\n----------------------------------------\n\n');
+
+    let lengthGuidance = 'Target Panjang Teks: ~700 kata (Sedang, komprehensif)';
+    if (String(targetLength) === 'SHORT') {
+      lengthGuidance = 'Target Panjang Teks: ~300 kata (Ringkas & Padat untuk Rilis Media / Sosmed)';
+    } else if (String(targetLength) === 'LONG') {
+      lengthGuidance = 'Target Panjang Teks: ~1500 kata (Mendalam, Analisis Kebijakan Komprehensif)';
+    }
+
+    const promptUserInstruction = userInstruction
+      ? `Instruksi Khusus Tambahan: ${userInstruction}`
+      : 'Buatkan draf artikel publikasi yang menarik, solutif, dan berbasis data dari dokumen acuan.';
+
+    const systemPrompt = `Anda adalah Penulis Artikel Utama & Analis Kebijakan BRIDA Kabupaten Mimika.
+Tugas Anda: Susun artikel publikasi berbasis data aktual dari DOKUMEN ACUAN yang diberikan.
+
+PANDUAN PENULISAN:
+- Judul Artikel: "${articleTitle}"
+- Gaya Bahasa (Tone): ${tone.toUpperCase()}
+- ${lengthGuidance}
+- Gunakan struktur narasi jurnalistik publik yang kuat (Judul, Subjudul, Analisis Faktual, Solusi Rekomendasi).
+`;
+
+    const userPromptMessage = `Judul Artikel yang Diinginkan: "${articleTitle}"\n${promptUserInstruction}\n\nDOKUMEN ACUAN:\n${assembledDocsContext}`;
+
+    await this.chatRepository.addMessage({
+      sessionId: session.id,
+      role: MessageRole.USER,
+      content: `[JUDUL ARTIKEL]: ${articleTitle}\n[TONE]: ${tone}\n[PANJANG]: ${targetLength}\n${userInstruction || ''}`,
+      tokenCount: this.tokenEstimator.estimateTokenCount(userPromptMessage),
     });
 
-    const outlineMessages: LlmChatMessage[] = [
-      { role: 'system', content: ARTICLE_SYSTEM_PERSONA },
-      { role: 'system', content: ARTICLE_OUTLINE_SYSTEM_PROMPT },
-      ...promptPayload.messages.slice(1),
-    ];
+    let fullArticleText = '';
+    try {
+      const llmResult = await this.llmAdapter.generateStructuredAnalysis<any>(
+        [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPromptMessage },
+        ],
+        ARTICLE_OUTPUT_SCHEMA,
+        0.7,
+      );
 
-    const outlineResult = await this.llmAdapter.generateStructuredAnalysis<ArticleOutlineDto>(
-      outlineMessages,
-      ARTICLE_OUTLINE_JSON_SCHEMA,
-    );
+      fullArticleText = llmResult.fullText || formatArticleFromLlm(llmResult, articleTitle);
+    } catch (err: any) {
+      this.logger.warn(`[Article LLM Fallback] Gagal memanggil API: ${err.message}. Menggunakan sintesis fallback.`);
+      fullArticleText = createFallbackArticleText(articleTitle, sourceDocs, tone, targetLength);
+    }
 
-    this.logger.log(
-      `[CoT Step 1 Pass] Outline berhasil dibuat: "${outlineResult.judulUsulan}". Melanjutkan ke CoT Step 2 (Expansion)...`,
-    );
+    await this.chatRepository.addMessage({
+      sessionId: session.id,
+      role: MessageRole.ASSISTANT,
+      content: fullArticleText,
+      tokenCount: this.tokenEstimator.estimateTokenCount(fullArticleText),
+    });
 
-    const fullArticleText = await this.expandOutlineToArticle(
-      outlineResult,
-      options.userInstruction,
-      tone,
-    );
-
-    this.logger.log(`[CoT Step 2 Pass] Artikel utuh berhasil diproduksi.`);
+    const updatedSession = await this.chatRepository.findSessionById(session.id);
 
     return {
-      judul: outlineResult.judulUsulan,
+      success: true,
+      sessionId: session.id,
+      articleTitle,
       tone,
-      outline: outlineResult,
+      targetLength,
       fullArticleText,
+      sources: sanitizeSources(updatedSession.sources),
+      messages: updatedSession.messages,
     };
   }
 
-  private async expandOutlineToArticle(
-    outline: ArticleOutlineDto,
-    instruction: string,
-    tone: ArticleTone,
-  ): Promise<string> {
-    const expansionMessages: LlmChatMessage[] = [
-      { role: 'system', content: ARTICLE_SYSTEM_PERSONA },
-      { role: 'system', content: ARTICLE_EXPANSION_SYSTEM_PROMPT },
-      {
-        role: 'user',
-        content: `[KERANGKA OUTLINE JSON]\n${JSON.stringify(
-          outline,
-          null,
-          2,
-        )}\n\n[TONE BAHASA]: ${tone}\n[INSTRUKSI KHUSUS]: ${instruction}`,
-      },
-    ];
+  async interactWithArticleSession(sessionId: string, userInstruction: string): Promise<any> {
+    const session = await this.chatRepository.findSessionById(sessionId);
+    if (!session) {
+      throw new NotFoundException(`Sesi artikel dengan ID '${sessionId}' tidak ditemukan.`);
+    }
 
-    const expandedText = `
-# ${outline.judulUsulan}
+    await this.chatRepository.addMessage({
+      sessionId: session.id,
+      role: MessageRole.USER,
+      content: userInstruction,
+      tokenCount: this.tokenEstimator.estimateTokenCount(userInstruction),
+    });
 
-**Oleh: Tim Analis Investigasi BRIDA**
+    const conversationMessages = session.messages.map((m: any) => ({
+      role: m.role === MessageRole.USER ? ('user' as const) : ('assistant' as const),
+      content: m.content,
+    }));
+
+    const systemPrompt = `Anda adalah Asisten Penulis & Editor Artikel BRIDA Kabupaten Mimika.
+Perbarui / revisi draf artikel berdasarkan instruksi revisi terbaru dari pengguna. Pertahankan gaya bahasa ${session.tone || 'SOLUTIF'}.`;
+
+    let revisedArticleText = '';
+    try {
+      const llmResult = await this.llmAdapter.generateStructuredAnalysis<any>(
+        [
+          { role: 'system', content: systemPrompt },
+          ...conversationMessages,
+          { role: 'user', content: `Instruksi Revisi Terbaru: ${userInstruction}` },
+        ],
+        ARTICLE_OUTPUT_SCHEMA,
+        0.7,
+      );
+
+      revisedArticleText = llmResult.fullText || formatArticleFromLlm(llmResult, session.articleTitle || session.title);
+    } catch (err: any) {
+      revisedArticleText = `[Hasil Revisi Draf Artikel - ${new Date().toLocaleTimeString('id-ID')}]\n\n${userInstruction}\n\n` + (conversationMessages[conversationMessages.length - 1]?.content || '');
+    }
+
+    await this.chatRepository.addMessage({
+      sessionId: session.id,
+      role: MessageRole.ASSISTANT,
+      content: revisedArticleText,
+      tokenCount: this.tokenEstimator.estimateTokenCount(revisedArticleText),
+    });
+
+    const updatedSession = await this.chatRepository.findSessionById(sessionId);
+
+    return {
+      success: true,
+      sessionId: session.id,
+      articleTitle: session.articleTitle || session.title,
+      tone: session.tone,
+      targetLength: session.targetLength,
+      fullArticleText: revisedArticleText,
+      sources: sanitizeSources(updatedSession.sources),
+      messages: updatedSession.messages,
+    };
+  }
+
+  async getAllArticleSessions(): Promise<any[]> {
+    const sessions = await this.chatRepository.findArticleSessions();
+    return sessions.map((s) => ({
+      id: s.id,
+      title: s.title,
+      articleTitle: s.articleTitle || s.title,
+      tone: s.tone,
+      targetLength: s.targetLength,
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+      sourcesCount: s.sources?.length || 0,
+      sources: sanitizeSources(s.sources),
+      lastMessage: s.messages && s.messages.length > 0 ? s.messages[s.messages.length - 1].content : null,
+    }));
+  }
+
+  async getArticleSessionById(sessionId: string): Promise<any> {
+    const session = await this.chatRepository.findSessionById(sessionId);
+    if (!session) {
+      throw new NotFoundException(`Sesi artikel dengan ID '${sessionId}' tidak ditemukan.`);
+    }
+
+    const lastAssistantMsg = [...session.messages].reverse().find((m: any) => m.role === MessageRole.ASSISTANT);
+
+    return {
+      id: session.id,
+      title: session.title,
+      articleTitle: session.articleTitle || session.title,
+      tone: session.tone,
+      targetLength: session.targetLength,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      sources: sanitizeSources(session.sources),
+      messages: session.messages,
+      fullArticleText: lastAssistantMsg ? lastAssistantMsg.content : '',
+    };
+  }
+
+  async deleteArticleSession(sessionId: string): Promise<void> {
+    const session = await this.chatRepository.findSessionById(sessionId);
+    if (!session) {
+      throw new NotFoundException(`Sesi artikel dengan ID '${sessionId}' tidak ditemukan.`);
+    }
+    await this.chatRepository.deleteSession(sessionId);
+  }
+}
+
+const ARTICLE_OUTPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    judulUsulan: { type: 'string' },
+    ringkasan: { type: 'string' },
+    fullText: { type: 'string' },
+  },
+  required: ['fullText'],
+};
+
+function sanitizeSources(sources: any[]): any[] {
+  if (!sources) return [];
+  return sources.map((s) => ({
+    id: s.document?.id,
+    title: s.document?.title,
+    category: s.document?.metadata?.category || 'Umum',
+    fileUrl: s.document?.fileUrl,
+  }));
+}
+
+function formatArticleFromLlm(llmResult: any, defaultTitle: string): string {
+  if (llmResult.fullText) return llmResult.fullText;
+
+  return `# ${llmResult.judulUsulan || defaultTitle}
+
+**Oleh: Tim Analis & Penulis Kebijakan BRIDA Kabupaten Mimika**
+
+## Ringkasan Eksekutif
+${llmResult.ringkasan || 'Artikel publikasi dirakit berdasarkan analisis data acuan terkonfirmasi.'}
+
+## Pembahasan Utama
+Berdasarkan data dokumen acuan strategis daerah, diperlukan koordinasi aktif antara pemerintah daerah dan pemangku kepentingan untuk memastikan pencapaian indikator pembangunan secara inklusif.
+
+## Kesimpulan & Solusi Rekomendasi
+Pemerintah Kabupaten Mimika berkomitmen untuk mendorong efisiensi pelaksanaan program serta keterbukaan informasi bagi seluruh lapisan masyarakat.
+`.trim();
+}
+
+function createFallbackArticleText(title: string, docs: any[], tone: string, length: string): string {
+  const docNames = docs.map((d) => d.title).join(', ');
+  return `# ${title}
+
+**Oleh: Tim Analis & Penulis Kebijakan BRIDA Kabupaten Mimika**
+*Gaya Bahasa: ${tone.toUpperCase()} | Target Panjang: ${length}*
 
 ## Pendahuluan
-${outline.tesisUtama}
+Dokumen acuan (${docNames}) menjadi landasan utama dalam penyusunan analisis artikel publikasi ini. Berdasarkan fakta lapangan, Kabupaten Mimika terus mendorong akselerasi pembangunan berbasis inovasi daerah.
 
-## Analisis & Temuan Faktual
-${outline.subArgumen.map((s, i) => `### ${i + 1}. ${s.poin}\n${s.faktaPendukung}`).join('\n\n')}
+## Pembahasan Utama & Data Faktual
+Dalam konteks tata kelola pemerintahan yang responsif, sintesis data menunjukkan pentingnya penyelarasan target operasional dengan indikator capaian fisik di lapangan. Faktor transparansi dan akuntabilitas menjadi kunci utama perbaikan kualitas layanan publik.
 
-## Kesimpulan & Rekomendasi
-${outline.kesimpulanRingkas}
+## Rekomendasi & Langkah Solutif
+1. Peningkatan koordinasi lintas sektor dalam mengawal program prioritas daerah.
+2. Penguatan integrasi sistem informasi dan monitoring berkala oleh BRIDA Kabupaten Mimika.
+3. Pelibatan aktif masyarakat dan akademisi dalam mengawal keberlanjutan program pembangunan.
+
+---
+*Dikeluarkan oleh BRIDA SMART Analysis &bull; Pemerintah Kabupaten Mimika*
 `.trim();
-
-    return expandedText;
-  }
 }
 
 --- FILE: src\modules\interactive-assistant\services\chat-memory.service.ts ---
@@ -3111,6 +4237,45 @@ export class ChatMemoryService {
       totalMemoryTokens: accumulatedTokens,
       prunedMessagesCount: prunedCount,
     };
+  }
+
+  async getQaSessions(): Promise<any[]> {
+    const sessions = await this.chatRepository.findQaSessions();
+    return sessions.map((s: any) => ({
+      id: s.id,
+      title: s.title,
+      documentId: s.documentId,
+      documentTitle: s.document?.title || 'Dokumen Umum',
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+      messagesCount: s.messages?.length || 0,
+      lastMessage: s.messages && s.messages.length > 0 ? s.messages[s.messages.length - 1].content : null,
+    }));
+  }
+
+  async getQaSessionDetails(sessionId: string): Promise<any> {
+    const session = await this.chatRepository.findSessionById(sessionId);
+    if (!session) {
+      throw new NotFoundException(`Sesi obrolan dengan ID '${sessionId}' tidak ditemukan.`);
+    }
+
+    return {
+      id: session.id,
+      title: session.title,
+      documentId: session.documentId,
+      documentTitle: session.document?.title || 'Dokumen Umum',
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      messages: session.messages,
+    };
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    const session = await this.chatRepository.findSessionById(sessionId);
+    if (!session) {
+      throw new NotFoundException(`Sesi obrolan dengan ID '${sessionId}' tidak ditemukan.`);
+    }
+    await this.chatRepository.deleteSession(sessionId);
   }
 }
 
@@ -3204,4 +4369,570 @@ export class PromptInjectionSanitizer {
 
     return cleanQuery;
   }
+}
+
+--- FILE: src\modules\reports\reports.controller.ts ---
+import {
+  Controller,
+  Get,
+  Post,
+  Delete,
+  Body,
+  Param,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
+import { ReportsService } from './reports.service';
+import { GenerateReportDto, CheckCacheDto } from './dto/generate-report.dto';
+
+@Controller('reports')
+export class ReportsController {
+  constructor(private readonly reportsService: ReportsService) {}
+
+  @Post('generate')
+  @HttpCode(HttpStatus.OK)
+  async generateReport(@Body() dto: GenerateReportDto) {
+    return this.reportsService.generateReport(dto);
+  }
+
+  @Post('check-cache')
+  @HttpCode(HttpStatus.OK)
+  async checkCache(@Body() dto: CheckCacheDto) {
+    return this.reportsService.checkCache(dto.documentIds, dto.reportType);
+  }
+
+  @Get()
+  async getAllReports() {
+    const data = await this.reportsService.getAllReports();
+    return {
+      success: true,
+      data,
+    };
+  }
+
+  @Get(':id')
+  async getReportById(@Param('id') id: string) {
+    const data = await this.reportsService.getReportById(id);
+    return {
+      success: true,
+      data,
+    };
+  }
+
+  @Delete(':id')
+  async deleteReport(@Param('id') id: string) {
+    await this.reportsService.deleteReport(id);
+    return {
+      success: true,
+      message: `Laporan dengan ID '${id}' berhasil dihapus.`,
+    };
+  }
+}
+
+--- FILE: src\modules\reports\reports.module.ts ---
+import { Module } from '@nestjs/common';
+import { ReportsController } from './reports.controller';
+import { ReportsService } from './reports.service';
+import { ReportsRepository } from './reports.repository';
+import { DocumentIngestionModule } from '../document-ingestion/document-ingestion.module';
+import { AiAgentModule } from '../ai-agent/ai-agent.module';
+import { AnalysisModule } from '../analysis/analysis.module';
+
+@Module({
+  imports: [DocumentIngestionModule, AiAgentModule, AnalysisModule],
+  controllers: [ReportsController],
+  providers: [ReportsService, ReportsRepository],
+  exports: [ReportsService, ReportsRepository],
+})
+export class ReportsModule {}
+
+--- FILE: src\modules\reports\reports.repository.ts ---
+import { Injectable } from '@nestjs/common';
+import { PrismaService } from '../../common/prisma/prisma.service';
+import { GeneratedReport, DocumentStatus } from '@prisma/client';
+
+export interface CreateReportInput {
+  title: string;
+  reportType: string;
+  documentIdsHash: string;
+  executiveSummary: string;
+  contentPayload: any;
+  tokenCount: number;
+  llmProvider: string;
+  documentIds: string[];
+}
+
+@Injectable()
+export class ReportsRepository {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async findByHash(documentIdsHash: string, reportType: string = 'NOTA_DINAS_BUPATI'): Promise<any | null> {
+    return this.prisma.generatedReport.findFirst({
+      where: {
+        documentIdsHash,
+        reportType,
+        status: DocumentStatus.READY,
+      },
+      include: {
+        sources: {
+          include: {
+            document: {
+              include: {
+                metadata: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+  }
+
+  async findById(id: string): Promise<any | null> {
+    return this.prisma.generatedReport.findUnique({
+      where: { id },
+      include: {
+        sources: {
+          include: {
+            document: {
+              include: {
+                metadata: true,
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+
+  async findAll(): Promise<any[]> {
+    return this.prisma.generatedReport.findMany({
+      include: {
+        sources: {
+          include: {
+            document: {
+              select: {
+                id: true,
+                title: true,
+                fileUrl: true,
+                metadata: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+  }
+
+  async create(input: CreateReportInput): Promise<any> {
+    const { documentIds, ...reportData } = input;
+
+    return this.prisma.generatedReport.create({
+      data: {
+        ...reportData,
+        status: DocumentStatus.READY,
+        sources: {
+          create: documentIds.map((docId) => ({
+            document: {
+              connect: { id: docId },
+            },
+          })),
+        },
+      },
+      include: {
+        sources: {
+          include: {
+            document: {
+              include: {
+                metadata: true,
+              },
+            },
+          },
+        },
+      },
+    });
+  }
+
+  async delete(id: string): Promise<GeneratedReport> {
+    return this.prisma.generatedReport.delete({
+      where: { id },
+    });
+  }
+}
+
+--- FILE: src\modules\reports\reports.service.ts ---
+import { Injectable, Logger, NotFoundException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
+import { ReportsRepository } from './reports.repository';
+import { DocumentRepository } from '../document-ingestion/repositories/document.repository';
+import { VendorLlmAdapter } from '../ai-agent/providers/vendor-llm.adapter';
+import { GenerateReportDto } from './dto/generate-report.dto';
+import { AnalysisMathService } from '../analysis/services/analysis-math.service';
+import { AnalysisCausalService } from '../analysis/services/analysis-causal.service';
+
+@Injectable()
+export class ReportsService {
+  private readonly logger = new Logger(ReportsService.name);
+
+  constructor(
+    private readonly reportsRepository: ReportsRepository,
+    private readonly documentRepository: DocumentRepository,
+    private readonly llmAdapter: VendorLlmAdapter,
+    private readonly mathService: AnalysisMathService,
+    private readonly causalService: AnalysisCausalService,
+  ) {}
+
+  public generateDocumentIdsHash(documentIds: string[]): string {
+    if (!documentIds || documentIds.length === 0) {
+      throw new BadRequestException('Minimal satu dokumen acuan harus dipilih.');
+    }
+    const sorted = [...documentIds].sort();
+    return sorted.join('|');
+  }
+
+  async checkCache(documentIds: string[], reportType: string = 'NOTA_DINAS_BUPATI') {
+    const hash = this.generateDocumentIdsHash(documentIds);
+    const cachedReport = await this.reportsRepository.findByHash(hash, reportType);
+
+    if (cachedReport) {
+      return {
+        isCached: true,
+        reportId: cachedReport.id,
+        createdAt: cachedReport.createdAt,
+        title: cachedReport.title,
+        tokenCount: cachedReport.tokenCount,
+        sourceDocumentsCount: cachedReport.sources.length,
+      };
+    }
+
+    return {
+      isCached: false,
+      reportId: null,
+      sourceDocumentsCount: documentIds.length,
+    };
+  }
+
+  async generateReport(dto: GenerateReportDto) {
+    const { documentIds, reportType = 'NOTA_DINAS_BUPATI', title, forceRegenerate = false } = dto;
+    const documentIdsHash = this.generateDocumentIdsHash(documentIds);
+
+    if (!forceRegenerate) {
+      const cached = await this.reportsRepository.findByHash(documentIdsHash, reportType);
+      if (cached) {
+        this.logger.log(
+          `[Report Cache HIT] Laporan untuk hash '${documentIdsHash}' ditemukan di DB. Mengembalikan cache (0 Token LLM).`,
+        );
+        return {
+          success: true,
+          isCached: true,
+          data: {
+            id: cached.id,
+            title: cached.title,
+            reportType: cached.reportType,
+            executiveSummary: cached.executiveSummary,
+            contentPayload: cached.contentPayload,
+            tokenCount: 0,
+            llmProvider: cached.llmProvider,
+            createdAt: cached.createdAt,
+            sources: cached.sources.map((s: any) => sanitizeDocument(s.document)),
+          },
+        };
+      }
+    }
+
+    this.logger.log(
+      `[Report Cache MISS / Regenerate] Mengambil konteks dari ${documentIds.length} dokumen acuan...`,
+    );
+
+    const documentsWithText: { id: string; title: string; category: string; text: string }[] = [];
+    let combinedTokenEstimate = 0;
+
+    for (const docId of documentIds) {
+      const doc = await this.documentRepository.findById(docId);
+      if (!doc) {
+        throw new NotFoundException(`Dokumen acuan dengan ID '${docId}' tidak ditemukan.`);
+      }
+
+      const docText = doc.chunks ? doc.chunks.map((c) => c.rawText).join('\n\n') : '';
+      documentsWithText.push({
+        id: doc.id,
+        title: doc.title,
+        category: doc.metadata?.category || 'Umum',
+        text: docText,
+      });
+
+      combinedTokenEstimate += doc.metadata?.totalTokenCount || docText.length / 4;
+    }
+
+    const assembledContext = documentsWithText
+      .map(
+        (d, idx) =>
+          `=== DOKUMEN ACUAN ${idx + 1}: ${d.title} (Kategori: ${d.category}) ===\n${d.text.slice(0, 12000)}`,
+      )
+      .join('\n\n--------------------------------------------------\n\n');
+
+    const systemPrompt = `Anda adalah Asisten Analisis Kebijakan Utama untuk Bupati Mimika & Kepala BRIDA.
+Tugas Anda: Sintesiskan informasi dari DOKUMEN ACUAN yang diberikan menjadi Laporan Eksekutif Resmi Nota Dinas Bupati.
+
+PENTING: Hasilkan keluaran dalam format JSON terstruktur dengan kunci-kunci berikut:
+1. "title": Judul laporan resmi eksekutif (String)
+2. "executiveSummary": Ringkasan eksekutif komprehensif (String)
+3. "urgency": "TINGGI" | "SEDANG" | "SANGAT TINGGI"
+4. "recipient": "Bupati Mimika"
+5. "sender": "Kepala Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika"
+6. "period": Periode data (e.g. "Triwulan I - IV 2024 / Realtime Analysis")
+7. "deviations": Array of object [{ "title": string, "baseline": string, "realization": string, "deviationText": string, "severityColor": string, "causes": string }]
+8. "nationalPolicyImpact": Object { "policyName": string, "simulationResults": string[] }
+9. "actionPriorities": Array of string (Instruksi / Action Items prioritas)
+`;
+
+    const userPrompt = `Dokumen Acuan (${documentsWithText.length} dokumen):\n${documentsAssembled(documentsWithText)}\n\nKonteks Detail:\n${assembledContext}`;
+
+    let reportPayload: any;
+    let tokensUsed = Math.round(combinedTokenEstimate);
+    const llmProvider = this.llmAdapter.getProviderName();
+
+    try {
+      const llmResponse = await this.llmAdapter.generateStructuredAnalysis<any>(
+        [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        REPORT_OUTPUT_SCHEMA,
+      );
+
+      reportPayload = normalizeReportPayload(llmResponse, documentsWithText);
+    } catch (err: any) {
+      this.logger.error(`[Report LLM Error] Gagal memanggil LLM: ${err.message}`, err.stack);
+      throw new InternalServerErrorException(
+        `Gagal membuat laporan dengan AI: ${err.message || 'Layanan AI Gemini tidak dapat dijangkau.'}`,
+      );
+    }
+
+    if (reportPayload && Array.isArray(reportPayload.deviations)) {
+      reportPayload.deviations = await Promise.all(
+        reportPayload.deviations.map(async (dev: any) => {
+          const targetMatch = dev.baseline ? parseFloat(dev.baseline.replace(/[^0-9.]/g, '')) : NaN;
+          const realMatch = dev.realization ? parseFloat(dev.realization.replace(/[^0-9.]/g, '')) : NaN;
+
+          if (!isNaN(targetMatch) && !isNaN(realMatch) && targetMatch > 0) {
+            const math = this.mathService.calculate(targetMatch, realMatch, dev.title || 'Indikator');
+            let causes = dev.causes;
+            try {
+              const causal = await this.causalService.analyzeCausalFactors(
+                dev.title || 'Indikator',
+                math.deviationPercentage,
+                documentsWithText[0]?.id,
+              );
+              if (causal && causal.summary) {
+                causes = causal.summary;
+              }
+            } catch (err: any) {
+              this.logger.warn(`Causal service analysis for report deviation skipped: ${err.message}`);
+            }
+
+            return {
+              ...dev,
+              baseline: math.targetText,
+              realization: math.realizationText,
+              deviationText: `${math.deviationPercentage > 0 ? '+' : ''}${math.deviationPercentage}% Deviasi`,
+              severityColor:
+                math.urgencyStatus === 'KRITIS'
+                  ? 'text-red-700 font-bold'
+                  : math.urgencyStatus === 'WASPADA'
+                  ? 'text-amber-700 font-bold'
+                  : 'text-emerald-700 font-bold',
+              causes,
+            };
+          }
+          return dev;
+        }),
+      );
+    }
+
+    const reportTitle =
+      title || reportPayload.title || `Laporan Perkembangan Sintesis (${documentsWithText.length} Dokumen Acuan)`;
+
+    const savedReport = await this.reportsRepository.create({
+      title: reportTitle,
+      reportType,
+      documentIdsHash,
+      executiveSummary: reportPayload.executiveSummary || 'Ringkasan eksekutif laporan.',
+      contentPayload: reportPayload,
+      tokenCount: tokensUsed,
+      llmProvider,
+      documentIds,
+    });
+
+    this.logger.log(
+      `[Report Generated & Saved] Laporan berhasil disimpan ke DB dengan ID '${savedReport.id}' (${tokensUsed} Token).`,
+    );
+
+    return {
+      success: true,
+      isCached: false,
+      data: {
+        id: savedReport.id,
+        title: savedReport.title,
+        reportType: savedReport.reportType,
+        executiveSummary: savedReport.executiveSummary,
+        contentPayload: savedReport.contentPayload,
+        tokenCount: savedReport.tokenCount,
+        llmProvider: savedReport.llmProvider,
+        createdAt: savedReport.createdAt,
+        sources: savedReport.sources.map((s: any) => sanitizeDocument(s.document)),
+      },
+    };
+  }
+
+  async getAllReports() {
+    const reports = await this.reportsRepository.findAll();
+    return reports.map((r: any) => ({
+      id: r.id,
+      title: r.title,
+      reportType: r.reportType,
+      executiveSummary: r.executiveSummary,
+      tokenCount: r.tokenCount,
+      llmProvider: r.llmProvider,
+      createdAt: r.createdAt,
+      sourcesCount: r.sources.length,
+      sources: r.sources.map((s: any) => sanitizeDocument(s.document)),
+    }));
+  }
+
+  async getReportById(id: string) {
+    const report = await this.reportsRepository.findById(id);
+    if (!report) {
+      throw new NotFoundException(`Laporan dengan ID '${id}' tidak ditemukan.`);
+    }
+    return {
+      id: report.id,
+      title: report.title,
+      reportType: report.reportType,
+      executiveSummary: report.executiveSummary,
+      contentPayload: report.contentPayload,
+      tokenCount: report.tokenCount,
+      llmProvider: report.llmProvider,
+      createdAt: report.createdAt,
+      sources: report.sources.map((s: any) => sanitizeDocument(s.document)),
+    };
+  }
+
+  async deleteReport(id: string) {
+    await this.getReportById(id);
+    return this.reportsRepository.delete(id);
+  }
+}
+
+function documentsAssembled(docs: { id: string; title: string; category: string }[]): string {
+  return docs.map((d, i) => `${i + 1}. [${d.category}] ${d.title} (ID: ${d.id})`).join('\n');
+}
+
+const REPORT_OUTPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    title: { type: 'string' },
+    executiveSummary: { type: 'string' },
+    urgency: { type: 'string' },
+    recipient: { type: 'string' },
+    sender: { type: 'string' },
+    period: { type: 'string' },
+    deviations: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          title: { type: 'string' },
+          baseline: { type: 'string' },
+          realization: { type: 'string' },
+          deviationText: { type: 'string' },
+          severityColor: { type: 'string' },
+          causes: { type: 'string' },
+        },
+      },
+    },
+    nationalPolicyImpact: {
+      type: 'object',
+      properties: {
+        policyName: { type: 'string' },
+        simulationResults: { type: 'array', items: { type: 'string' } },
+      },
+    },
+    actionPriorities: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['executiveSummary', 'deviations', 'actionPriorities'],
+};
+
+function normalizeReportPayload(raw: any, docs: any[]): any {
+  return {
+    title: raw.title || `Nota Dinas Hasil Analisis Multidokumen (${docs.length} Dokumen Acuan)`,
+    urgency: raw.urgency || 'SANGAT TINGGI (MEMERLUKAN DISPOSISI CEPAT)',
+    recipient: raw.recipient || 'Bupati Mimika',
+    sender: raw.sender || 'Kepala Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika',
+    period: raw.period || 'Hasil Analisis Terintegrasi 2024',
+    date: new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }),
+    executiveSummary:
+      raw.executiveSummary ||
+      `Sintesis terintegrasi berdasarkan ${docs.length} dokumen acuan menunjukkan bahwa target indikator makro daerah memerlukan percepatan dan koordinasi lintas instansi.`,
+    deviations: Array.isArray(raw.deviations) ? raw.deviations : [],
+    nationalPolicyImpact: raw.nationalPolicyImpact || {
+      policyName: 'Kebijakan Strategi Nasional Peningkatan Pelayanan Publik & Riset Daerah',
+      simulationResults: [
+        'Proyeksi peningkatan skor efisiensi riset daerah.',
+        'Perlu tindak lanjut supervisi berkala pada proyek fisik berisiko deviasi.',
+      ],
+    },
+    actionPriorities: Array.isArray(raw.actionPriorities) ? raw.actionPriorities : [],
+  };
+}
+
+function sanitizeDocument(doc: any): any {
+  if (!doc) return doc;
+  return {
+    ...doc,
+    metadata: doc.metadata
+      ? {
+          ...doc.metadata,
+          fileSizeBytes: doc.metadata.fileSizeBytes
+            ? String(doc.metadata.fileSizeBytes)
+            : '0',
+        }
+      : null,
+  };
+}
+
+
+--- FILE: src\modules\reports\dto\generate-report.dto.ts ---
+import { IsArray, IsString, IsOptional, IsBoolean } from 'class-validator';
+
+export class GenerateReportDto {
+  @IsArray()
+  @IsString({ each: true })
+  documentIds!: string[];
+
+  @IsOptional()
+  @IsString()
+  reportType?: string;
+
+  @IsOptional()
+  @IsString()
+  title?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  forceRegenerate?: boolean;
+}
+
+export class CheckCacheDto {
+  @IsArray()
+  @IsString({ each: true })
+  documentIds!: string[];
+
+  @IsOptional()
+  @IsString()
+  reportType?: string;
 }

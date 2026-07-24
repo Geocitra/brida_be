@@ -5,6 +5,7 @@ import { DocumentIngestionModule } from './modules/document-ingestion/document-i
 import { AiAgentModule } from './modules/ai-agent/ai-agent.module';
 import { InteractiveAssistantModule } from './modules/interactive-assistant/interactive-assistant.module';
 import { ReportsModule } from './modules/reports/reports.module';
+import { AnalysisModule } from './modules/analysis/analysis.module';
 
 @Module({
   imports: [
@@ -16,6 +17,7 @@ import { ReportsModule } from './modules/reports/reports.module';
     AiAgentModule,
     InteractiveAssistantModule,
     ReportsModule,
+    AnalysisModule,
   ],
 })
 export class AppModule {}

@@ -1,8 +1,10 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { ReportsRepository } from './reports.repository';
 import { DocumentRepository } from '../document-ingestion/repositories/document.repository';
 import { VendorLlmAdapter } from '../ai-agent/providers/vendor-llm.adapter';
 import { GenerateReportDto } from './dto/generate-report.dto';
+import { AnalysisMathService } from '../analysis/services/analysis-math.service';
+import { AnalysisCausalService } from '../analysis/services/analysis-causal.service';
 
 @Injectable()
 export class ReportsService {
@@ -12,6 +14,8 @@ export class ReportsService {
     private readonly reportsRepository: ReportsRepository,
     private readonly documentRepository: DocumentRepository,
     private readonly llmAdapter: VendorLlmAdapter,
+    private readonly mathService: AnalysisMathService,
+    private readonly causalService: AnalysisCausalService,
   ) {}
 
   /**
@@ -103,29 +107,30 @@ export class ReportsService {
     }
 
     // 3. Assemble Prompt & Payload for LLM Generation
+    // 3. Assemble Full-Context Prompt & Payload for LLM Generation (Zero Information Loss)
     const assembledContext = documentsWithText
       .map(
         (d, idx) =>
-          `=== DOKUMEN ACUAN ${idx + 1}: ${d.title} (Kategori: ${d.category}) ===\n${d.text.slice(0, 12000)}`,
+          `=== DOKUMEN ACUAN ${idx + 1}: ${d.title} (Kategori: ${d.category}) ===\n${d.text}`,
       )
       .join('\n\n--------------------------------------------------\n\n');
 
     const systemPrompt = `Anda adalah Asisten Analisis Kebijakan Utama untuk Bupati Mimika & Kepala BRIDA.
-Tugas Anda: Sintesiskan informasi dari DOKUMEN ACUAN yang diberikan menjadi Laporan Eksekutif Resmi Nota Dinas Bupati.
+Tugas Anda: Sintesiskan seluruh informasi faktual dari DOKUMEN ACUAN yang diberikan menjadi Laporan Eksekutif Resmi Nota Dinas Bupati.
 
-PENTING: Hasilkan keluaran dalam format JSON terstruktur dengan kunci-kunci berikut:
-1. "title": Judul laporan resmi eksekutif (String)
-2. "executiveSummary": Ringkasan eksekutif komprehensif (String)
-3. "urgency": "TINGGI" | "SEDANG" | "SANGAT TINGGI"
-4. "recipient": "Bupati Mimika"
-5. "sender": "Kepala Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika"
-6. "period": Periode data (e.g. "Triwulan I - IV 2024 / Realtime Analysis")
-7. "deviations": Array of object [{ "title": string, "baseline": string, "realization": string, "deviationText": string, "severityColor": string, "causes": string }]
-8. "nationalPolicyImpact": Object { "policyName": string, "simulationResults": string[] }
-9. "actionPriorities": Array of string (Instruksi / Action Items prioritas)
+PANDUAN STRUKTUR & BIAYA OUTPUT JSON ESEKUTIF PRESISI:
+1. "title": Judul laporan resmi eksekutif (Maksimal 15 kata).
+2. "executiveSummary": Ringkasan eksekutif padat, faktual, dan solutif (Maksimal 200 - 250 kata).
+3. "urgency": "TINGGI" | "SEDANG" | "SANGAT TINGGI".
+4. "recipient": "Bupati Mimika".
+5. "sender": "Kepala Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika".
+6. "period": Periode data (e.g. "Triwulan I - IV 2024 / Realtime Analysis").
+7. "deviations": TEPAT 3 objek deviasi paling kritis [{ "title": string, "baseline": string, "realization": string, "deviationText": string, "severityColor": string, "causes": string }] (di mana "causes" maksimal 2 kalimat).
+8. "nationalPolicyImpact": Object { "policyName": string, "simulationResults": string[] } (maksimal 2 poin ringkas).
+9. "actionPriorities": TEPAT 3 poin instruksi / Action Items prioritas utama (masing-masing 1 kalimat).
 `;
 
-    const userPrompt = `Dokumen Acuan (${documentsWithText.length} dokumen):\n${documentsAssembled(documentsWithText)}\n\nKonteks Detail:\n${assembledContext}`;
+    const userPrompt = `Dokumen Acuan (${documentsWithText.length} dokumen):\n${documentsAssembled(documentsWithText)}\n\nKonteks Detail Full-Text:\n${assembledContext}`;
 
     let reportPayload: any;
     let tokensUsed = Math.round(combinedTokenEstimate);
@@ -143,8 +148,52 @@ PENTING: Hasilkan keluaran dalam format JSON terstruktur dengan kunci-kunci beri
       // Sanitize / normalize payload fields
       reportPayload = normalizeReportPayload(llmResponse, documentsWithText);
     } catch (err: any) {
-      this.logger.warn(`[Report LLM Fallback] Gagal memanggil LLM: ${err.message}. Menggunakan sintesis fallback.`);
-      reportPayload = createFallbackReportPayload(documentsWithText);
+      this.logger.error(`[Report LLM Error] Gagal memanggil LLM: ${err.message}`, err.stack);
+      throw new InternalServerErrorException(
+        `Gagal membuat laporan dengan AI: ${err.message || 'Layanan AI Gemini tidak dapat dijangkau.'}`,
+      );
+    }
+
+    // Direct Integration with AnalysisMathService and AnalysisCausalService for 100% mathematical and causal consistency
+    if (reportPayload && Array.isArray(reportPayload.deviations)) {
+      reportPayload.deviations = await Promise.all(
+        reportPayload.deviations.map(async (dev: any) => {
+          const targetMatch = dev.baseline ? parseFloat(dev.baseline.replace(/[^0-9.]/g, '')) : NaN;
+          const realMatch = dev.realization ? parseFloat(dev.realization.replace(/[^0-9.]/g, '')) : NaN;
+
+          if (!isNaN(targetMatch) && !isNaN(realMatch) && targetMatch > 0) {
+            const math = this.mathService.calculate(targetMatch, realMatch, dev.title || 'Indikator');
+            let causes = dev.causes;
+            try {
+              const causal = await this.causalService.analyzeCausalFactors(
+                dev.title || 'Indikator',
+                math.deviationPercentage,
+                documentsWithText[0]?.id,
+              );
+              if (causal && causal.summary) {
+                causes = causal.summary;
+              }
+            } catch (err: any) {
+              this.logger.warn(`Causal service analysis for report deviation skipped: ${err.message}`);
+            }
+
+            return {
+              ...dev,
+              baseline: math.targetText,
+              realization: math.realizationText,
+              deviationText: `${math.deviationPercentage > 0 ? '+' : ''}${math.deviationPercentage}% Deviasi`,
+              severityColor:
+                math.urgencyStatus === 'KRITIS'
+                  ? 'text-red-700 font-bold'
+                  : math.urgencyStatus === 'WASPADA'
+                  ? 'text-amber-700 font-bold'
+                  : 'text-emerald-700 font-bold',
+              causes,
+            };
+          }
+          return dev;
+        }),
+      );
     }
 
     const reportTitle =
@@ -273,64 +322,15 @@ function normalizeReportPayload(raw: any, docs: any[]): any {
     executiveSummary:
       raw.executiveSummary ||
       `Sintesis terintegrasi berdasarkan ${docs.length} dokumen acuan menunjukkan bahwa target indikator makro daerah memerlukan percepatan dan koordinasi lintas instansi.`,
-    deviations: Array.isArray(raw.deviations) && raw.deviations.length > 0
-      ? raw.deviations
-      : [
-          {
-            title: `Penyelarasan Target Dokumen Acuan (${docs[0]?.title || 'Dokumen Acuan'})`,
-            baseline: '100% Sesuai Rencana',
-            realization: '78.5% Realisasi Lapangan',
-            deviationText: '-21.5% Deviasi Capaian',
-            severityColor: 'text-red-700 font-bold',
-            causes: `Terjadi kendala integrasi data lapangan dan penyerapan anggaran pada dokumen acuan terpilih.`,
-          },
-        ],
+    deviations: Array.isArray(raw.deviations) ? raw.deviations : [],
     nationalPolicyImpact: raw.nationalPolicyImpact || {
-      policyName: 'Inpres Percepatan Pembangunan Kesejahteraan & Efisiensi Anggaran Daerah',
-      simulationResults: [
-        'Dampak Positif: Terjadi efisiensi alokasi anggaran belanja modal hingga 14.2%.',
-        'Risiko Lapangan: Diperlukan jaminan ketersediaan tenaga teknis lokal di Distrik Mimika Baru.',
-      ],
-    },
-    actionPriorities: Array.isArray(raw.actionPriorities) && raw.actionPriorities.length > 0
-      ? raw.actionPriorities
-      : [
-          'Instruksikan OPD teknis untuk segera melakukan sinkronisasi data realisasi fisik triwulanan.',
-          'Penerbitan Surat Keputusan Bupati mengenai Pembentukan Satgas Monitoring Dokumen Strategis.',
-          'Alokasi anggaran darurat untuk penanganan deviasi indikator prioritas di Mimika.',
-        ],
-  };
-}
-
-function createFallbackReportPayload(docs: any[]): any {
-  const docNames = docs.map((d) => d.title).join(', ');
-  return {
-    title: `Nota Dinas Hasil Analisis Multi-Dokumen Acuan BRIDA`,
-    urgency: 'SANGAT TINGGI (PENTING)',
-    recipient: 'Bupati Mimika',
-    sender: 'Kepala Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika',
-    period: 'Sintesis Data Multidokumen 2024',
-    date: new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }),
-    executiveSummary: `Laporan ini dirakit berdasarkan ${docs.length} dokumen acuan terpilih (${docNames}). Berdasarkan sintesis data, ditemukan potensi deviasi realisasi fisik dan serapan anggaran yang memerlukan disposisi cepat dari Bapak Bupati.`,
-    deviations: docs.map((d, idx) => ({
-      title: `Analisis Deviasi: ${d.title}`,
-      baseline: 'Target Target OPD 100%',
-      realization: `${80 - idx * 5}% Realisasi Terkonfirmasi`,
-      deviationText: `-${20 + idx * 5}% Deviasi Target`,
-      severityColor: 'text-amber-700 font-bold',
-      causes: `Faktor teknis operasional dan penyesuaian jadwal eksekusi kegiatan pada sektor ${d.category}.`,
-    })),
-    nationalPolicyImpact: {
       policyName: 'Kebijakan Strategi Nasional Peningkatan Pelayanan Publik & Riset Daerah',
       simulationResults: [
-        'Proyeksi peningkatan skor efisiensi riset daerah sebesar +18.4%.',
+        'Proyeksi peningkatan skor efisiensi riset daerah.',
         'Perlu tindak lanjut supervisi berkala pada proyek fisik berisiko deviasi.',
       ],
     },
-    actionPriorities: [
-      'Segera terbitkan disposisi ke Kepala OPD terkait untuk klarifikasi deviasi indikator.',
-      'Jadwalkan rapat koordinasi terbatas bersama Tim Evaluasi BRIDA Kabupaten Mimika.',
-    ],
+    actionPriorities: Array.isArray(raw.actionPriorities) ? raw.actionPriorities : [],
   };
 }
 

@@ -31,25 +31,35 @@ export class ExternalEmbeddingAdapter implements IEmbeddingProvider {
   }
 
   private async callRealGeminiEmbeddingApi(apiKey: string, texts: string[]): Promise<number[][]> {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:batchEmbedContents?key=${apiKey}`;
+    const primaryModel = this.configService.get<string>('GEMINI_EMBEDDING_MODEL') || 'text-embedding-004';
+    const fallbackModel = 'embedding-001';
 
-    const requests = texts.map((t) => ({
-      model: 'models/text-embedding-004',
-      content: { parts: [{ text: t }] },
-    }));
+    const embedSingle = async (text: string, model: string): Promise<number[]> => {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:embedContent?key=${apiKey}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: { parts: [{ text }] },
+        }),
+      });
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ requests }),
-    });
+      const data = await response.json();
+      if (!response.ok || !data?.embedding?.values) {
+        throw new Error(data?.error?.message || `Gagal menghasilkan embedding dengan model ${model}`);
+      }
 
-    const data = await response.json();
-    if (!response.ok || !data.embeddings) {
-      throw new Error(data?.error?.message || 'Gagal menghasilkan embeddings via Gemini.');
+      return data.embedding.values;
+    };
+
+    try {
+      return await Promise.all(texts.map((t) => embedSingle(t, primaryModel)));
+    } catch (primaryErr: any) {
+      this.logger.warn(
+        `[Gemini Embedding Primary Model ${primaryModel} Error]: ${primaryErr.message}. Mencoba fallback model ${fallbackModel}...`,
+      );
+      return await Promise.all(texts.map((t) => embedSingle(t, fallbackModel)));
     }
-
-    return data.embeddings.map((item: any) => item.values);
   }
 
   private generateDeterministicVector(text: string, seedOffset: number): number[] {
