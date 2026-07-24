@@ -50,13 +50,15 @@ export class GlobalHttpExceptionFilter implements ExceptionFilter {
       errorType = 'BadRequest';
     }
 
+    const safeMessageStr = typeof message === 'string' ? message : String(message);
+
     if (status === HttpStatus.INTERNAL_SERVER_ERROR) {
       this.logger.error(
-        `[${request.method}] ${request.url} - Error: ${JSON.stringify(message)}`,
+        `[${request.method}] ${request.url} - Error: ${safeMessageStr}`,
         exception instanceof Error ? exception.stack : '',
       );
     } else {
-      this.logger.warn(`[${request.method}] ${request.url} - Status ${status} (${errorType}): ${JSON.stringify(message)}`);
+      this.logger.warn(`[${request.method}] ${request.url} - Status ${status} (${errorType}): ${safeMessageStr}`);
     }
 
     response.status(status).json({

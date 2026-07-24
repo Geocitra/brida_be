@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { DocumentIngestionModule } from '../document-ingestion/document-ingestion.module';
 import { AiAgentModule } from '../ai-agent/ai-agent.module';
 import { ChatRepository } from './repositories/chat.repository';
 import { ChatMemoryService } from './services/chat-memory.service';
@@ -10,7 +11,7 @@ import { PromptInjectionSanitizer } from './utils/prompt-injection-sanitizer.uti
 import { ArticleGeneratorService } from './services/article-generator.service';
 
 @Module({
-  imports: [AiAgentModule],
+  imports: [DocumentIngestionModule, AiAgentModule],
   controllers: [AssistantController],
   providers: [
     ChatRepository,

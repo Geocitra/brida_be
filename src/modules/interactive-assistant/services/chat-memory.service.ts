@@ -93,4 +93,43 @@ export class ChatMemoryService {
       prunedMessagesCount: prunedCount,
     };
   }
+
+  async getQaSessions(): Promise<any[]> {
+    const sessions = await this.chatRepository.findQaSessions();
+    return sessions.map((s: any) => ({
+      id: s.id,
+      title: s.title,
+      documentId: s.documentId,
+      documentTitle: s.document?.title || 'Dokumen Umum',
+      createdAt: s.createdAt,
+      updatedAt: s.updatedAt,
+      messagesCount: s.messages?.length || 0,
+      lastMessage: s.messages && s.messages.length > 0 ? s.messages[s.messages.length - 1].content : null,
+    }));
+  }
+
+  async getQaSessionDetails(sessionId: string): Promise<any> {
+    const session = await this.chatRepository.findSessionById(sessionId);
+    if (!session) {
+      throw new NotFoundException(`Sesi obrolan dengan ID '${sessionId}' tidak ditemukan.`);
+    }
+
+    return {
+      id: session.id,
+      title: session.title,
+      documentId: session.documentId,
+      documentTitle: session.document?.title || 'Dokumen Umum',
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      messages: session.messages,
+    };
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    const session = await this.chatRepository.findSessionById(sessionId);
+    if (!session) {
+      throw new NotFoundException(`Sesi obrolan dengan ID '${sessionId}' tidak ditemukan.`);
+    }
+    await this.chatRepository.deleteSession(sessionId);
+  }
 }

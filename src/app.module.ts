@@ -4,6 +4,7 @@ import { PrismaModule } from './common/prisma/prisma.module';
 import { DocumentIngestionModule } from './modules/document-ingestion/document-ingestion.module';
 import { AiAgentModule } from './modules/ai-agent/ai-agent.module';
 import { InteractiveAssistantModule } from './modules/interactive-assistant/interactive-assistant.module';
+import { ReportsModule } from './modules/reports/reports.module';
 
 @Module({
   imports: [
@@ -14,6 +15,7 @@ import { InteractiveAssistantModule } from './modules/interactive-assistant/inte
     DocumentIngestionModule,
     AiAgentModule,
     InteractiveAssistantModule,
+    ReportsModule,
   ],
 })
 export class AppModule {}

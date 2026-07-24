@@ -44,9 +44,10 @@ export class ArticleIntentHandler implements IIntentHandler {
 
     // 3. Execute 2-Step Chain of Thought Article Generator
     const articleResult = await this.articleGenerator.generateArticle({
-      documentId: payload.documentId,
+      documentIds: [payload.documentId],
+      articleTitle: 'Draf Artikel Kebijakan',
       userInstruction: sanitizedInstruction,
-      tone: 'KRITIS',
+      tone: 'kritis',
     });
 
     // 4. Record Assistant Message in DB

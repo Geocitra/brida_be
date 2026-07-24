@@ -1,12 +1,20 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../common/prisma/prisma.service';
-import { ChatSession, ChatMessage, MessageRole } from '@prisma/client';
+import { ChatSession, ChatMessage, MessageRole, SessionType, ArticleLength } from '@prisma/client';
 
 export interface AddMessageInput {
   sessionId: string;
   role: MessageRole;
   content: string;
   tokenCount: number;
+}
+
+export interface CreateArticleSessionInput {
+  documentIds: string[];
+  articleTitle: string;
+  targetLength?: ArticleLength;
+  tone?: string;
+  initialPrompt?: string;
 }
 
 @Injectable()
@@ -19,15 +27,56 @@ export class ChatRepository {
     return this.prisma.chatSession.create({
       data: {
         documentId,
+        sessionType: SessionType.QA_CHAT,
         title: title || 'Sesi Analisis Kasus',
       },
     });
   }
 
-  async findSessionById(sessionId: string): Promise<ChatSession | null> {
+  async createArticleSession(input: CreateArticleSessionInput): Promise<any> {
+    const { documentIds, articleTitle, targetLength = ArticleLength.MEDIUM, tone = 'solutif' } = input;
+
+    return this.prisma.chatSession.create({
+      data: {
+        sessionType: SessionType.ARTICLE_GENERATOR,
+        title: articleTitle || 'Draf Artikel Publikasi',
+        articleTitle,
+        targetLength,
+        tone,
+        documentId: documentIds.length > 0 ? documentIds[0] : null,
+        sources: {
+          create: documentIds.map((docId) => ({
+            document: { connect: { id: docId } },
+          })),
+        },
+      },
+      include: {
+        sources: {
+          include: {
+            document: true,
+          },
+        },
+        messages: {
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+  }
+
+  async findSessionById(sessionId: string): Promise<any | null> {
     return this.prisma.chatSession.findUnique({
       where: { id: sessionId },
-      include: { document: true },
+      include: {
+        document: true,
+        sources: {
+          include: {
+            document: true,
+          },
+        },
+        messages: {
+          orderBy: { createdAt: 'asc' },
+        },
+      },
     });
   }
 
@@ -35,6 +84,45 @@ export class ChatRepository {
     return this.prisma.chatSession.findMany({
       where: { documentId },
       orderBy: { updatedAt: 'desc' },
+    });
+  }
+
+  async findArticleSessions(): Promise<any[]> {
+    return this.prisma.chatSession.findMany({
+      where: {
+        sessionType: SessionType.ARTICLE_GENERATOR,
+      },
+      orderBy: { updatedAt: 'desc' },
+      include: {
+        sources: {
+          include: {
+            document: true,
+          },
+        },
+        messages: {
+          orderBy: { createdAt: 'asc' },
+        },
+      },
+    });
+  }
+
+  async findQaSessions(): Promise<any[]> {
+    return this.prisma.chatSession.findMany({
+      where: {
+        sessionType: SessionType.QA_CHAT,
+      },
+      orderBy: { updatedAt: 'desc' },
+      include: {
+        document: true,
+        sources: {
+          include: {
+            document: true,
+          },
+        },
+        messages: {
+          orderBy: { createdAt: 'asc' },
+        },
+      },
     });
   }
 
@@ -55,6 +143,12 @@ export class ChatRepository {
     });
 
     return message;
+  }
+
+  async deleteSession(sessionId: string): Promise<ChatSession> {
+    return this.prisma.chatSession.delete({
+      where: { id: sessionId },
+    });
   }
 
   /**

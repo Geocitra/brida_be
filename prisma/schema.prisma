@@ -27,6 +27,17 @@ enum MessageRole {
   SYSTEM
 }
 
+enum SessionType {
+  QA_CHAT
+  ARTICLE_GENERATOR
+}
+
+enum ArticleLength {
+  SHORT
+  MEDIUM
+  LONG
+}
+
 model ReportDocument {
   id           String             @id @default(uuid()) @db.Uuid
   title        String
@@ -42,6 +53,8 @@ model ReportDocument {
   logs         ExtractionLog[]
   aiLogs       AiAnalysisLog[]
   chatSessions ChatSession[]
+  generatedReportSources ReportSourceRef[]
+  chatSessionSources ChatSessionSourceRef[]
 
   @@map("report_documents")
 }
@@ -121,16 +134,34 @@ model AiAnalysisLog {
 }
 
 model ChatSession {
-  id          String        @id @default(uuid()) @db.Uuid
-  documentId  String        @db.Uuid
-  title       String        @default("Sesi Analisis Kasus")
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id           String                 @id @default(uuid()) @db.Uuid
+  documentId   String?                @db.Uuid
+  sessionType  SessionType            @default(QA_CHAT)
+  title        String                 @default("Sesi Analisis Kasus")
+  articleTitle String?                @db.Text
+  targetLength ArticleLength?         @default(MEDIUM)
+  tone         String?                @default("solutif")
+  createdAt    DateTime               @default(now())
+  updatedAt    DateTime               @updatedAt
 
-  document    ReportDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  messages    ChatMessage[]
+  document     ReportDocument?        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  messages     ChatMessage[]
+  sources      ChatSessionSourceRef[]
 
   @@map("chat_sessions")
+}
+
+model ChatSessionSourceRef {
+  id           String          @id @default(uuid()) @db.Uuid
+  sessionId    String          @db.Uuid
+  documentId   String          @db.Uuid
+  createdAt    DateTime        @default(now())
+
+  session      ChatSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  document     ReportDocument  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, documentId])
+  @@map("chat_session_source_refs")
 }
 
 model ChatMessage {
@@ -146,3 +177,36 @@ model ChatMessage {
   @@index([sessionId, createdAt])
   @@map("chat_messages")
 }
+
+model GeneratedReport {
+  id               String            @id @default(uuid()) @db.Uuid
+  title            String
+  reportType       String            @default("NOTA_DINAS_BUPATI")
+  documentIdsHash  String            @db.Text
+  executiveSummary String            @db.Text
+  contentPayload   Json
+  tokenCount       Int               @default(0)
+  llmProvider      String            @default("GEMINI_FLASH")
+  status           DocumentStatus    @default(READY)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  sources          ReportSourceRef[]
+
+  @@index([documentIdsHash])
+  @@map("generated_reports")
+}
+
+model ReportSourceRef {
+  id           String          @id @default(uuid()) @db.Uuid
+  reportId     String          @db.Uuid
+  documentId   String          @db.Uuid
+  createdAt    DateTime        @default(now())
+
+  report       GeneratedReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  document     ReportDocument  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([reportId, documentId])
+  @@map("report_source_refs")
+}
+
