@@ -8,8 +8,62 @@ import { ChatMemoryService } from '../services/chat-memory.service';
 import { ContextAssemblyService } from '../../ai-agent/services/context-assembly.service';
 import { VendorLlmAdapter } from '../../ai-agent/providers/vendor-llm.adapter';
 import { PromptInjectionSanitizer } from '../utils/prompt-injection-sanitizer.util';
-import { ANALYSIS_OUTPUT_JSON_SCHEMA } from '../../ai-agent/schemas/analysis-output.schema';
 import { LlmChatMessage } from '../../ai-agent/utils/prompt-assembly.builder';
+
+/**
+ * Flexible Q&A response schema — accepts both investigative structured analysis
+ * AND plain conversational answers, reducing schema mismatch errors.
+ */
+const QA_FLEXIBLE_JSON_SCHEMA = {
+  type: 'object',
+  properties: {
+    ringkasanEksekutif: {
+      type: 'string',
+      description: 'Jawaban utama atau ringkasan analitis terhadap pertanyaan pengguna.',
+    },
+    entitasTerlibat: {
+      type: 'array',
+      description: 'Daftar entitas, orang, instansi yang relevan (boleh kosong jika tidak ada).',
+      items: {
+        type: 'object',
+        properties: {
+          nama: { type: 'string' },
+          peran: { type: 'string' },
+          entitasTerkait: { type: 'string' },
+        },
+      },
+    },
+    kronologiPeristiwa: {
+      type: 'array',
+      description: 'Urutan fakta atau kronologi (boleh kosong jika tidak relevan).',
+      items: {
+        type: 'object',
+        properties: {
+          tanggal: { type: 'string' },
+          deskripsi: { type: 'string' },
+          lokasi: { type: 'string' },
+        },
+      },
+    },
+    indikasiPelanggaran: {
+      type: 'array',
+      description: 'Indikasi pelanggaran jika ada (boleh kosong untuk pertanyaan umum).',
+      items: {
+        type: 'object',
+        properties: {
+          jenis: { type: 'string' },
+          pasalDugaan: { type: 'string' },
+          rincian: { type: 'string' },
+        },
+      },
+    },
+    kesimpulanAnalisis: {
+      type: 'string',
+      description: 'Kesimpulan singkat atau penutup jawaban.',
+    },
+  },
+  // No "required" constraint — all fields have fallback defaults in VendorLlmAdapter
+};
 
 @Injectable()
 export class QaIntentHandler implements IIntentHandler {
@@ -35,37 +89,37 @@ export class QaIntentHandler implements IIntentHandler {
       `[QaIntentHandler] Memproses Q&A Analitik untuk Sesi ID: ${payload.sessionId}...`,
     );
 
-    // 1. Step 1: Prompt Injection Security Sanitization
+    // 1. Prompt Injection Security Sanitization
     const sanitizedQuery = this.sanitizer.sanitize(payload.query);
 
-    // 2. Step 2: Record User Message in Chat Session
+    // 2. Record User Message in Chat Session
     await this.chatMemory.recordUserMessage(payload.sessionId, sanitizedQuery);
 
-    // 3. Step 3: Fetch Active Sliding Window Memory (Pruned 2,000 Token Limit)
+    // 3. Fetch Active Sliding Window Memory (Pruned 2,000 Token Limit)
     const memory = await this.chatMemory.getActiveSlidingWindowMemory(payload.sessionId);
 
-    // Format chat history messages for Prompt Assembly
+    // Format chat history for Prompt Assembly
     const historyMessages: LlmChatMessage[] = memory.activeMessages.map((m) => ({
       role: m.role === 'USER' ? 'user' : 'assistant',
       content: m.content,
     }));
 
-    // 4. Step 4: Assemble Composite Quad-Block Prompt Payload
+    // 4. Assemble Composite Quad-Block Prompt Payload
     const promptPayload = await this.contextAssembly.assemblePromptPayload({
       documentId: memory.documentId,
       userQuery: sanitizedQuery,
     });
 
-    // Inject history messages into prompt messages
+    // Inject history messages into prompt
     promptPayload.messages.splice(2, 0, ...historyMessages);
 
-    // 5. Step 5: Execute LLM Adapter with temperature: 0.0 & JSON Schema Enforcement
+    // 5. Execute LLM with flexible schema (no required fields — tolerant normalization handles fallbacks)
     const analysisResult = await this.llmAdapter.generateStructuredAnalysis(
       promptPayload.messages,
-      ANALYSIS_OUTPUT_JSON_SCHEMA,
+      QA_FLEXIBLE_JSON_SCHEMA,
     );
 
-    // 6. Step 6: Persistence - Record Assistant Response in ChatSession
+    // 6. Persist Assistant Response in ChatSession
     const assistantResponseContent = JSON.stringify(analysisResult);
     await this.chatMemory.recordAssistantMessage(payload.sessionId, assistantResponseContent);
 

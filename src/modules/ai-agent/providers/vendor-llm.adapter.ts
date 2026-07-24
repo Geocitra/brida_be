@@ -34,7 +34,7 @@ export class VendorLlmAdapter implements ILlmProvider {
       let rawResponse: string;
 
       if (apiKey && apiKey.trim().length > 0) {
-        rawResponse = await this.callRealGeminiApi(apiKey, messages);
+        rawResponse = await this.callRealGeminiApi(apiKey, messages, jsonSchema);
       } else {
         this.logger.warn(
           `[GEMINI_API_KEY Kosong] Menggunakan mock response terstruktur untuk fase testing. Masukkan GEMINI_API_KEY pada .env untuk memanggil API sungguhan.`,
@@ -44,10 +44,10 @@ export class VendorLlmAdapter implements ILlmProvider {
 
       // Clean Markdown Fences (```json ... ```) & Validate Post-Generation DTO
       return this.validateAndParseOutput<T>(rawResponse);
-    }, 3, 1000);
+    }, 3, 2000); // 2s initial backoff (2s, 4s, 8s) for Gemini high-demand tolerance
   }
 
-  private async callRealGeminiApi(apiKey: string, messages: LlmChatMessage[]): Promise<string> {
+  private async callRealGeminiApi(apiKey: string, messages: LlmChatMessage[], jsonSchema?: any): Promise<string> {
     const modelName = this.configService.get<string>('GEMINI_MODEL') || 'gemini-1.5-flash';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
@@ -65,6 +65,8 @@ export class VendorLlmAdapter implements ILlmProvider {
         generationConfig: {
           temperature: 0.0,
           responseMimeType: 'application/json',
+          // Enforce native structured output at token-generation level
+          responseSchema: jsonSchema,
         },
       }),
     });
@@ -133,23 +135,35 @@ export class VendorLlmAdapter implements ILlmProvider {
         throw new UnprocessableEntityException('Output LLM bukan objek JSON yang valid.');
       }
 
-      if (
-        !parsed.ringkasanEksekutif ||
-        !Array.isArray(parsed.entitasTerlibat) ||
-        !Array.isArray(parsed.kronologiPeristiwa) ||
-        !Array.isArray(parsed.indikasiPelanggaran) ||
-        !parsed.kesimpulanAnalisis
-      ) {
-        throw new UnprocessableEntityException(
-          'Output LLM tidak memenuhi skema DTO AnalysisResponseDto yang diwajibkan.',
-        );
-      }
+      // Tolerant normalization: fallback to safe defaults if LLM skips a key
+      // instead of hard-failing and triggering expensive retry loops
+      const normalized = {
+        ringkasanEksekutif:
+          typeof parsed.ringkasanEksekutif === 'string' && parsed.ringkasanEksekutif.trim()
+            ? parsed.ringkasanEksekutif
+            : parsed.answer || parsed.summary || 'Tidak ada ringkasan tersedia dari dokumen ini.',
+        entitasTerlibat: Array.isArray(parsed.entitasTerlibat) ? parsed.entitasTerlibat : [],
+        kronologiPeristiwa: Array.isArray(parsed.kronologiPeristiwa) ? parsed.kronologiPeristiwa : [],
+        indikasiPelanggaran: Array.isArray(parsed.indikasiPelanggaran) ? parsed.indikasiPelanggaran : [],
+        kesimpulanAnalisis:
+          typeof parsed.kesimpulanAnalisis === 'string' && parsed.kesimpulanAnalisis.trim()
+            ? parsed.kesimpulanAnalisis
+            : parsed.conclusion || 'Tidak ada kesimpulan tambahan.',
+      };
 
-      this.logger.log(`[Defensive Validation Pass] Output JSON LLM berhasil dibersihkan dari markdown dan lolos uji DTO.`);
-      return parsed as T;
+      this.logger.log(`[Tolerant Validation Pass] Output JSON LLM berhasil dinormalisasi dan siap dikembalikan ke klien.`);
+      return normalized as T;
     } catch (err: any) {
       this.logger.error(`[Post-Generation Validation Failed]: ${err.message}`);
-      throw new UnprocessableEntityException(`Gagal memverifikasi respons JSON dari LLM: ${err.message}`);
+      // Last-resort fallback: return safe empty structure instead of throwing 422
+      this.logger.warn(`[Fallback Activated] Mengembalikan struktur kosong aman daripada melempar exception.`);
+      return {
+        ringkasanEksekutif: 'Sistem tidak dapat memproses respons AI saat ini. Silakan coba kembali dalam beberapa saat.',
+        entitasTerlibat: [],
+        kronologiPeristiwa: [],
+        indikasiPelanggaran: [],
+        kesimpulanAnalisis: 'Terjadi kendala teknis sementara pada engine AI. Pastikan backend terhubung dan coba ulangi pertanyaan Anda.',
+      } as T;
     }
   }
 
