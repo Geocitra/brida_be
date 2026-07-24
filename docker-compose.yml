@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  brida_db:
+    image: postgis/postgis:16-3.4
+    container_name: brida_postgres_postgis
+    environment:
+      POSTGRES_USER: brida_user
+      POSTGRES_PASSWORD: brida_password
+      POSTGRES_DB: brida_smart_analysis
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

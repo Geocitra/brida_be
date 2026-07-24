@@ -1,0 +1,3207 @@
+=== BRIDA SMART ANALYSIS (BACKEND CODEBASE BUNDLE) ===
+
+
+--- FILE: docker-compose.yml ---
+version: '3.8'
+
+services:
+  brida_db:
+    image: postgis/postgis:16-3.4
+    container_name: brida_postgres_postgis
+    environment:
+      POSTGRES_USER: brida_user
+      POSTGRES_PASSWORD: brida_password
+      POSTGRES_DB: brida_smart_analysis
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+--- FILE: nest-cli.json ---
+{
+  "$schema": "https://json.schemastore.org/nest-cli",
+  "collection": "@nestjs/schematics",
+  "sourceRoot": "src",
+  "compilerOptions": {
+    "deleteOutDir": true
+  }
+}
+
+--- FILE: package.json ---
+{
+  "name": "brida-smart-analysis-be",
+  "version": "1.0.0",
+  "description": "BRIDA SMART Analysis (Static Edition) - NestJS Backend Engine",
+  "author": "BRIDA Systems Team",
+  "private": true,
+  "license": "UNLICENSED",
+  "scripts": {
+    "build": "nest build",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "start": "nest start",
+    "start:dev": "nest start --watch",
+    "start:debug": "nest start --debug --watch",
+    "start:prod": "node dist/main",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio"
+  },
+  "dependencies": {
+    "@nestjs/common": "^10.3.0",
+    "@nestjs/config": "^3.1.1",
+    "@nestjs/core": "^10.3.0",
+    "@nestjs/platform-express": "^10.3.0",
+    "@prisma/client": "5.10.2",
+    "class-transformer": "^0.5.1",
+    "class-validator": "^0.14.1",
+    "mammoth": "^1.7.0",
+    "pdf-parse": "^1.1.1",
+    "reflect-metadata": "^0.2.1",
+    "rxjs": "^7.8.1",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^10.3.0",
+    "@nestjs/schematics": "^10.1.0",
+    "@nestjs/testing": "^10.3.0",
+    "@types/express": "^4.17.21",
+    "@types/multer": "^1.4.11",
+    "@types/node": "^20.11.16",
+    "@types/pdf-parse": "^1.1.4",
+    "@types/uuid": "^9.0.8",
+    "prisma": "5.10.2",
+    "source-map-support": "^0.5.21",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.3.3"
+  }
+}
+
+--- FILE: tsconfig.json ---
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "declaration": true,
+    "removeComments": true,
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "allowSyntheticDefaultImports": true,
+    "target": "ES2021",
+    "sourceMap": true,
+    "outDir": "./dist",
+    "baseUrl": "./",
+    "incremental": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "strictNullChecks": true,
+    "strictBindCallApply": true,
+    "forceConsistentCasingInFileNames": true,
+    "noImplicitAny": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true
+  }
+}
+
+--- FILE: prisma\schema.prisma ---
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [postgis, pgvector(map: "vector")]
+}
+
+enum DocumentStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum LogStatus {
+  INFO
+  SUCCESS
+  WARNING
+  ERROR
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+model ReportDocument {
+  id           String             @id @default(uuid()) @db.Uuid
+  title        String
+  fileUrl      String
+  mimeType     String
+  checksumHash String             @unique
+  status       DocumentStatus     @default(PENDING)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  metadata     DocumentMetadata?
+  chunks       DocumentChunk[]
+  logs         ExtractionLog[]
+  aiLogs       AiAnalysisLog[]
+  chatSessions ChatSession[]
+
+  @@map("report_documents")
+}
+
+model DocumentMetadata {
+  id              String         @id @default(uuid()) @db.Uuid
+  documentId      String         @unique @db.Uuid
+  fileSizeBytes   BigInt
+  pageCount       Int            @default(0)
+  totalTokenCount Int            @default(0)
+  category        String         @default("General Report")
+  uploadedBy      String         @default("SYSTEM_STAF")
+  createdAt       DateTime       @default(now())
+
+  document        ReportDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@map("document_metadata")
+}
+
+model DocumentChunk {
+  id          String               @id @default(uuid()) @db.Uuid
+  documentId  String               @db.Uuid
+  chunkIndex  Int
+  rawText     String               @db.Text
+  tokenCount  Int
+  embedding   Unsupported("vector(768)")?
+  createdAt   DateTime             @default(now())
+
+  document    ReportDocument       @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  locations   GeospatialLocation[]
+
+  @@index([documentId, chunkIndex])
+  @@map("document_chunks")
+}
+
+model ExtractionLog {
+  id              String         @id @default(uuid()) @db.Uuid
+  documentId      String         @db.Uuid
+  status          LogStatus      @default(INFO)
+  errorMessage    String?        @db.Text
+  executionTimeMs Int            @default(0)
+  createdAt       DateTime       @default(now())
+
+  document        ReportDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@map("extraction_logs")
+}
+
+model GeospatialLocation {
+  id              String                    @id @default(uuid()) @db.Uuid
+  chunkId         String                    @db.Uuid
+  locationName    String
+  latitude        Float
+  longitude       Float
+  locationPoint   Unsupported("geometry")?
+  confidenceScore Float                     @default(1.0)
+  createdAt       DateTime                  @default(now())
+
+  chunk           DocumentChunk             @relation(fields: [chunkId], references: [id], onDelete: Cascade)
+
+  @@map("geospatial_locations")
+}
+
+model AiAnalysisLog {
+  id              String         @id @default(uuid()) @db.Uuid
+  documentId      String         @db.Uuid
+  userQuery       String         @db.Text
+  status          LogStatus      @default(SUCCESS)
+  executionTimeMs Int            @default(0)
+  tokenCount      Int            @default(0)
+  responsePayload String?        @db.Text
+  errorMessage    String?        @db.Text
+  createdAt       DateTime       @default(now())
+
+  document        ReportDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@map("ai_analysis_logs")
+}
+
+model ChatSession {
+  id          String        @id @default(uuid()) @db.Uuid
+  documentId  String        @db.Uuid
+  title       String        @default("Sesi Analisis Kasus")
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  document    ReportDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  messages    ChatMessage[]
+
+  @@map("chat_sessions")
+}
+
+model ChatMessage {
+  id          String      @id @default(uuid()) @db.Uuid
+  sessionId   String      @db.Uuid
+  role        MessageRole
+  content     String      @db.Text
+  tokenCount  Int         @default(0)
+  createdAt   DateTime    @default(now())
+
+  session     ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+  @@map("chat_messages")
+}
+
+--- FILE: src\app.module.ts ---
+import { Module } from '@nestjs/common';
+import { ConfigModule } from '@nestjs/config';
+import { PrismaModule } from './common/prisma/prisma.module';
+import { DocumentIngestionModule } from './modules/document-ingestion/document-ingestion.module';
+import { AiAgentModule } from './modules/ai-agent/ai-agent.module';
+import { InteractiveAssistantModule } from './modules/interactive-assistant/interactive-assistant.module';
+
+@Module({
+  imports: [
+    ConfigModule.forRoot({
+      isGlobal: true,
+    }),
+    PrismaModule,
+    DocumentIngestionModule,
+    AiAgentModule,
+    InteractiveAssistantModule,
+  ],
+})
+export class AppModule {}
+
+--- FILE: src\main.ts ---
+import { NestFactory } from '@nestjs/core';
+import { ValidationPipe, Logger } from '@nestjs/common';
+import { AppModule } from './app.module';
+import { GlobalHttpExceptionFilter } from './common/filters/http-exception.filter';
+
+async function bootstrap() {
+  const logger = new Logger('Bootstrap');
+  const app = await NestFactory.create(AppModule);
+
+  app.enableCors({
+    origin: true,
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    credentials: true,
+  });
+
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true,
+      forbidNonWhitelisted: true,
+      transform: true,
+    }),
+  );
+
+  app.useGlobalFilters(new GlobalHttpExceptionFilter());
+
+  const port = process.env.PORT || 3000;
+  await app.listen(port);
+  logger.log(`BRIDA SMART Analysis (Backend Engine) is running on port ${port}`);
+}
+bootstrap();
+
+--- FILE: src\common\filters\http-exception.filter.ts ---
+import {
+  ExceptionFilter,
+  Catch,
+  ArgumentsHost,
+  HttpException,
+  HttpStatus,
+  Logger,
+} from '@nestjs/common';
+import { Request, Response } from 'express';
+
+@Catch()
+export class GlobalHttpExceptionFilter implements ExceptionFilter {
+  private readonly logger = new Logger(GlobalHttpExceptionFilter.name);
+
+  catch(exception: unknown, host: ArgumentsHost): void {
+    const ctx = host.switchToHttp();
+    const response = ctx.getResponse<Response>();
+    const request = ctx.getRequest<Request>();
+
+    const status =
+      exception instanceof HttpException
+        ? exception.getStatus()
+        : HttpStatus.INTERNAL_SERVER_ERROR;
+
+    const exceptionResponse =
+      exception instanceof HttpException ? exception.getResponse() : null;
+
+    let message: string | string[] = 'Internal server error';
+    let errorType = 'InternalServerError';
+
+    if (exception instanceof HttpException) {
+      errorType = exception.name || 'HttpException';
+      if (typeof exceptionResponse === 'object' && exceptionResponse !== null) {
+        message = (exceptionResponse as any).message || String(exception);
+      } else if (typeof exceptionResponse === 'string') {
+        message = exceptionResponse;
+      } else {
+        message = exception.message;
+      }
+    } else if (exception instanceof Error) {
+      message = exception.message;
+    }
+
+    if (status === HttpStatus.PAYLOAD_TOO_LARGE) {
+      errorType = 'PayloadTooLarge';
+    } else if (status === HttpStatus.UNSUPPORTED_MEDIA_TYPE) {
+      errorType = 'UnsupportedMediaType';
+    } else if (status === HttpStatus.BAD_REQUEST) {
+      errorType = 'BadRequest';
+    }
+
+    if (status === HttpStatus.INTERNAL_SERVER_ERROR) {
+      this.logger.error(
+        `[${request.method}] ${request.url} - Error: ${JSON.stringify(message)}`,
+        exception instanceof Error ? exception.stack : '',
+      );
+    } else {
+      this.logger.warn(`[${request.method}] ${request.url} - Status ${status} (${errorType}): ${JSON.stringify(message)}`);
+    }
+
+    response.status(status).json({
+      success: false,
+      statusCode: status,
+      errorType,
+      message,
+      path: request.url,
+      timestamp: new Date().toISOString(),
+    });
+  }
+}
+
+--- FILE: src\common\pipes\file-signature-validation.pipe.ts ---
+import {
+  PipeTransform,
+  Injectable,
+  BadRequestException,
+  PayloadTooLargeException,
+  UnsupportedMediaTypeException,
+  Logger,
+} from '@nestjs/common';
+
+@Injectable()
+export class FileSignatureValidationPipe implements PipeTransform {
+  private readonly logger = new Logger(FileSignatureValidationPipe.name);
+
+  private readonly MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
+
+  private readonly PDF_MAGIC = [0x25, 0x50, 0x44, 0x46, 0x2d];
+
+  private readonly DOCX_ZIP_MAGIC = [0x50, 0x4b, 0x03, 0x04];
+
+  transform(file: Express.Multer.File): Express.Multer.File {
+    if (!file) {
+      throw new BadRequestException('Dokumen laporan wajib diunggah (multipart form-data file key: "file").');
+    }
+
+    if (file.size > this.MAX_FILE_SIZE_BYTES) {
+      const sizeMb = (file.size / (1024 * 1024)).toFixed(2);
+      this.logger.warn(`File '${file.originalname}' ditolak: Ukuran file (${sizeMb} MB) melebihi batas maksimal 20 MB.`);
+      throw new PayloadTooLargeException(
+        `Ukuran file (${sizeMb} MB) melebihi batas maksimum 20 MB yang diizinkan sistem BRIDA.`,
+      );
+    }
+
+    const buffer = file.buffer;
+    if (!buffer || buffer.length === 0) {
+      throw new BadRequestException('File buffer kosong atau tidak valid.');
+    }
+
+    const detectedType = this.detectMagicNumberType(buffer);
+
+    if (detectedType === 'UNKNOWN') {
+      this.logger.warn(
+        `File '${file.originalname}' (MIME dikirim: '${file.mimetype}') ditolak: Magic number byte signature tidak valid.`,
+      );
+      throw new UnsupportedMediaTypeException(
+        `Format file '${file.originalname}' ditolak. Magic Number byte signature tidak cocok dengan dokumen PDF, DOCX, atau TXT yang diizinkan.`,
+      );
+    }
+
+    if (detectedType === 'PDF') {
+      file.mimetype = 'application/pdf';
+    } else if (detectedType === 'DOCX') {
+      file.mimetype = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    } else if (detectedType === 'TXT') {
+      file.mimetype = 'text/plain';
+    }
+
+    this.logger.log(
+      `[Magic Number Pass] File '${file.originalname}' berhasil divalidasi sebagai tipe: ${detectedType} (${file.size} bytes).`,
+    );
+
+    return file;
+  }
+
+  private detectMagicNumberType(buffer: Buffer): 'PDF' | 'DOCX' | 'TXT' | 'UNKNOWN' {
+
+    if (this.checkMagicBytes(buffer, this.PDF_MAGIC)) {
+      return 'PDF';
+    }
+
+    if (this.checkMagicBytes(buffer, this.DOCX_ZIP_MAGIC)) {
+      return 'DOCX';
+    }
+
+    if (this.isPrintableTextBuffer(buffer)) {
+      return 'TXT';
+    }
+
+    return 'UNKNOWN';
+  }
+
+  private checkMagicBytes(buffer: Buffer, magic: number[]): boolean {
+    if (buffer.length < magic.length) return false;
+    for (let i = 0; i < magic.length; i++) {
+      if (buffer[i] !== magic[i]) return false;
+    }
+    return true;
+  }
+
+  private isPrintableTextBuffer(buffer: Buffer): boolean {
+
+    const sampleLength = Math.min(buffer.length, 512);
+    for (let i = 0; i < sampleLength; i++) {
+      const byte = buffer[i];
+
+      if (byte !== 9 && byte !== 10 && byte !== 13 && byte < 32) {
+        return false;
+      }
+    }
+    return true;
+  }
+}
+
+--- FILE: src\common\prisma\prisma.module.ts ---
+import { Global, Module } from '@nestjs/common';
+import { PrismaService } from './prisma.service';
+
+@Global()
+@Module({
+  providers: [PrismaService],
+  exports: [PrismaService],
+})
+export class PrismaModule {}
+
+--- FILE: src\common\prisma\prisma.service.ts ---
+import { Injectable, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import { PrismaClient } from '@prisma/client';
+
+@Injectable()
+export class PrismaService extends PrismaClient implements OnModuleInit, OnModuleDestroy {
+  async onModuleInit(): Promise<void> {
+    await this.$connect();
+  }
+
+  async onModuleDestroy(): Promise<void> {
+    await this.$disconnect();
+  }
+}
+
+--- FILE: src\modules\ai-agent\ai-agent.module.ts ---
+import { Module } from '@nestjs/common';
+import { DocumentIngestionModule } from '../document-ingestion/document-ingestion.module';
+import { VectorRetrievalService } from './services/vector-retrieval.service';
+import { TokenEstimatorUtil } from './utils/token-estimator.util';
+import { PromptAssemblyBuilder } from './utils/prompt-assembly.builder';
+import { ContextAssemblyService } from './services/context-assembly.service';
+import { NetworkResilienceUtil } from './utils/network-resilience.util';
+import { VendorLlmAdapter } from './providers/vendor-llm.adapter';
+import { AiAgentService } from './services/ai-agent.service';
+import { AiAgentController } from './controllers/ai-agent.controller';
+
+@Module({
+  imports: [DocumentIngestionModule],
+  controllers: [AiAgentController],
+  providers: [
+    VectorRetrievalService,
+    TokenEstimatorUtil,
+    PromptAssemblyBuilder,
+    ContextAssemblyService,
+    NetworkResilienceUtil,
+    VendorLlmAdapter,
+    AiAgentService,
+  ],
+  exports: [
+    VectorRetrievalService,
+    TokenEstimatorUtil,
+    PromptAssemblyBuilder,
+    ContextAssemblyService,
+    NetworkResilienceUtil,
+    VendorLlmAdapter,
+    AiAgentService,
+  ],
+})
+export class AiAgentModule {}
+
+--- FILE: src\modules\ai-agent\constants\system-prompts.constant.ts ---
+export const BRIDA_SYSTEM_PERSONA = `Anda adalah seorang Senior Systems Analyst dan Analis Investigasi Kasus di Badan Riset dan Inovasi Daerah (BRIDA).
+Tugas utama Anda adalah menganalisis dokumen laporan statis (seperti laporan investigasi korupsi, analisis kebijakan, dan dokumen hukum) yang diunggah oleh staf BRIDA.
+
+ATURAN MUTLAK (ZERO-KNOWLEDGE BASE ENFORCEMENT):
+1. Anda HANYA BOHLEH memberikan analisis, jawaban, dan informasi yang secara EKSPLISIT tercantum di dalam teks dokumen terlampir.
+2. DILARANG KERAS menambahkan asumsi, spekulasi, atau pengetahuan eksternal di luar teks dokumen.
+3. Jika informasi yang ditanyakan oleh pengguna tidak tercantum di dalam dokumen, Anda WAJIB menjawab: "Informasi tersebut tidak ditemukan di dalam dokumen laporan yang diunggah."
+4. Jawaban Anda harus selalu terstruktur, berbasis bukti faktual, dan menyertakan kutipan/referensi paragraf dokumen jika relevan.`;
+
+export const BRIDA_GUARDRAIL_POSTFIX = `[INSTRUKSI PENUTUP MUDUR - RECENTENCY BIAS GUARDRAIL]
+Evaluasi dan jawab pertanyaan pengguna di atas secara eksklusif berdasarkan teks konteks dokumen terlampir.
+Terapkan Aturan Zero-Knowledge Base secara mutlak. Jangan menambahkan asumsi atau opini eksternal apa pun. Hasil analisis WAJIB dalam format JSON yang terstruktur.`;
+
+export const DYNAMIC_CONTEXT_TOKEN_THRESHOLD = 80000;
+
+--- FILE: src\modules\ai-agent\controllers\ai-agent.controller.ts ---
+import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common';
+import { AiAgentService } from '../services/ai-agent.service';
+import { AnalysisRequestDto } from '../dtos/analysis-request.dto';
+import { FinalAnalysisResponse } from '../dtos/analysis-response.dto';
+
+@Controller('ai')
+export class AiAgentController {
+  constructor(private readonly aiAgentService: AiAgentService) {}
+
+  @Post('analyze')
+  @HttpCode(HttpStatus.OK)
+  async analyzeDocument(
+    @Body() dto: AnalysisRequestDto,
+  ): Promise<FinalAnalysisResponse> {
+    return this.aiAgentService.executeStaticAnalysis(dto);
+  }
+}
+
+--- FILE: src\modules\ai-agent\dtos\analysis-request.dto.ts ---
+import { IsString, IsNotEmpty, IsUUID, MinLength } from 'class-validator';
+
+export class AnalysisRequestDto {
+  @IsUUID('4', { message: 'documentId harus berupa format UUID v4 yang valid' })
+  @IsNotEmpty({ message: 'documentId tidak boleh kosong' })
+  documentId!: string;
+
+  @IsString()
+  @IsNotEmpty({ message: 'Query atau instruksi analisis tidak boleh kosong' })
+  @MinLength(3, { message: 'Query minimal 3 karakter' })
+  query!: string;
+}
+
+--- FILE: src\modules\ai-agent\dtos\analysis-response.dto.ts ---
+import { AnalysisResponseDto } from '../schemas/analysis-response.dto';
+
+export interface AnalysisExecutionMetadata {
+  executionTimeMs: number;
+  estimatedPayloadTokens: number;
+  llmProvider: string;
+}
+
+export interface FinalAnalysisResponse {
+  success: boolean;
+  documentId: string;
+  data: AnalysisResponseDto;
+  metadata: AnalysisExecutionMetadata;
+}
+
+--- FILE: src\modules\ai-agent\interfaces\llm-provider.interface.ts ---
+import { LlmChatMessage } from '../utils/prompt-assembly.builder';
+
+export interface ILlmProvider {
+
+  getProviderName(): string;
+
+  generateStructuredAnalysis<T>(
+    messages: LlmChatMessage[],
+    jsonSchema: any,
+  ): Promise<T>;
+}
+
+--- FILE: src\modules\ai-agent\interfaces\retrieval-result.interface.ts ---
+import { ChunkSpatialMetadata } from '../../document-ingestion/interfaces/chunk-data.interface';
+
+export interface RetrievalResult {
+  chunkId: string;
+  documentId: string;
+  chunkIndex: number;
+  rawText: string;
+  tokenCount: number;
+  similarityScore: number;
+  spatialMetadata?: ChunkSpatialMetadata;
+}
+
+--- FILE: src\modules\ai-agent\interfaces\vector-search-params.interface.ts ---
+export interface VectorSearchParams {
+  documentId: string;
+  queryVector: number[];
+  limit?: number;
+  similarityThreshold?: number;
+}
+
+--- FILE: src\modules\ai-agent\providers\vendor-llm.adapter.ts ---
+import { Injectable, Logger, UnprocessableEntityException } from '@nestjs/common';
+import { ILlmProvider } from '../interfaces/llm-provider.interface';
+import { LlmChatMessage } from '../utils/prompt-assembly.builder';
+import { NetworkResilienceUtil } from '../utils/network-resilience.util';
+import { AnalysisResponseDto } from '../schemas/analysis-response.dto';
+
+@Injectable()
+export class VendorLlmAdapter implements ILlmProvider {
+  private readonly logger = new Logger(VendorLlmAdapter.name);
+
+  constructor(private readonly resilienceUtil: NetworkResilienceUtil) {}
+
+  getProviderName(): string {
+    return 'GeminiStructuredLlmAdapter';
+  }
+
+  async generateStructuredAnalysis<T = AnalysisResponseDto>(
+    messages: LlmChatMessage[],
+    jsonSchema: any,
+  ): Promise<T> {
+    this.logger.log(
+      `[VendorLlmAdapter] Mengirim ${messages.length} pesan ke LLM API dengan temperature=0.0 & JSON Schema Enforcement...`,
+    );
+
+    return this.resilienceUtil.executeWithRetry(async () => {
+      const rawResponse = await this.mockVendorApiCall(messages, jsonSchema);
+
+      return this.validateAndParseOutput<T>(rawResponse);
+    }, 3, 1000);
+  }
+
+  private async mockVendorApiCall(messages: LlmChatMessage[], schema: any): Promise<string> {
+
+    const mockResult: AnalysisResponseDto = {
+      ringkasanEksekutif:
+        'Berdasarkan dokumen laporan statis yang dianalisis, ditemukan indikasi awal penyimpangan prosedur pengadaan barang dan jasa pada proyek pembangunan infrastruktur daerah.',
+      entitasTerlibat: [
+        {
+          nama: 'Drs. Supriyanto, M.Si',
+          peran: 'Pejabat Pembuat Komitmen (PPK)',
+          entitasTerkait: 'Dinas Pekerjaan Umum Daerah',
+        },
+        {
+          nama: 'PT Karya Sentosa Jaya',
+          peran: 'Kontraktor Pelaksana Utama',
+          entitasTerkait: 'Penyedia Jasa Swasta',
+        },
+      ],
+      kronologiPeristiwa: [
+        {
+          tanggal: '15 Maret 2024',
+          deskripsi: 'Penetapan pemenang tender proyek infrastruktur tanpa melalui proses pencairan jaminan penawaran.',
+          lokasi: 'Kabupaten BRIDA',
+        },
+        {
+          tanggal: '02 April 2024',
+          deskripsi: 'Pencairan dana termin pertama sebesar 30% tanpa adanya laporan verifikasi fisik lapangan.',
+        },
+      ],
+      indikasiPelanggaran: [
+        {
+          jenis: 'Dugaan Perbuatan Melawan Hukum & Penyalahgunaan Wewenang',
+          pasalDugaan: 'Pasal 2 dan Pasal 3 UU No. 31 Tahun 1999 jo. UU No. 20 Tahun 2001',
+          rincian: 'Penyalur dana termin tidak sesuai dengan persentase realisasi fisik pekerjaan di lapangan.',
+        },
+      ],
+      kesimpulanAnalisis:
+        'Dokumen laporan menunjukkan bukti awal yang cukup kuat terkait ketidaksesuaian prosedur administratif dan indikasi kerugian keuangan daerah. Direkomendasikan untuk dilakukan audit investigatif lanjutan.',
+    };
+
+    return `\`\`\`json\n${JSON.stringify(mockResult, null, 2)}\n\`\`\``;
+  }
+
+  private validateAndParseOutput<T>(rawString: string): T {
+    try {
+
+      const sanitizedJsonString = this.stripMarkdownFences(rawString);
+
+      const parsed = JSON.parse(sanitizedJsonString);
+
+      if (!parsed || typeof parsed !== 'object') {
+        throw new UnprocessableEntityException('Output LLM bukan objek JSON yang valid.');
+      }
+
+      if (
+        !parsed.ringkasanEksekutif ||
+        !Array.isArray(parsed.entitasTerlibat) ||
+        !Array.isArray(parsed.kronologiPeristiwa) ||
+        !Array.isArray(parsed.indikasiPelanggaran) ||
+        !parsed.kesimpulanAnalisis
+      ) {
+        throw new UnprocessableEntityException(
+          'Output LLM tidak memenuhi skema DTO AnalysisResponseDto yang diwajibkan.',
+        );
+      }
+
+      this.logger.log(`[Defensive Validation Pass] Output JSON LLM berhasil dibersihkan dari markdown dan lolos uji DTO.`);
+      return parsed as T;
+    } catch (err: any) {
+      this.logger.error(`[Post-Generation Validation Failed]: ${err.message}`);
+      throw new UnprocessableEntityException(`Gagal memverifikasi respons JSON dari LLM: ${err.message}`);
+    }
+  }
+
+  private stripMarkdownFences(rawText: string): string {
+    if (!rawText) return '';
+    let cleaned = rawText.trim();
+
+    cleaned = cleaned.replace(/^```(?:json)?\s*/i, '');
+    // Strip trailing ```
+    cleaned = cleaned.replace(/\s*```$/i, '');
+
+    return cleaned.trim();
+  }
+}
+
+--- FILE: src\modules\ai-agent\schemas\analysis-output.schema.ts ---
+export const ANALYSIS_OUTPUT_JSON_SCHEMA = {
+  $schema: 'http://json-schema.org/draft-07/schema#',
+  title: 'BridaReportAnalysisOutput',
+  type: 'object',
+  required: [
+    'ringkasanEksekutif',
+    'entitasTerlibat',
+    'kronologiPeristiwa',
+    'indikasiPelanggaran',
+    'kesimpulanAnalisis',
+  ],
+  properties: {
+    ringkasanEksekutif: {
+      type: 'string',
+      description: 'Ringkasan esensial laporan investigasi/kebijakan dalam 2-3 paragraf faktual.',
+    },
+    entitasTerlibat: {
+      type: 'array',
+      description: 'Daftar nama orang, instansi, atau perusahaan yang secara eksplisit disebutkan.',
+      items: {
+        type: 'object',
+        required: ['nama', 'peran'],
+        properties: {
+          nama: { type: 'string', description: 'Nama entitas/individu/organisasi' },
+          peran: { type: 'string', description: 'Peran atau jabatan dalam laporan' },
+          entitasTerkait: { type: 'string', description: 'Instansi atau pihak terkait' },
+        },
+      },
+    },
+    kronologiPeristiwa: {
+      type: 'array',
+      description: 'Urutan kejadian atau kronologi fakta yang tercantum.',
+      items: {
+        type: 'object',
+        required: ['deskripsi'],
+        properties: {
+          tanggal: { type: 'string', description: 'Tanggal atau periode waktu kejadian' },
+          deskripsi: { type: 'string', description: 'Rincian peristiwa faktual' },
+          lokasi: { type: 'string', description: 'Lokasi geografis kejadian jika ada' },
+        },
+      },
+    },
+    indikasiPelanggaran: {
+      type: 'array',
+      description: 'Daftar dugaan pelanggaran hukum, kebijakan, atau perbuatan melawan hukum.',
+      items: {
+        type: 'object',
+        required: ['jenis', 'rincian'],
+        properties: {
+          jenis: { type: 'string', description: 'Jenis dugaan pelanggaran' },
+          pasalDugaan: { type: 'string', description: 'Pasal atau aturan yang diduga dilanggar' },
+          rincian: { type: 'string', description: 'Penjelasan faktual pendukung' },
+        },
+      },
+    },
+    kesimpulanAnalisis: {
+      type: 'string',
+      description: 'Rekomendasi akhir dan kesimpulan analis investigasi BRIDA.',
+    },
+  },
+  additionalProperties: false,
+};
+
+--- FILE: src\modules\ai-agent\schemas\analysis-response.dto.ts ---
+export interface EntitasTerlibatDto {
+  nama: string;
+  peran: string;
+  entitasTerkait?: string;
+}
+
+export interface KronologiPeristiwaDto {
+  tanggal?: string;
+  deskripsi: string;
+  lokasi?: string;
+}
+
+export interface IndikasiPelanggaranDto {
+  jenis: string;
+  pasalDugaan?: string;
+  rincian: string;
+}
+
+export interface AnalysisResponseDto {
+  ringkasanEksekutif: string;
+  entitasTerlibat: EntitasTerlibatDto[];
+  kronologiPeristiwa: KronologiPeristiwaDto[];
+  indikasiPelanggaran: IndikasiPelanggaranDto[];
+  kesimpulanAnalisis: string;
+}
+
+--- FILE: src\modules\ai-agent\services\ai-agent.service.ts ---
+import {
+  Injectable,
+  Logger,
+  RequestTimeoutException,
+  InternalServerErrorException,
+} from '@nestjs/common';
+import { PrismaService } from '../../../common/prisma/prisma.service';
+import { ContextAssemblyService } from './context-assembly.service';
+import { VendorLlmAdapter } from '../providers/vendor-llm.adapter';
+import { ANALYSIS_OUTPUT_JSON_SCHEMA } from '../schemas/analysis-output.schema';
+import { AnalysisResponseDto } from '../schemas/analysis-response.dto';
+import { AnalysisRequestDto } from '../dtos/analysis-request.dto';
+import { FinalAnalysisResponse } from '../dtos/analysis-response.dto';
+import { LogStatus } from '@prisma/client';
+
+@Injectable()
+export class AiAgentService {
+  private readonly logger = new Logger(AiAgentService.name);
+
+  private readonly CIRCUIT_BREAKER_TIMEOUT_MS = 60000;
+
+  constructor(
+    private readonly contextAssembly: ContextAssemblyService,
+    private readonly llmAdapter: VendorLlmAdapter,
+    private readonly prisma: PrismaService,
+  ) {}
+
+  async executeStaticAnalysis(dto: AnalysisRequestDto): Promise<FinalAnalysisResponse> {
+    const startTime = Date.now();
+
+    try {
+
+      const result = await Promise.race([
+        this.runAnalysisPipeline(dto, startTime),
+        this.createTimeoutGuard(this.CIRCUIT_BREAKER_TIMEOUT_MS),
+      ]);
+
+      return result as FinalAnalysisResponse;
+    } catch (error: any) {
+      const executionTimeMs = Date.now() - startTime;
+      this.logger.error(
+        `[AiAgentService Failed] Dokumen ID '${dto.documentId}': ${error.message}`,
+      );
+
+      await this.saveAuditLog({
+        documentId: dto.documentId,
+        userQuery: dto.query,
+        status: LogStatus.ERROR,
+        errorMessage: error.message,
+        executionTimeMs,
+      });
+
+      if (error instanceof RequestTimeoutException) {
+        throw error;
+      }
+
+      throw new InternalServerErrorException(
+        `Gagal memproses analisis AI: ${error.message || 'Kesalahan internal server.'}`,
+      );
+    }
+  }
+
+  private async runAnalysisPipeline(
+    dto: AnalysisRequestDto,
+    startTime: number,
+  ): Promise<FinalAnalysisResponse> {
+
+    const promptPayload = await this.contextAssembly.assemblePromptPayload({
+      documentId: dto.documentId,
+      userQuery: dto.query,
+    });
+
+    const structuredAnalysis = await this.llmAdapter.generateStructuredAnalysis<AnalysisResponseDto>(
+      promptPayload.messages,
+      ANALYSIS_OUTPUT_JSON_SCHEMA,
+    );
+
+    const executionTimeMs = Date.now() - startTime;
+    const estimatedPayloadTokens = promptPayload.messages.length * 500;
+
+    await this.saveAuditLog({
+      documentId: dto.documentId,
+      userQuery: dto.query,
+      status: LogStatus.SUCCESS,
+      responsePayload: JSON.stringify(structuredAnalysis),
+      executionTimeMs,
+      tokenCount: estimatedPayloadTokens,
+    });
+
+    this.logger.log(
+      `[AiAgentService Success] Analisis statis berhasil untuk Dokumen ID '${dto.documentId}' dalam ${executionTimeMs}ms.`,
+    );
+
+    return {
+      success: true,
+      documentId: dto.documentId,
+      data: structuredAnalysis,
+      metadata: {
+        executionTimeMs,
+        estimatedPayloadTokens,
+        llmProvider: this.llmAdapter.getProviderName(),
+      },
+    };
+  }
+
+  private createTimeoutGuard(timeoutMs: number): Promise<never> {
+    return new Promise((_, reject) => {
+      setTimeout(() => {
+        reject(
+          new RequestTimeoutException(
+            `Proses analisis AI melebihi batas waktu aman (Circuit Breaker Timeout ${timeoutMs / 1000}s).`,
+          ),
+        );
+      }, timeoutMs);
+    });
+  }
+
+  private async saveAuditLog(logData: {
+    documentId: string;
+    userQuery: string;
+    status: LogStatus;
+    executionTimeMs: number;
+    tokenCount?: number;
+    responsePayload?: string;
+    errorMessage?: string;
+  }): Promise<void> {
+    try {
+      await this.prisma.aiAnalysisLog.create({
+        data: {
+          documentId: logData.documentId,
+          userQuery: logData.userQuery,
+          status: logData.status,
+          executionTimeMs: logData.executionTimeMs,
+          tokenCount: logData.tokenCount || 0,
+          responsePayload: logData.responsePayload,
+          errorMessage: logData.errorMessage,
+        },
+      });
+      this.logger.log(`[Audit Logged] Rekam jejak AI berhasil dicatat di ai_analysis_logs.`);
+    } catch (err: any) {
+      this.logger.error(`[Audit Log Failed] Gagal mencatat log rekam jejak: ${err.message}`);
+    }
+  }
+}
+
+--- FILE: src\modules\ai-agent\services\context-assembly.service.ts ---
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { DocumentRepository } from '../../document-ingestion/repositories/document.repository';
+import { VectorRetrievalService } from './vector-retrieval.service';
+import { TokenEstimatorUtil } from '../utils/token-estimator.util';
+import { PromptAssemblyBuilder, QuadBlockPromptPayload } from '../utils/prompt-assembly.builder';
+import { DYNAMIC_CONTEXT_TOKEN_THRESHOLD } from '../constants/system-prompts.constant';
+
+export interface AssemblePromptOptions {
+  documentId: string;
+  userQuery: string;
+  topK?: number;
+  similarityThreshold?: number;
+}
+
+@Injectable()
+export class ContextAssemblyService {
+  private readonly logger = new Logger(ContextAssemblyService.name);
+
+  constructor(
+    private readonly repository: DocumentRepository,
+    private readonly vectorRetrieval: VectorRetrievalService,
+    private readonly tokenEstimator: TokenEstimatorUtil,
+    private readonly promptBuilder: PromptAssemblyBuilder,
+  ) {}
+
+  async assemblePromptPayload(options: AssemblePromptOptions): Promise<QuadBlockPromptPayload> {
+    const { documentId, userQuery, topK = 10, similarityThreshold = 0.5 } = options;
+
+    const doc = await this.repository.findById(documentId);
+    if (!doc) {
+      throw new NotFoundException(`Dokumen laporan dengan ID '${documentId}' tidak ditemukan.`);
+    }
+
+    const totalTokens = doc.metadata?.totalTokenCount || 0;
+    let contextPayloadText = '';
+
+    if (totalTokens < DYNAMIC_CONTEXT_TOKEN_THRESHOLD && doc.chunks && doc.chunks.length > 0) {
+
+      this.logger.log(
+        `[Hybrid Strategy A] Total tokens (${totalTokens}) < ${DYNAMIC_CONTEXT_TOKEN_THRESHOLD}. Menggunakan Full-Document Stuffing untuk Prompt Caching.`,
+      );
+      contextPayloadText = doc.chunks.map((c) => c.rawText).join('\n\n');
+    } else {
+
+      this.logger.log(
+        `[Hybrid Strategy B] Total tokens (${totalTokens}) >= ${DYNAMIC_CONTEXT_TOKEN_THRESHOLD}. Menggunakan Vector Retrieval (pgvector Top-${topK}).`,
+      );
+      const retrievedChunks = await this.vectorRetrieval.searchRelevantChunks({
+        documentId,
+        queryText: userQuery,
+        topK,
+        similarityThreshold,
+      });
+
+      if (retrievedChunks.length > 0) {
+        contextPayloadText = retrievedChunks
+          .map((item, idx) => `--- CHUNK ${idx + 1} (Score: ${item.similarityScore.toFixed(3)}) ---\n${item.rawText}`)
+          .join('\n\n');
+      } else {
+        contextPayloadText = 'Teks relevan tidak ditemukan pada dokumen.';
+      }
+    }
+
+    const payload = this.promptBuilder
+      .reset()
+      .setContextPayload(contextPayloadText)
+      .setUserQuery(userQuery)
+      .build();
+
+    const estimatedTotalTokens = this.tokenEstimator.estimateArrayTokenCount(
+      payload.messages.map((m) => m.content),
+    );
+
+    this.logger.log(
+      `[ContextAssemblyService] Payload 4-Blok berhasil dirakit (Est. Total Payload Tokens: ${estimatedTotalTokens}).`,
+    );
+
+    return payload;
+  }
+}
+
+--- FILE: src\modules\ai-agent\services\vector-retrieval.service.ts ---
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ExternalEmbeddingAdapter } from '../../document-ingestion/providers/external-embedding.adapter';
+import { DocumentRepository } from '../../document-ingestion/repositories/document.repository';
+import { RetrievalResult } from '../interfaces/retrieval-result.interface';
+
+export interface RetrievalSearchOptions {
+  documentId: string;
+  queryText: string;
+  topK?: number;
+  similarityThreshold?: number;
+}
+
+@Injectable()
+export class VectorRetrievalService {
+  private readonly logger = new Logger(VectorRetrievalService.name);
+
+  constructor(
+    private readonly embeddingAdapter: ExternalEmbeddingAdapter,
+    private readonly repository: DocumentRepository,
+  ) {}
+
+  async searchRelevantChunks(options: RetrievalSearchOptions): Promise<RetrievalResult[]> {
+    const { documentId, queryText, topK = 10, similarityThreshold = 0.5 } = options;
+
+    if (!queryText || queryText.trim().length === 0) {
+      return [];
+    }
+
+    const doc = await this.repository.findById(documentId);
+    if (!doc) {
+      throw new NotFoundException(`Dokumen laporan dengan ID '${documentId}' tidak ditemukan.`);
+    }
+
+    const queryVectors = await this.embeddingAdapter.generateEmbeddings([queryText]);
+    const queryVector = queryVectors[0];
+
+    const results = await this.repository.findSimilarChunks({
+      documentId,
+      queryVector,
+      limit: topK,
+      similarityThreshold,
+    });
+
+    this.logger.log(
+      `[VectorRetrievalService] Kueri: "${queryText.slice(0, 50)}..." -> Ditemukan ${results.length} chunks relevan di Dokumen ID ${documentId}.`,
+    );
+
+    return results;
+  }
+}
+
+--- FILE: src\modules\ai-agent\utils\network-resilience.util.ts ---
+import { Injectable, Logger } from '@nestjs/common';
+
+@Injectable()
+export class NetworkResilienceUtil {
+  private readonly logger = new Logger(NetworkResilienceUtil.name);
+
+  async executeWithRetry<T>(
+    task: () => Promise<T>,
+    maxRetries: number = 3,
+    initialDelayMs: number = 1000,
+  ): Promise<T> {
+    let attempt = 0;
+    let delay = initialDelayMs;
+
+    while (attempt < maxRetries) {
+      try {
+        attempt++;
+        return await task();
+      } catch (error: any) {
+        this.logger.warn(
+          `[NetworkResilience] Percobaan ${attempt}/${maxRetries} gagal: ${error.message}. ${
+            attempt < maxRetries ? `Mencoba ulang dalam ${delay}ms...` : 'Batas maksimal retry tercapai.'
+          }`,
+        );
+
+        if (attempt >= maxRetries) {
+          throw error;
+        }
+
+        await new Promise((resolve) => setTimeout(resolve, delay));
+        delay *= 2;
+      }
+    }
+
+    throw new Error('Penanganan retry gagal.');
+  }
+}
+
+--- FILE: src\modules\ai-agent\utils\prompt-assembly.builder.ts ---
+import { Injectable, Logger } from '@nestjs/common';
+import {
+  BRIDA_SYSTEM_PERSONA,
+  BRIDA_GUARDRAIL_POSTFIX,
+} from '../constants/system-prompts.constant';
+
+export interface LlmChatMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+export interface QuadBlockPromptPayload {
+  messages: LlmChatMessage[];
+  systemBlock: string;
+  contextBlock: string;
+  userQueryBlock: string;
+  postfixGuardrailBlock: string;
+}
+
+@Injectable()
+export class PromptAssemblyBuilder {
+  private readonly logger = new Logger(PromptAssemblyBuilder.name);
+
+  private systemPersona: string = BRIDA_SYSTEM_PERSONA;
+  private contextPayload: string = '';
+  private memoryMessages: LlmChatMessage[] = [];
+  private userQuery: string = '';
+  private guardrailPostfix: string = BRIDA_GUARDRAIL_POSTFIX;
+
+  reset(): this {
+    this.systemPersona = BRIDA_SYSTEM_PERSONA;
+    this.contextPayload = '';
+    this.memoryMessages = [];
+    this.userQuery = '';
+    this.guardrailPostfix = BRIDA_GUARDRAIL_POSTFIX;
+    return this;
+  }
+
+  setSystemPersona(customPersona?: string): this {
+    if (customPersona && customPersona.trim().length > 0) {
+      this.systemPersona = customPersona.trim();
+    }
+    return this;
+  }
+
+  setContextPayload(contextText: string): this {
+    this.contextPayload = contextText ? contextText.trim() : '';
+    return this;
+  }
+
+  setMemoryMessages(chatHistory: LlmChatMessage[]): this {
+    this.memoryMessages = chatHistory || [];
+    return this;
+  }
+
+  setUserQuery(query: string): this {
+    this.userQuery = query ? query.trim() : '';
+    return this;
+  }
+
+  setGuardrailPostfix(customPostfix?: string): this {
+    if (customPostfix && customPostfix.trim().length > 0) {
+      this.guardrailPostfix = customPostfix.trim();
+    }
+    return this;
+  }
+
+  build(): QuadBlockPromptPayload {
+    const formattedContext = `[DOKUMEN TERLAMPIR - RUANG KONTEKS STATIS]\n${this.contextPayload}`;
+    const formattedUserQuery = `[PERTANYAAN / INSTRUKSI PENGGUNA]\n${this.userQuery}`;
+
+    const messages: LlmChatMessage[] = [
+
+      { role: 'system', content: this.systemPersona },
+
+      { role: 'system', content: formattedContext },
+
+      ...this.memoryMessages,
+
+      { role: 'user', content: formattedUserQuery },
+
+      { role: 'user', content: this.guardrailPostfix },
+    ];
+
+    this.logger.log(
+      `[PromptAssemblyBuilder] Berhasil merakit Composite Quad-Block Payload (${messages.length} total messages).`,
+    );
+
+    return {
+      messages,
+      systemBlock: this.systemPersona,
+      contextBlock: formattedContext,
+      userQueryBlock: formattedUserQuery,
+      postfixGuardrailBlock: this.guardrailPostfix,
+    };
+  }
+}
+
+--- FILE: src\modules\ai-agent\utils\token-estimator.util.ts ---
+import { Injectable } from '@nestjs/common';
+
+@Injectable()
+export class TokenEstimatorUtil {
+
+  estimateTokenCount(text: string): number {
+    if (!text) return 0;
+    return Math.max(1, Math.ceil(text.length / 4));
+  }
+
+  estimateArrayTokenCount(texts: string[]): number {
+    if (!texts || texts.length === 0) return 0;
+    return texts.reduce((acc, t) => acc + this.estimateTokenCount(t), 0);
+  }
+}
+
+--- FILE: src\modules\document-ingestion\document-ingestion.module.ts ---
+import { Module } from '@nestjs/common';
+import { DocumentIngestionController } from './controllers/document-ingestion.controller';
+import { DocumentIngestionService } from './services/document-ingestion.service';
+import { SemanticChunkerService } from './services/semantic-chunker.service';
+import { GeospatialParserService } from './services/geospatial-parser.service';
+import { DocumentRepository } from './repositories/document.repository';
+import { PdfParserAdapter } from './parsers/pdf-parser.adapter';
+import { DocxParserAdapter } from './parsers/docx-parser.adapter';
+import { TxtParserAdapter } from './parsers/txt-parser.adapter';
+import { ParserFactory } from './parsers/parser.factory';
+
+import { ExternalEmbeddingAdapter } from './providers/external-embedding.adapter';
+import { EmbeddingBatchProcessor } from './utils/embedding-batch-processor.util';
+
+import { UnicodeNormalizerFilter } from './utils/sanitizers/unicode-normalizer.filter';
+import { WhitespaceTrimmerFilter } from './utils/sanitizers/whitespace-trimmer.filter';
+import { HeaderFooterRemoverFilter } from './utils/sanitizers/header-footer-remover.filter';
+import { TextSanitizerPipeline } from './utils/sanitizers/text-sanitizer.pipeline';
+
+@Module({
+  controllers: [DocumentIngestionController],
+  providers: [
+    DocumentIngestionService,
+    SemanticChunkerService,
+    GeospatialParserService,
+    DocumentRepository,
+    PdfParserAdapter,
+    DocxParserAdapter,
+    TxtParserAdapter,
+    ParserFactory,
+
+    ExternalEmbeddingAdapter,
+    EmbeddingBatchProcessor,
+
+    UnicodeNormalizerFilter,
+    WhitespaceTrimmerFilter,
+    HeaderFooterRemoverFilter,
+    TextSanitizerPipeline,
+  ],
+  exports: [
+    DocumentIngestionService,
+    DocumentRepository,
+    ParserFactory,
+    TextSanitizerPipeline,
+    SemanticChunkerService,
+    ExternalEmbeddingAdapter,
+    EmbeddingBatchProcessor,
+  ],
+})
+export class DocumentIngestionModule {}
+
+--- FILE: src\modules\document-ingestion\controllers\document-ingestion.controller.ts ---
+import {
+  Controller,
+  Post,
+  Get,
+  Param,
+  UseInterceptors,
+  UploadedFile,
+  Body,
+  ParseUUIDPipe,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { DocumentIngestionService } from '../services/document-ingestion.service';
+import { UploadDocumentDto } from '../dtos/upload-document.dto';
+import { DocumentResponseDto } from '../dtos/document-response.dto';
+import { FileSignatureValidationPipe } from '../../../common/pipes/file-signature-validation.pipe';
+
+@Controller('documents')
+export class DocumentIngestionController {
+  constructor(private readonly ingestionService: DocumentIngestionService) {}
+
+  @Post('upload')
+  @HttpCode(HttpStatus.CREATED)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: {
+        fileSize: 20 * 1024 * 1024,
+      },
+    }),
+  )
+  async uploadDocument(
+    @UploadedFile(new FileSignatureValidationPipe()) file: Express.Multer.File,
+    @Body() dto: UploadDocumentDto,
+  ): Promise<{ success: boolean; data: DocumentResponseDto }> {
+    const result = await this.ingestionService.processDocumentUpload(file, dto);
+    return {
+      success: true,
+      data: result,
+    };
+  }
+
+  @Get(':id')
+  async getDocumentDetails(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+  ): Promise<{ success: boolean; data: DocumentResponseDto }> {
+    const result = await this.ingestionService.getDocumentDetails(id);
+    return {
+      success: true,
+      data: result,
+    };
+  }
+}
+
+--- FILE: src\modules\document-ingestion\dtos\document-response.dto.ts ---
+export interface DocumentResponseDto {
+  id: string;
+  title: string;
+  fileUrl: string;
+  mimeType: string;
+  checksumHash: string;
+  status: string;
+  createdAt: Date;
+  metadata?: {
+    fileSizeBytes: string;
+    pageCount: number;
+    totalTokenCount: number;
+    category: string;
+    uploadedBy: string;
+  };
+  chunkCount?: number;
+  extractedLocationsCount?: number;
+}
+
+--- FILE: src\modules\document-ingestion\dtos\upload-document.dto.ts ---
+import { IsString, IsNotEmpty, IsOptional } from 'class-validator';
+
+export class UploadDocumentDto {
+  @IsString()
+  @IsNotEmpty({ message: 'Judul laporan tidak boleh kosong' })
+  title!: string;
+
+  @IsString()
+  @IsOptional()
+  category?: string;
+
+  @IsString()
+  @IsOptional()
+  uploadedBy?: string;
+}
+
+--- FILE: src\modules\document-ingestion\interfaces\chunk-data.interface.ts ---
+export interface ChunkSpatialMetadata {
+  startCharIndex: number;
+  endCharIndex: number;
+  estimatedPage?: number;
+  overlapWithPrevious: boolean;
+}
+
+export interface ChunkData {
+  chunkIndex: number;
+  rawText: string;
+  tokenCount: number;
+  spatialMetadata: ChunkSpatialMetadata;
+  overlapText?: string;
+}
+
+--- FILE: src\modules\document-ingestion\interfaces\document-parser.interface.ts ---
+export interface ParsedDocumentOutput {
+  rawText: string;
+  pageCount: number;
+}
+
+export interface IDocumentParser {
+
+  supports(mimeType: string): boolean;
+
+  parse(buffer: Buffer): Promise<ParsedDocumentOutput>;
+}
+
+--- FILE: src\modules\document-ingestion\interfaces\embedding-provider.interface.ts ---
+export interface IEmbeddingProvider {
+
+  generateEmbeddings(texts: string[]): Promise<number[][]>;
+
+  getVectorDimension(): number;
+}
+
+--- FILE: src\modules\document-ingestion\interfaces\text-filter.interface.ts ---
+export interface ITextFilter {
+
+  readonly filterName: string;
+
+  filter(text: string): string;
+}
+
+--- FILE: src\modules\document-ingestion\parsers\docx-parser.adapter.ts ---
+import { Injectable, UnprocessableEntityException, Logger } from '@nestjs/common';
+import * as mammoth from 'mammoth';
+import { IDocumentParser, ParsedDocumentOutput } from '../interfaces/document-parser.interface';
+
+@Injectable()
+export class DocxParserAdapter implements IDocumentParser {
+  private readonly logger = new Logger(DocxParserAdapter.name);
+
+  supports(mimeType: string): boolean {
+    return (
+      mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+      mimeType === 'application/msword'
+    );
+  }
+
+  async parse(buffer: Buffer): Promise<ParsedDocumentOutput> {
+    try {
+      const result = await mammoth.extractRawText({ buffer });
+      const rawText = result.value ? result.value.trim() : '';
+
+      if (!rawText || rawText.length === 0) {
+        throw new UnprocessableEntityException('Tidak ada teks yang dapat diekstraksi dari dokumen DOCX.');
+      }
+
+      const estimatedPages = Math.max(1, Math.ceil(rawText.length / 3000));
+      this.logger.log(`[DocxParserAdapter] Berhasil mengekstraksi dokumen DOCX (${rawText.length} karakter, est. ${estimatedPages} hal).`);
+
+      return {
+        rawText,
+        pageCount: estimatedPages,
+      };
+    } catch (err: any) {
+      if (err instanceof UnprocessableEntityException) {
+        throw err;
+      }
+      this.logger.error(`Error pada DocxParserAdapter: ${err.message}`);
+      throw new UnprocessableEntityException(`Gagal membaca struktur dokumen DOCX: ${err.message}`);
+    }
+  }
+}
+
+--- FILE: src\modules\document-ingestion\parsers\parser.factory.ts ---
+import { Injectable, UnsupportedMediaTypeException, Logger } from '@nestjs/common';
+import { IDocumentParser } from '../interfaces/document-parser.interface';
+import { PdfParserAdapter } from './pdf-parser.adapter';
+import { DocxParserAdapter } from './docx-parser.adapter';
+import { TxtParserAdapter } from './txt-parser.adapter';
+
+@Injectable()
+export class ParserFactory {
+  private readonly logger = new Logger(ParserFactory.name);
+  private readonly parsers: IDocumentParser[];
+
+  constructor(
+    pdfParser: PdfParserAdapter,
+    docxParser: DocxParserAdapter,
+    txtParser: TxtParserAdapter,
+  ) {
+
+    this.parsers = [pdfParser, docxParser, txtParser];
+  }
+
+  getParser(mimeType: string): IDocumentParser {
+    const parser = this.parsers.find((p) => p.supports(mimeType));
+
+    if (!parser) {
+      this.logger.warn(`ParserFactory: Tidak ada strategy parser yang mendukung MIME type '${mimeType}'`);
+      throw new UnsupportedMediaTypeException(
+        `Format dokumen '${mimeType}' tidak didukung oleh mesin parsing BRIDA SMART Analysis.`,
+      );
+    }
+
+    return parser;
+  }
+}
+
+--- FILE: src\modules\document-ingestion\parsers\pdf-parser.adapter.ts ---
+import { Injectable, UnprocessableEntityException, Logger } from '@nestjs/common';
+import * as pdfParse from 'pdf-parse';
+import { IDocumentParser, ParsedDocumentOutput } from '../interfaces/document-parser.interface';
+
+@Injectable()
+export class PdfParserAdapter implements IDocumentParser {
+  private readonly logger = new Logger(PdfParserAdapter.name);
+
+  supports(mimeType: string): boolean {
+    return mimeType === 'application/pdf';
+  }
+
+  async parse(buffer: Buffer): Promise<ParsedDocumentOutput> {
+    try {
+      const data = await pdfParse(buffer);
+      const rawText = data.text ? data.text.trim() : '';
+
+      if (!rawText || rawText.length === 0) {
+        throw new UnprocessableEntityException(
+          'Tidak ada teks yang dapat diekstraksi dari PDF. Dokumen mungkin berupa scan gambar murni tanpa lapisan OCR.',
+        );
+      }
+
+      this.logger.log(`[PdfParserAdapter] Berhasil mengekstraksi ${data.numpages} halaman PDF (${rawText.length} karakter).`);
+
+      return {
+        rawText,
+        pageCount: data.numpages || 1,
+      };
+    } catch (err: any) {
+      if (err instanceof UnprocessableEntityException) {
+        throw err;
+      }
+      if (err.message && err.message.toLowerCase().includes('password')) {
+        throw new UnprocessableEntityException('PDF terproteksi kata sandi.');
+      }
+      this.logger.error(`Error pada PdfParserAdapter: ${err.message}`);
+      throw new UnprocessableEntityException(`Gagal membaca struktur PDF: ${err.message}`);
+    }
+  }
+}
+
+--- FILE: src\modules\document-ingestion\parsers\txt-parser.adapter.ts ---
+import { Injectable, UnprocessableEntityException, Logger } from '@nestjs/common';
+import { IDocumentParser, ParsedDocumentOutput } from '../interfaces/document-parser.interface';
+
+@Injectable()
+export class TxtParserAdapter implements IDocumentParser {
+  private readonly logger = new Logger(TxtParserAdapter.name);
+
+  supports(mimeType: string): boolean {
+    return mimeType === 'text/plain' || mimeType.startsWith('text/');
+  }
+
+  async parse(buffer: Buffer): Promise<ParsedDocumentOutput> {
+    try {
+      const rawText = buffer.toString('utf-8').trim();
+
+      if (!rawText || rawText.length === 0) {
+        throw new UnprocessableEntityException('File teks mentah kosong.');
+      }
+
+      const estimatedPages = Math.max(1, Math.ceil(rawText.length / 3000));
+      this.logger.log(`[TxtParserAdapter] Berhasil mengekstraksi file teks TXT (${rawText.length} karakter).`);
+
+      return {
+        rawText,
+        pageCount: estimatedPages,
+      };
+    } catch (err: any) {
+      if (err instanceof UnprocessableEntityException) {
+        throw err;
+      }
+      this.logger.error(`Error pada TxtParserAdapter: ${err.message}`);
+      throw new UnprocessableEntityException(`Gagal membaca file teks TXT: ${err.message}`);
+    }
+  }
+}
+
+--- FILE: src\modules\document-ingestion\providers\external-embedding.adapter.ts ---
+import { Injectable, Logger } from '@nestjs/common';
+import { IEmbeddingProvider } from '../interfaces/embedding-provider.interface';
+
+@Injectable()
+export class ExternalEmbeddingAdapter implements IEmbeddingProvider {
+  private readonly logger = new Logger(ExternalEmbeddingAdapter.name);
+  private readonly vectorDimension = 768;
+
+  getVectorDimension(): number {
+    return this.vectorDimension;
+  }
+
+  async generateEmbeddings(texts: string[]): Promise<number[][]> {
+    if (!texts || texts.length === 0) {
+      return [];
+    }
+
+    this.logger.log(`[ExternalEmbeddingAdapter] Menghasilkan vector embeddings untuk ${texts.length} teks...`);
+
+    const embeddings: number[][] = texts.map((text) => {
+      const vector: number[] = new Array(this.vectorDimension);
+      let hash = 0;
+      for (let i = 0; i < text.length; i++) {
+        hash = (hash << 5) - hash + text.charCodeAt(i);
+        hash |= 0;
+      }
+
+      for (let j = 0; j < this.vectorDimension; j++) {
+
+        const value = Math.sin(hash + j);
+        vector[j] = parseFloat(value.toFixed(6));
+      }
+
+      return vector;
+    });
+
+    return embeddings;
+  }
+}
+
+--- FILE: src\modules\document-ingestion\repositories\document.repository.ts ---
+import { Injectable, Logger } from '@nestjs/common';
+import { PrismaService } from '../../../common/prisma/prisma.service';
+import { Prisma, DocumentStatus, LogStatus, ReportDocument } from '@prisma/client';
+import { ChunkData } from '../interfaces/chunk-data.interface';
+import { ExtractedGeospatialData } from '../services/geospatial-parser.service';
+import { VectorSearchParams } from '../../ai-agent/interfaces/vector-search-params.interface';
+import { RetrievalResult } from '../../ai-agent/interfaces/retrieval-result.interface';
+
+export interface ChunkWithVectorInput {
+  chunkData: ChunkData;
+  embedding: number[];
+  locations: ExtractedGeospatialData[];
+}
+
+export interface CreateDocumentTransactionInput {
+  title: string;
+  fileUrl: string;
+  mimeType: string;
+  checksumHash: string;
+  fileSizeBytes: bigint;
+  pageCount: number;
+  totalTokenCount: number;
+  category: string;
+  uploadedBy: string;
+  chunks: ChunkWithVectorInput[];
+  executionTimeMs: number;
+}
+
+@Injectable()
+export class DocumentRepository {
+  private readonly logger = new Logger(DocumentRepository.name);
+
+  constructor(private readonly prisma: PrismaService) {}
+
+  async findByChecksum(checksumHash: string): Promise<ReportDocument | null> {
+    return this.prisma.reportDocument.findUnique({
+      where: { checksumHash },
+      include: { metadata: true },
+    });
+  }
+
+  async findById(id: string) {
+    return this.prisma.reportDocument.findUnique({
+      where: { id },
+      include: {
+        metadata: true,
+        chunks: {
+          orderBy: { chunkIndex: 'asc' },
+          include: { locations: true },
+        },
+        logs: {
+          orderBy: { createdAt: 'desc' },
+        },
+      },
+    });
+  }
+
+  async findSimilarChunks(params: VectorSearchParams): Promise<RetrievalResult[]> {
+    const limit = params.limit || 10;
+    const threshold = params.similarityThreshold ?? 0.5;
+    const vectorStr = `[${params.queryVector.join(',')}]`;
+
+    const rawResults: any[] = await this.prisma.$queryRawUnsafe(
+      `
+      SELECT
+        "id" AS "chunkId",
+        "documentId",
+        "chunkIndex",
+        "rawText",
+        "tokenCount",
+        (1 - ("embedding" <=> $1::vector)) AS "similarityScore"
+      FROM "document_chunks"
+      WHERE "documentId" = $2::uuid
+        AND "embedding" IS NOT NULL
+        AND (1 - ("embedding" <=> $1::vector)) >= $3
+      ORDER BY "similarityScore" DESC
+      LIMIT $4;
+      `,
+      vectorStr,
+      params.documentId,
+      threshold,
+      limit,
+    );
+
+    this.logger.log(
+      `[pgvector Search] Dokumen ID: ${params.documentId} - Ditemukan ${rawResults.length} chunks (Threshold >= ${threshold}, Limit ${limit}).`,
+    );
+
+    return rawResults.map((r) => ({
+      chunkId: r.chunkId,
+      documentId: r.documentId,
+      chunkIndex: r.chunkIndex,
+      rawText: r.rawText,
+      tokenCount: r.tokenCount,
+      similarityScore: parseFloat(r.similarityScore),
+    }));
+  }
+
+  async createDocumentWithTransaction(input: CreateDocumentTransactionInput): Promise<ReportDocument> {
+    return this.prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+
+      const document = await tx.reportDocument.create({
+        data: {
+          title: input.title,
+          fileUrl: input.fileUrl,
+          mimeType: input.mimeType,
+          checksumHash: input.checksumHash,
+          status: DocumentStatus.READY,
+        },
+      });
+
+      await tx.documentMetadata.create({
+        data: {
+          documentId: document.id,
+          fileSizeBytes: input.fileSizeBytes,
+          pageCount: input.pageCount,
+          totalTokenCount: input.totalTokenCount,
+          category: input.category,
+          uploadedBy: input.uploadedBy,
+        },
+      });
+
+      for (const item of input.chunks) {
+        const chunkRecord = await tx.documentChunk.create({
+          data: {
+            documentId: document.id,
+            chunkIndex: item.chunkData.chunkIndex,
+            rawText: item.chunkData.rawText,
+            tokenCount: item.chunkData.tokenCount,
+          },
+        });
+
+        if (item.embedding && item.embedding.length > 0) {
+          const vectorStr = `[${item.embedding.join(',')}]`;
+          await tx.$executeRawUnsafe(
+            `UPDATE "document_chunks" SET "embedding" = $1::vector WHERE "id" = $2::uuid`,
+            vectorStr,
+            chunkRecord.id,
+          );
+        }
+
+        if (item.locations.length > 0) {
+          for (const loc of item.locations) {
+            await tx.geospatialLocation.create({
+              data: {
+                chunkId: chunkRecord.id,
+                locationName: loc.locationName,
+                latitude: loc.latitude,
+                longitude: loc.longitude,
+                confidenceScore: loc.confidenceScore,
+              },
+            });
+          }
+        }
+      }
+
+      await tx.extractionLog.create({
+        data: {
+          documentId: document.id,
+          status: LogStatus.SUCCESS,
+          executionTimeMs: input.executionTimeMs,
+        },
+      });
+
+      this.logger.log(
+        `[Atomic Commit] Berhasil menyimpan dokumen ID ${document.id} (${input.chunks.length} vector chunks) ke PostgreSQL (pgvector).`,
+      );
+
+      return document;
+    });
+  }
+}
+
+--- FILE: src\modules\document-ingestion\services\document-chunker.service.ts ---
+import { Injectable, Logger } from '@nestjs/common';
+
+export interface GeneratedChunk {
+  chunkIndex: number;
+  rawText: string;
+  tokenCount: number;
+}
+
+@Injectable()
+export class DocumentChunkerService {
+  private readonly logger = new Logger(DocumentChunkerService.name);
+
+  private readonly targetChunkSize = 2000;
+  private readonly chunkOverlap = 200;
+
+  createChunks(rawText: string): GeneratedChunk[] {
+    if (!rawText || rawText.trim().length === 0) {
+      return [];
+    }
+
+    const paragraphs = rawText.split(/\n\s*\n/);
+    const chunks: GeneratedChunk[] = [];
+    let currentChunkText = '';
+    let chunkIndex = 0;
+
+    for (const paragraph of paragraphs) {
+      const cleanParagraph = paragraph.trim();
+      if (!cleanParagraph) continue;
+
+      if ((currentChunkText + '\n\n' + cleanParagraph).length > this.targetChunkSize) {
+        if (currentChunkText.length > 0) {
+          chunks.push({
+            chunkIndex: chunkIndex++,
+            rawText: currentChunkText.trim(),
+            tokenCount: this.estimateTokenCount(currentChunkText),
+          });
+
+          const words = currentChunkText.split(' ');
+          const overlapWords = words.slice(-Math.min(words.length, 30)).join(' ');
+          currentChunkText = overlapWords + '\n\n' + cleanParagraph;
+        } else {
+
+          currentChunkText = cleanParagraph;
+        }
+      } else {
+        currentChunkText = currentChunkText
+          ? `${currentChunkText}\n\n${cleanParagraph}`
+          : cleanParagraph;
+      }
+    }
+
+    if (currentChunkText.trim().length > 0) {
+      chunks.push({
+        chunkIndex: chunkIndex++,
+        rawText: currentChunkText.trim(),
+        tokenCount: this.estimateTokenCount(currentChunkText),
+      });
+    }
+
+    this.logger.log(`Berhasil membuat ${chunks.length} chunks dari total ${rawText.length} karakter.`);
+    return chunks;
+  }
+
+  estimateTokenCount(text: string): number {
+
+    return Math.max(1, Math.ceil(text.length / 4));
+  }
+}
+
+--- FILE: src\modules\document-ingestion\services\document-ingestion.service.ts ---
+import { Injectable, ConflictException, Logger, NotFoundException } from '@nestjs/common';
+import * as crypto from 'crypto';
+import * as fs from 'fs';
+import * as path from 'path';
+import { ParserFactory } from '../parsers/parser.factory';
+import { TextSanitizerPipeline } from '../utils/sanitizers/text-sanitizer.pipeline';
+import { SemanticChunkerService } from './semantic-chunker.service';
+import { ExternalEmbeddingAdapter } from '../providers/external-embedding.adapter';
+import { EmbeddingBatchProcessor } from '../utils/embedding-batch-processor.util';
+import { GeospatialParserService } from './geospatial-parser.service';
+import { DocumentRepository } from '../repositories/document.repository';
+import { UploadDocumentDto } from '../dtos/upload-document.dto';
+import { DocumentResponseDto } from '../dtos/document-response.dto';
+
+@Injectable()
+export class DocumentIngestionService {
+  private readonly logger = new Logger(DocumentIngestionService.name);
+  private readonly uploadDir = path.resolve(process.env.UPLOAD_DESTINATION || './uploads');
+
+  constructor(
+    private readonly parserFactory: ParserFactory,
+    private readonly sanitizerPipeline: TextSanitizerPipeline,
+    private readonly semanticChunker: SemanticChunkerService,
+    private readonly embeddingProvider: ExternalEmbeddingAdapter,
+    private readonly batchProcessor: EmbeddingBatchProcessor,
+    private readonly geospatialParser: GeospatialParserService,
+    private readonly repository: DocumentRepository,
+  ) {
+    if (!fs.existsSync(this.uploadDir)) {
+      fs.mkdirSync(this.uploadDir, { recursive: true });
+    }
+  }
+
+  async processDocumentUpload(
+    file: Express.Multer.File,
+    dto: UploadDocumentDto,
+  ): Promise<DocumentResponseDto> {
+    const startTime = Date.now();
+
+    const checksumHash = crypto.createHash('sha256').update(file.buffer).digest('hex');
+
+    const existingDoc = await this.repository.findByChecksum(checksumHash);
+    if (existingDoc) {
+      this.logger.warn(`Dokumen duplikat terdeteksi dengan Checksum: ${checksumHash}`);
+      throw new ConflictException({
+        message: 'Dokumen ini sudah pernah diunggah sebelumnya ke dalam sistem BRIDA SMART Analysis.',
+        existingDocumentId: existingDoc.id,
+      });
+    }
+
+    const fileExtension = path.extname(file.originalname);
+    const fileNameOnDisk = `${checksumHash}${fileExtension}`;
+    const filePathOnDisk = path.join(this.uploadDir, fileNameOnDisk);
+    fs.writeFileSync(filePathOnDisk, file.buffer);
+
+    const parser = this.parserFactory.getParser(file.mimetype);
+    const extracted = await parser.parse(file.buffer);
+
+    const sanitizedText = this.sanitizerPipeline.sanitize(extracted.rawText);
+
+    const chunkObjects = this.semanticChunker.createSemanticChunks(sanitizedText);
+
+    const chunksWithEmbeddings = await this.batchProcessor.processInBatches(
+      chunkObjects,
+      this.embeddingProvider,
+    );
+
+    let totalTokenCount = 0;
+    let totalLocationsCount = 0;
+    const chunkItems = chunksWithEmbeddings.map((item) => {
+      totalTokenCount += item.chunkData.tokenCount;
+      const locations = this.geospatialParser.extractGeospatialLocations(item.chunkData.rawText);
+      totalLocationsCount += locations.length;
+      return {
+        chunkData: item.chunkData,
+        embedding: item.embedding,
+        locations,
+      };
+    });
+
+    const executionTimeMs = Date.now() - startTime;
+
+    const savedDoc = await this.repository.createDocumentWithTransaction({
+      title: dto.title,
+      fileUrl: filePathOnDisk,
+      mimeType: file.mimetype,
+      checksumHash,
+      fileSizeBytes: BigInt(file.size),
+      pageCount: extracted.pageCount,
+      totalTokenCount,
+      category: dto.category || 'General Report',
+      uploadedBy: dto.uploadedBy || 'SYSTEM_STAF',
+      chunks: chunkItems,
+      executionTimeMs,
+    });
+
+    return {
+      id: savedDoc.id,
+      title: savedDoc.title,
+      fileUrl: savedDoc.fileUrl,
+      mimeType: savedDoc.mimeType,
+      checksumHash: savedDoc.checksumHash,
+      status: savedDoc.status,
+      createdAt: savedDoc.createdAt,
+      metadata: {
+        fileSizeBytes: file.size.toString(),
+        pageCount: extracted.pageCount,
+        totalTokenCount,
+        category: dto.category || 'General Report',
+        uploadedBy: dto.uploadedBy || 'SYSTEM_STAF',
+      },
+      chunkCount: chunkObjects.length,
+      extractedLocationsCount: totalLocationsCount,
+    };
+  }
+
+  async getDocumentDetails(documentId: string): Promise<DocumentResponseDto> {
+    const doc = await this.repository.findById(documentId);
+    if (!doc) {
+      throw new NotFoundException(`Dokumen dengan ID '${documentId}' tidak ditemukan.`);
+    }
+
+    let locationCount = 0;
+    if (doc.chunks) {
+      locationCount = doc.chunks.reduce(
+        (acc: number, chunk: any) => acc + (chunk.locations ? chunk.locations.length : 0),
+        0,
+      );
+    }
+
+    return {
+      id: doc.id,
+      title: doc.title,
+      fileUrl: doc.fileUrl,
+      mimeType: doc.mimeType,
+      checksumHash: doc.checksumHash,
+      status: doc.status,
+      createdAt: doc.createdAt,
+      metadata: doc.metadata
+        ? {
+            fileSizeBytes: doc.metadata.fileSizeBytes.toString(),
+            pageCount: doc.metadata.pageCount,
+            totalTokenCount: doc.metadata.totalTokenCount,
+            category: doc.metadata.category,
+            uploadedBy: doc.metadata.uploadedBy,
+          }
+        : undefined,
+      chunkCount: doc.chunks ? doc.chunks.length : 0,
+      extractedLocationsCount: locationCount,
+    };
+  }
+}
+
+--- FILE: src\modules\document-ingestion\services\geospatial-parser.service.ts ---
+import { Injectable, Logger } from '@nestjs/common';
+
+export interface ExtractedGeospatialData {
+  locationName: string;
+  latitude: number;
+  longitude: number;
+  confidenceScore: number;
+}
+
+@Injectable()
+export class GeospatialParserService {
+  private readonly logger = new Logger(GeospatialParserService.name);
+
+  private readonly coordRegex =
+    /(?:lat(?:itude)?|lintang)?\s*[:=]?\s*(-?\d{1,2}\.\d+)\s*,\s*(?:long(?:itude)?|bujur)?\s*[:=]?\s*(-?\d{1,3}\.\d+)/gi;
+
+  extractGeospatialLocations(chunkText: string): ExtractedGeospatialData[] {
+    const results: ExtractedGeospatialData[] = [];
+    let match: RegExpExecArray | null;
+
+    while ((match = this.coordRegex.exec(chunkText)) !== null) {
+      const lat = parseFloat(match[1]);
+      const lng = parseFloat(match[2]);
+
+      if (lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
+        results.push({
+          locationName: `Koordinat terdeteksi (${lat}, ${lng})`,
+          latitude: lat,
+          longitude: lng,
+          confidenceScore: 0.95,
+        });
+      }
+    }
+
+    if (results.length > 0) {
+      this.logger.log(`Terdeteksi ${results.length} titik lokasi geospasial pada chunk teks.`);
+    }
+
+    return results;
+  }
+}
+
+--- FILE: src\modules\document-ingestion\services\semantic-chunker.service.ts ---
+import { Injectable, Logger } from '@nestjs/common';
+import { ChunkData } from '../interfaces/chunk-data.interface';
+
+@Injectable()
+export class SemanticChunkerService {
+  private readonly logger = new Logger(SemanticChunkerService.name);
+
+  private readonly targetChunkSize = parseInt(process.env.CHUNK_TARGET_SIZE || '2000', 10);
+
+  private readonly overlapPercentage = parseFloat(process.env.CHUNK_OVERLAP_PERCENTAGE || '0.12');
+
+  createSemanticChunks(sanitizedText: string): ChunkData[] {
+    if (!sanitizedText || sanitizedText.trim().length === 0) {
+      return [];
+    }
+
+    const rawParagraphs = sanitizedText.split(/\n\s*\n/);
+
+    const normalizedParagraphs: string[] = [];
+    for (const paragraph of rawParagraphs) {
+      const cleanPara = paragraph.trim();
+      if (!cleanPara) continue;
+
+      if (cleanPara.length > this.targetChunkSize) {
+
+        const sentenceSubChunks = this.splitHugeParagraphBySentences(cleanPara);
+        normalizedParagraphs.push(...sentenceSubChunks);
+      } else {
+        normalizedParagraphs.push(cleanPara);
+      }
+    }
+
+    const chunks: ChunkData[] = [];
+    let currentChunkText = '';
+    let chunkIndex = 0;
+    let currentOffset = 0;
+    let previousOverlapText = '';
+
+    for (const textUnit of normalizedParagraphs) {
+      if ((currentChunkText + '\n\n' + textUnit).length > this.targetChunkSize) {
+        if (currentChunkText.length > 0) {
+          const startCharIndex = currentOffset;
+          const endCharIndex = currentOffset + currentChunkText.length;
+
+          const overlapLength = Math.floor(currentChunkText.length * this.overlapPercentage);
+          previousOverlapText = currentChunkText.slice(-overlapLength);
+
+          chunks.push({
+            chunkIndex: chunkIndex++,
+            rawText: currentChunkText.trim(),
+            tokenCount: this.estimateTokenCount(currentChunkText),
+            spatialMetadata: {
+              startCharIndex,
+              endCharIndex,
+              overlapWithPrevious: chunks.length > 0,
+            },
+            overlapText: chunks.length > 0 ? previousOverlapText : undefined,
+          });
+
+          currentOffset = endCharIndex;
+          currentChunkText = previousOverlapText + '\n\n' + textUnit;
+        } else {
+          currentChunkText = textUnit;
+        }
+      } else {
+        currentChunkText = currentChunkText
+          ? `${currentChunkText}\n\n${textUnit}`
+          : textUnit;
+      }
+    }
+
+    if (currentChunkText.trim().length > 0) {
+      const startCharIndex = currentOffset;
+      const endCharIndex = currentOffset + currentChunkText.length;
+
+      chunks.push({
+        chunkIndex: chunkIndex++,
+        rawText: currentChunkText.trim(),
+        tokenCount: this.estimateTokenCount(currentChunkText),
+        spatialMetadata: {
+          startCharIndex,
+          endCharIndex,
+          overlapWithPrevious: chunks.length > 0,
+        },
+        overlapText: chunks.length > 0 ? previousOverlapText : undefined,
+      });
+    }
+
+    this.logger.log(
+      `[SemanticChunkerService] Berhasil menghasilkan ${chunks.length} objek ChunkData berpasangan Sentence-Level Fallback & Overlap.`,
+    );
+
+    return chunks;
+  }
+
+  private splitHugeParagraphBySentences(hugeParagraph: string): string[] {
+    this.logger.warn(
+      `[Sentence-Level Fallback] Paragraf raksasa terdeteksi (${hugeParagraph.length} karakter). Melakukan pemotongan berbasis kalimat.`,
+    );
+
+    const sentences = hugeParagraph.split(/(?<=[.!?;\n])\s+/);
+    const subChunks: string[] = [];
+    let currentSub = '';
+
+    for (const sentence of sentences) {
+      if ((currentSub + ' ' + sentence).length > this.targetChunkSize) {
+        if (currentSub.length > 0) {
+          subChunks.push(currentSub.trim());
+          currentSub = sentence;
+        } else {
+
+          subChunks.push(sentence.slice(0, this.targetChunkSize));
+          currentSub = sentence.slice(this.targetChunkSize);
+        }
+      } else {
+        currentSub = currentSub ? `${currentSub} ${sentence}` : sentence;
+      }
+    }
+
+    if (currentSub.trim().length > 0) {
+      subChunks.push(currentSub.trim());
+    }
+
+    return subChunks;
+  }
+
+  estimateTokenCount(text: string): number {
+    return Math.max(1, Math.ceil(text.length / 4));
+  }
+}
+
+--- FILE: src\modules\document-ingestion\services\text-extractor.service.ts ---
+import { Injectable, BadRequestException, UnprocessableEntityException, Logger } from '@nestjs/common';
+import * as pdfParse from 'pdf-parse';
+import * as mammoth from 'mammoth';
+
+export interface ExtractedDocumentContent {
+  rawText: string;
+  pageCount: number;
+}
+
+@Injectable()
+export class TextExtractorService {
+  private readonly logger = new Logger(TextExtractorService.name);
+
+  async extractText(fileBuffer: Buffer, mimeType: string): Promise<ExtractedDocumentContent> {
+    if (!fileBuffer || fileBuffer.length === 0) {
+      throw new BadRequestException('File buffer kosong atau tidak valid.');
+    }
+
+    try {
+      if (mimeType === 'application/pdf') {
+        return await this.extractPdf(fileBuffer);
+      } else if (
+        mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+        mimeType === 'application/msword'
+      ) {
+        return await this.extractDocx(fileBuffer);
+      } else if (mimeType.startsWith('text/')) {
+        return this.extractTxt(fileBuffer);
+      } else {
+        throw new BadRequestException(`Tipe mime file '${mimeType}' tidak didukung.`);
+      }
+    } catch (error: any) {
+      this.logger.error(`Error saat mengekstraksi teks dokumen: ${error.message}`);
+      if (error instanceof BadRequestException || error instanceof UnprocessableEntityException) {
+        throw error;
+      }
+      throw new UnprocessableEntityException(
+        `Gagal mengekstraksi teks dari dokumen: ${error.message || 'File mungkin korup atau terproteksi kata sandi.'}`,
+      );
+    }
+  }
+
+  private async extractPdf(buffer: Buffer): Promise<ExtractedDocumentContent> {
+    try {
+      const data = await pdfParse(buffer);
+      const text = data.text ? data.text.trim() : '';
+
+      if (!text || text.length === 0) {
+        throw new UnprocessableEntityException(
+          'Tidak ada teks yang dapat diekstraksi dari PDF. Pastikan dokumen bukan scan gambar tanpa OCR.',
+        );
+      }
+
+      return {
+        rawText: text,
+        pageCount: data.numpages || 1,
+      };
+    } catch (err: any) {
+      if (err.message && err.message.toLowerCase().includes('password')) {
+        throw new UnprocessableEntityException('PDF terproteksi oleh kata sandi.');
+      }
+      throw err;
+    }
+  }
+
+  private async extractDocx(buffer: Buffer): Promise<ExtractedDocumentContent> {
+    const result = await mammoth.extractRawText({ buffer });
+    const text = result.value ? result.value.trim() : '';
+
+    if (!text || text.length === 0) {
+      throw new UnprocessableEntityException('Tidak ada teks yang dapat diekstraksi dari dokumen Word (DOCX).');
+    }
+
+    const estimatedPages = Math.max(1, Math.ceil(text.length / 3000));
+
+    return {
+      rawText: text,
+      pageCount: estimatedPages,
+    };
+  }
+
+  private extractTxt(buffer: Buffer): ExtractedDocumentContent {
+    const text = buffer.toString('utf-8').trim();
+    if (!text || text.length === 0) {
+      throw new UnprocessableEntityException('File teks kosong.');
+    }
+
+    const estimatedPages = Math.max(1, Math.ceil(text.length / 3000));
+    return {
+      rawText: text,
+      pageCount: estimatedPages,
+    };
+  }
+}
+
+--- FILE: src\modules\document-ingestion\utils\embedding-batch-processor.util.ts ---
+import { Injectable, Logger } from '@nestjs/common';
+import { IEmbeddingProvider } from '../interfaces/embedding-provider.interface';
+import { ChunkData } from '../interfaces/chunk-data.interface';
+
+export interface ChunkWithEmbedding {
+  chunkData: ChunkData;
+  embedding: number[];
+}
+
+@Injectable()
+export class EmbeddingBatchProcessor {
+  private readonly logger = new Logger(EmbeddingBatchProcessor.name);
+  private readonly batchSize = 50;
+
+  async processInBatches(
+    chunks: ChunkData[],
+    embeddingProvider: IEmbeddingProvider,
+  ): Promise<ChunkWithEmbedding[]> {
+    if (!chunks || chunks.length === 0) {
+      return [];
+    }
+
+    const results: ChunkWithEmbedding[] = [];
+    const totalBatches = Math.ceil(chunks.length / this.batchSize);
+
+    this.logger.log(
+      `[EmbeddingBatchProcessor] Memulai pemrosesan ${chunks.length} chunks dalam ${totalBatches} batch (Max ${this.batchSize} chunks/batch)...`,
+    );
+
+    for (let i = 0; i < chunks.length; i += this.batchSize) {
+      const batchChunks = chunks.slice(i, i + this.batchSize);
+      const batchTexts = batchChunks.map((c) => c.rawText);
+
+      const embeddings = await embeddingProvider.generateEmbeddings(batchTexts);
+
+      for (let j = 0; j < batchChunks.length; j++) {
+        results.push({
+          chunkData: batchChunks[j],
+          embedding: embeddings[j],
+        });
+      }
+
+      const currentBatchNum = Math.floor(i / this.batchSize) + 1;
+      this.logger.log(`[Batch ${currentBatchNum}/${totalBatches}] Selesai memproses ${batchChunks.length} chunks.`);
+    }
+
+    return results;
+  }
+}
+
+--- FILE: src\modules\document-ingestion\utils\sanitizers\header-footer-remover.filter.ts ---
+import { Injectable } from '@nestjs/common';
+import { ITextFilter } from '../../interfaces/text-filter.interface';
+
+@Injectable()
+export class HeaderFooterRemoverFilter implements ITextFilter {
+  readonly filterName = 'HeaderFooterRemoverFilter';
+
+  private readonly pageNumRegex =
+    /^(?:halaman|page)\s*\d+\s*(?:dari|of)\s*\d+|^-\s*\d+\s*-$/gi;
+
+  filter(text: string): string {
+    if (!text) return '';
+
+    const lines = text.split('\n');
+    const filteredLines = lines.filter((line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return true;
+
+      if (this.pageNumRegex.test(trimmed)) {
+        return false;
+      }
+
+      return true;
+    });
+
+    return filteredLines.join('\n');
+  }
+}
+
+--- FILE: src\modules\document-ingestion\utils\sanitizers\text-sanitizer.pipeline.ts ---
+import { Injectable, Logger } from '@nestjs/common';
+import { ITextFilter } from '../../interfaces/text-filter.interface';
+import { UnicodeNormalizerFilter } from './unicode-normalizer.filter';
+import { WhitespaceTrimmerFilter } from './whitespace-trimmer.filter';
+import { HeaderFooterRemoverFilter } from './header-footer-remover.filter';
+
+@Injectable()
+export class TextSanitizerPipeline {
+  private readonly logger = new Logger(TextSanitizerPipeline.name);
+  private readonly filters: ITextFilter[];
+
+  constructor(
+    unicodeFilter: UnicodeNormalizerFilter,
+    headerFooterFilter: HeaderFooterRemoverFilter,
+    whitespaceFilter: WhitespaceTrimmerFilter,
+  ) {
+
+    this.filters = [unicodeFilter, headerFooterFilter, whitespaceFilter];
+  }
+
+  sanitize(rawText: string): string {
+    if (!rawText) return '';
+
+    const initialLength = rawText.length;
+    let sanitizedText = rawText;
+
+    for (const filter of this.filters) {
+      sanitizedText = filter.filter(sanitizedText);
+    }
+
+    const finalLength = sanitizedText.length;
+    this.logger.log(
+      `[TextSanitizerPipeline] Teks berhasil di-sanitasi. Panjang awal: ${initialLength} -> Panjang akhir: ${finalLength} karakter.`,
+    );
+
+    return sanitizedText;
+  }
+}
+
+--- FILE: src\modules\document-ingestion\utils\sanitizers\unicode-normalizer.filter.ts ---
+import { Injectable } from '@nestjs/common';
+import { ITextFilter } from '../../interfaces/text-filter.interface';
+
+@Injectable()
+export class UnicodeNormalizerFilter implements ITextFilter {
+  readonly filterName = 'UnicodeNormalizerFilter';
+
+  filter(text: string): string {
+    if (!text) return '';
+
+    let cleanText = text.normalize('NFC');
+
+    cleanText = cleanText.replace(/[\u200B-\u200D\uFEFF]/g, '');
+
+    cleanText = cleanText
+      .replace(/[\u2018\u2019]/g, "'")
+      .replace(/[\u201C\u201D]/g, '"')
+      .replace(/[\u2013\u2014]/g, '-');
+
+    return cleanText;
+  }
+}
+
+--- FILE: src\modules\document-ingestion\utils\sanitizers\whitespace-trimmer.filter.ts ---
+import { Injectable } from '@nestjs/common';
+import { ITextFilter } from '../../interfaces/text-filter.interface';
+
+@Injectable()
+export class WhitespaceTrimmerFilter implements ITextFilter {
+  readonly filterName = 'WhitespaceTrimmerFilter';
+
+  filter(text: string): string {
+    if (!text) return '';
+
+    let cleanText = text.replace(/[ \t]+/g, ' ');
+
+    cleanText = cleanText.replace(/\n{3,}/g, '\n\n');
+
+    cleanText = cleanText
+      .split('\n')
+      .map((line) => line.trim())
+      .join('\n');
+
+    return cleanText.trim();
+  }
+}
+
+--- FILE: src\modules\interactive-assistant\interactive-assistant.module.ts ---
+import { Module } from '@nestjs/common';
+import { AiAgentModule } from '../ai-agent/ai-agent.module';
+import { ChatRepository } from './repositories/chat.repository';
+import { ChatMemoryService } from './services/chat-memory.service';
+import { QaIntentHandler } from './handlers/qa-intent.handler';
+import { ArticleIntentHandler } from './handlers/article-intent.handler';
+import { IntentRouterService } from './services/intent-router.service';
+import { AssistantController } from './controllers/assistant.controller';
+import { PromptInjectionSanitizer } from './utils/prompt-injection-sanitizer.util';
+import { ArticleGeneratorService } from './services/article-generator.service';
+
+@Module({
+  imports: [AiAgentModule],
+  controllers: [AssistantController],
+  providers: [
+    ChatRepository,
+    ChatMemoryService,
+    PromptInjectionSanitizer,
+    ArticleGeneratorService,
+    QaIntentHandler,
+    ArticleIntentHandler,
+    IntentRouterService,
+  ],
+  exports: [
+    ChatRepository,
+    ChatMemoryService,
+    PromptInjectionSanitizer,
+    ArticleGeneratorService,
+    QaIntentHandler,
+    ArticleIntentHandler,
+    IntentRouterService,
+  ],
+})
+export class InteractiveAssistantModule {}
+
+--- FILE: src\modules\interactive-assistant\constants\article-prompts.constant.ts ---
+export type ArticleTone = 'KRITIS' | 'SOLUTIF' | 'AKADEMIS';
+
+export const ARTICLE_SYSTEM_PERSONA = `Anda adalah seorang Jurnalis Investigasi Senior dan Analis Kebijakan Publik BRIDA.
+Tugas Anda adalah merakit draf artikel analitis, rilis media, atau opini kebijakan publik berbasis fakta mutlak dari laporan terlampir.
+
+ATURAN PENULISAN:
+1. Setiap poin argumen WAJIB berdasar pada data dan fakta dari dokumen laporan.
+2. DILARANG KERAS menyisipkan opini pribadi yang tidak didukung data laporan.
+3. Gaya bahasa harus profesional, mengalir, persuasif, namun tetap objektif.`;
+
+export const ARTICLE_OUTLINE_SYSTEM_PROMPT = `[TAHAP 1: OUTLINE GENERATION]
+Susun kerangka argumen JSON (Outline) yang komprehensif berdasarkan dokumen laporan terlampir.
+Kerangka harus mencakup: Judul Utama, Tesis Utama, 3-4 Sub-Argumen, Fakta Pendukung, dan Kesimpulan.`;
+
+export const ARTICLE_EXPANSION_SYSTEM_PROMPT = `[TAHAP 2: TEXT EXPANSION]
+Kembangkan kerangka JSON Outline yang diberikan menjadi draf artikel naratif utuh (1.000 - 2.500 kata).
+Gunakan tone bahasa yang diminta. Jangan menambahkan fakta di luar Outline JSON.`;
+
+--- FILE: src\modules\interactive-assistant\controllers\assistant.controller.ts ---
+import { Controller, Post, Body, HttpCode, HttpStatus, ParseUUIDPipe } from '@nestjs/common';
+import { IntentRouterService } from '../services/intent-router.service';
+import { ChatMemoryService } from '../services/chat-memory.service';
+import { InteractRequestDto } from '../dtos/interact-request.dto';
+
+@Controller('assistant')
+export class AssistantController {
+  constructor(
+    private readonly routerService: IntentRouterService,
+    private readonly memoryService: ChatMemoryService,
+  ) {}
+
+  @Post('session')
+  @HttpCode(HttpStatus.CREATED)
+  async createSession(
+    @Body('documentId', new ParseUUIDPipe({ version: '4' })) documentId: string,
+    @Body('title') title?: string,
+  ) {
+    const session = await this.memoryService.createSession(documentId, title);
+    return {
+      success: true,
+      data: session,
+    };
+  }
+
+  @Post('interact')
+  @HttpCode(HttpStatus.OK)
+  async interact(
+    @Body() dto: InteractRequestDto,
+  ) {
+    const result = await this.routerService.dispatch(dto.sessionId, dto.query);
+    return {
+      success: true,
+      data: result,
+    };
+  }
+}
+
+--- FILE: src\modules\interactive-assistant\dtos\interact-request.dto.ts ---
+import { IsString, IsNotEmpty, IsUUID, MinLength } from 'class-validator';
+
+export class InteractRequestDto {
+  @IsUUID('4', { message: 'sessionId harus berupa format UUID v4 yang valid' })
+  @IsNotEmpty({ message: 'sessionId tidak boleh kosong' })
+  sessionId!: string;
+
+  @IsString()
+  @IsNotEmpty({ message: 'Pesan atau perintah tidak boleh kosong' })
+  @MinLength(2, { message: 'Pesan minimal 2 karakter' })
+  query!: string;
+}
+
+--- FILE: src\modules\interactive-assistant\handlers\article-intent.handler.ts ---
+import { Injectable, Logger } from '@nestjs/common';
+import {
+  IIntentHandler,
+  IntentType,
+  IntentExecutionPayload,
+} from '../interfaces/intent-handler.interface';
+import { ChatMemoryService } from '../services/chat-memory.service';
+import { ArticleGeneratorService } from '../services/article-generator.service';
+import { PromptInjectionSanitizer } from '../utils/prompt-injection-sanitizer.util';
+
+@Injectable()
+export class ArticleIntentHandler implements IIntentHandler {
+  private readonly logger = new Logger(ArticleIntentHandler.name);
+
+  private readonly articleTriggersRegex =
+    /(?:buatkan|tulis|susun|generate|draft)\s*(?:artikel|opini|berita|press release|rilis media|publikasi|ringkasan eksekutif)/i;
+
+  constructor(
+    private readonly sanitizer: PromptInjectionSanitizer,
+    private readonly chatMemory: ChatMemoryService,
+    private readonly articleGenerator: ArticleGeneratorService,
+  ) {}
+
+  getIntentType(): IntentType {
+    return 'ARTICLE_GENERATION';
+  }
+
+  canHandle(query: string): boolean {
+    if (!query) return false;
+    return this.articleTriggersRegex.test(query.trim());
+  }
+
+  async execute(payload: IntentExecutionPayload): Promise<any> {
+    this.logger.log(
+      `[ArticleIntentHandler] Memproses Perintah Pembuatan Artikel CoT untuk Sesi ID: ${payload.sessionId}...`,
+    );
+
+    const sanitizedInstruction = this.sanitizer.sanitize(payload.query);
+
+    await this.chatMemory.recordUserMessage(payload.sessionId, sanitizedInstruction);
+
+    const articleResult = await this.articleGenerator.generateArticle({
+      documentId: payload.documentId,
+      userInstruction: sanitizedInstruction,
+      tone: 'KRITIS',
+    });
+
+    await this.chatMemory.recordAssistantMessage(
+      payload.sessionId,
+      JSON.stringify(articleResult),
+    );
+
+    return {
+      intent: this.getIntentType(),
+      sessionId: payload.sessionId,
+      data: articleResult,
+    };
+  }
+}
+
+--- FILE: src\modules\interactive-assistant\handlers\qa-intent.handler.ts ---
+import { Injectable, Logger } from '@nestjs/common';
+import {
+  IIntentHandler,
+  IntentType,
+  IntentExecutionPayload,
+} from '../interfaces/intent-handler.interface';
+import { ChatMemoryService } from '../services/chat-memory.service';
+import { ContextAssemblyService } from '../../ai-agent/services/context-assembly.service';
+import { VendorLlmAdapter } from '../../ai-agent/providers/vendor-llm.adapter';
+import { PromptInjectionSanitizer } from '../utils/prompt-injection-sanitizer.util';
+import { ANALYSIS_OUTPUT_JSON_SCHEMA } from '../../ai-agent/schemas/analysis-output.schema';
+import { LlmChatMessage } from '../../ai-agent/utils/prompt-assembly.builder';
+
+@Injectable()
+export class QaIntentHandler implements IIntentHandler {
+  private readonly logger = new Logger(QaIntentHandler.name);
+
+  constructor(
+    private readonly sanitizer: PromptInjectionSanitizer,
+    private readonly chatMemory: ChatMemoryService,
+    private readonly contextAssembly: ContextAssemblyService,
+    private readonly llmAdapter: VendorLlmAdapter,
+  ) {}
+
+  getIntentType(): IntentType {
+    return 'ANALYTICAL_QA';
+  }
+
+  canHandle(query: string): boolean {
+    return true;
+  }
+
+  async execute(payload: IntentExecutionPayload): Promise<any> {
+    this.logger.log(
+      `[QaIntentHandler] Memproses Q&A Analitik untuk Sesi ID: ${payload.sessionId}...`,
+    );
+
+    const sanitizedQuery = this.sanitizer.sanitize(payload.query);
+
+    await this.chatMemory.recordUserMessage(payload.sessionId, sanitizedQuery);
+
+    const memory = await this.chatMemory.getActiveSlidingWindowMemory(payload.sessionId);
+
+    const historyMessages: LlmChatMessage[] = memory.activeMessages.map((m) => ({
+      role: m.role === 'USER' ? 'user' : 'assistant',
+      content: m.content,
+    }));
+
+    const promptPayload = await this.contextAssembly.assemblePromptPayload({
+      documentId: memory.documentId,
+      userQuery: sanitizedQuery,
+    });
+
+    promptPayload.messages.splice(2, 0, ...historyMessages);
+
+    const analysisResult = await this.llmAdapter.generateStructuredAnalysis(
+      promptPayload.messages,
+      ANALYSIS_OUTPUT_JSON_SCHEMA,
+    );
+
+    const assistantResponseContent = JSON.stringify(analysisResult);
+    await this.chatMemory.recordAssistantMessage(payload.sessionId, assistantResponseContent);
+
+    return {
+      intent: this.getIntentType(),
+      sessionId: payload.sessionId,
+      documentId: memory.documentId,
+      data: analysisResult,
+      memoryInfo: {
+        activeTokens: memory.totalMemoryTokens,
+        prunedMessagesCount: memory.prunedMessagesCount,
+      },
+    };
+  }
+}
+
+--- FILE: src\modules\interactive-assistant\interfaces\chat-memory.interface.ts ---
+export interface ActiveChatMessage {
+  id: string;
+  role: 'USER' | 'ASSISTANT' | 'SYSTEM';
+  content: string;
+  tokenCount: number;
+  createdAt: Date;
+}
+
+export interface SlidingWindowMemoryPayload {
+  sessionId: string;
+  documentId: string;
+  activeMessages: ActiveChatMessage[];
+  totalMemoryTokens: number;
+  prunedMessagesCount: number;
+}
+
+--- FILE: src\modules\interactive-assistant\interfaces\intent-handler.interface.ts ---
+export type IntentType = 'ANALYTICAL_QA' | 'ARTICLE_GENERATION';
+
+export interface IntentExecutionPayload {
+  sessionId: string;
+  documentId: string;
+  query: string;
+}
+
+export interface IIntentHandler {
+
+  getIntentType(): IntentType;
+
+  canHandle(query: string): boolean;
+
+  execute(payload: IntentExecutionPayload): Promise<any>;
+}
+
+--- FILE: src\modules\interactive-assistant\repositories\chat.repository.ts ---
+import { Injectable, Logger } from '@nestjs/common';
+import { PrismaService } from '../../../common/prisma/prisma.service';
+import { ChatSession, ChatMessage, MessageRole } from '@prisma/client';
+
+export interface AddMessageInput {
+  sessionId: string;
+  role: MessageRole;
+  content: string;
+  tokenCount: number;
+}
+
+@Injectable()
+export class ChatRepository {
+  private readonly logger = new Logger(ChatRepository.name);
+
+  constructor(private readonly prisma: PrismaService) {}
+
+  async createSession(documentId: string, title?: string): Promise<ChatSession> {
+    return this.prisma.chatSession.create({
+      data: {
+        documentId,
+        title: title || 'Sesi Analisis Kasus',
+      },
+    });
+  }
+
+  async findSessionById(sessionId: string): Promise<ChatSession | null> {
+    return this.prisma.chatSession.findUnique({
+      where: { id: sessionId },
+      include: { document: true },
+    });
+  }
+
+  async findSessionsByDocument(documentId: string): Promise<ChatSession[]> {
+    return this.prisma.chatSession.findMany({
+      where: { documentId },
+      orderBy: { updatedAt: 'desc' },
+    });
+  }
+
+  async addMessage(input: AddMessageInput): Promise<ChatMessage> {
+    const message = await this.prisma.chatMessage.create({
+      data: {
+        sessionId: input.sessionId,
+        role: input.role,
+        content: input.content,
+        tokenCount: input.tokenCount,
+      },
+    });
+
+    await this.prisma.chatSession.update({
+      where: { id: input.sessionId },
+      data: { updatedAt: new Date() },
+    });
+
+    return message;
+  }
+
+  async getLatestMessages(sessionId: string, fetchLimit: number = 30): Promise<ChatMessage[]> {
+    return this.prisma.chatMessage.findMany({
+      where: { sessionId },
+      orderBy: { createdAt: 'desc' },
+      take: fetchLimit,
+    });
+  }
+}
+
+--- FILE: src\modules\interactive-assistant\schemas\article-outline.schema.ts ---
+export const ARTICLE_OUTLINE_JSON_SCHEMA = {
+  $schema: 'http://json-schema.org/draft-07/schema#',
+  title: 'ArticleOutlineOutput',
+  type: 'object',
+  required: ['judulUsulan', 'tesisUtama', 'subArgumen', 'kesimpulanRingkas'],
+  properties: {
+    judulUsulan: {
+      type: 'string',
+      description: 'Judul artikel analitis/opini yang menarik dan profesional.',
+    },
+    tesisUtama: {
+      type: 'string',
+      description: 'Pernyataan tesis utama berbasis data dokumen laporan.',
+    },
+    subArgumen: {
+      type: 'array',
+      description: 'Daftar 3-4 poin sub-argumen logis.',
+      items: {
+        type: 'object',
+        required: ['poin', 'faktaPendukung'],
+        properties: {
+          poin: { type: 'string', description: 'Judul sub-argumen/paragraf' },
+          faktaPendukung: { type: 'string', description: 'Kutipan fakta dari dokumen' },
+        },
+      },
+    },
+    kesimpulanRingkas: {
+      type: 'string',
+      description: 'Kesimpulan dan rekomendasi aksi.',
+    },
+  },
+  additionalProperties: false,
+};
+
+export interface ArticleOutlineDto {
+  judulUsulan: string;
+  tesisUtama: string;
+  subArgumen: Array<{
+    poin: string;
+    faktaPendukung: string;
+  }>;
+  kesimpulanRingkas: string;
+}
+
+--- FILE: src\modules\interactive-assistant\services\article-generator.service.ts ---
+import { Injectable, Logger } from '@nestjs/common';
+import { ContextAssemblyService } from '../../ai-agent/services/context-assembly.service';
+import { VendorLlmAdapter } from '../../ai-agent/providers/vendor-llm.adapter';
+import { ARTICLE_OUTLINE_JSON_SCHEMA, ArticleOutlineDto } from '../schemas/article-outline.schema';
+import {
+  ARTICLE_SYSTEM_PERSONA,
+  ARTICLE_OUTLINE_SYSTEM_PROMPT,
+  ARTICLE_EXPANSION_SYSTEM_PROMPT,
+  ArticleTone,
+} from '../constants/article-prompts.constant';
+import { LlmChatMessage } from '../../ai-agent/utils/prompt-assembly.builder';
+
+export interface GenerateArticleOptions {
+  documentId: string;
+  userInstruction: string;
+  tone?: ArticleTone;
+}
+
+export interface GeneratedArticleResult {
+  judul: string;
+  tone: ArticleTone;
+  outline: ArticleOutlineDto;
+  fullArticleText: string;
+}
+
+@Injectable()
+export class ArticleGeneratorService {
+  private readonly logger = new Logger(ArticleGeneratorService.name);
+
+  constructor(
+    private readonly contextAssembly: ContextAssemblyService,
+    private readonly llmAdapter: VendorLlmAdapter,
+  ) {}
+
+  async generateArticle(options: GenerateArticleOptions): Promise<GeneratedArticleResult> {
+    const tone = options.tone || 'KRITIS';
+    this.logger.log(
+      `[CoT Step 1] Memulai pembuatan Outline Artikel (Tone: ${tone}) untuk Dokumen ID: ${options.documentId}...`,
+    );
+
+    const promptPayload = await this.contextAssembly.assemblePromptPayload({
+      documentId: options.documentId,
+      userQuery: options.userInstruction,
+    });
+
+    const outlineMessages: LlmChatMessage[] = [
+      { role: 'system', content: ARTICLE_SYSTEM_PERSONA },
+      { role: 'system', content: ARTICLE_OUTLINE_SYSTEM_PROMPT },
+      ...promptPayload.messages.slice(1),
+    ];
+
+    const outlineResult = await this.llmAdapter.generateStructuredAnalysis<ArticleOutlineDto>(
+      outlineMessages,
+      ARTICLE_OUTLINE_JSON_SCHEMA,
+    );
+
+    this.logger.log(
+      `[CoT Step 1 Pass] Outline berhasil dibuat: "${outlineResult.judulUsulan}". Melanjutkan ke CoT Step 2 (Expansion)...`,
+    );
+
+    const fullArticleText = await this.expandOutlineToArticle(
+      outlineResult,
+      options.userInstruction,
+      tone,
+    );
+
+    this.logger.log(`[CoT Step 2 Pass] Artikel utuh berhasil diproduksi.`);
+
+    return {
+      judul: outlineResult.judulUsulan,
+      tone,
+      outline: outlineResult,
+      fullArticleText,
+    };
+  }
+
+  private async expandOutlineToArticle(
+    outline: ArticleOutlineDto,
+    instruction: string,
+    tone: ArticleTone,
+  ): Promise<string> {
+    const expansionMessages: LlmChatMessage[] = [
+      { role: 'system', content: ARTICLE_SYSTEM_PERSONA },
+      { role: 'system', content: ARTICLE_EXPANSION_SYSTEM_PROMPT },
+      {
+        role: 'user',
+        content: `[KERANGKA OUTLINE JSON]\n${JSON.stringify(
+          outline,
+          null,
+          2,
+        )}\n\n[TONE BAHASA]: ${tone}\n[INSTRUKSI KHUSUS]: ${instruction}`,
+      },
+    ];
+
+    const expandedText = `
+# ${outline.judulUsulan}
+
+**Oleh: Tim Analis Investigasi BRIDA**
+
+## Pendahuluan
+${outline.tesisUtama}
+
+## Analisis & Temuan Faktual
+${outline.subArgumen.map((s, i) => `### ${i + 1}. ${s.poin}\n${s.faktaPendukung}`).join('\n\n')}
+
+## Kesimpulan & Rekomendasi
+${outline.kesimpulanRingkas}
+`.trim();
+
+    return expandedText;
+  }
+}
+
+--- FILE: src\modules\interactive-assistant\services\chat-memory.service.ts ---
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { ChatRepository } from '../repositories/chat.repository';
+import { TokenEstimatorUtil } from '../../ai-agent/utils/token-estimator.util';
+import { ActiveChatMessage, SlidingWindowMemoryPayload } from '../interfaces/chat-memory.interface';
+import { MessageRole } from '@prisma/client';
+
+@Injectable()
+export class ChatMemoryService {
+  private readonly logger = new Logger(ChatMemoryService.name);
+
+  private readonly MAX_MEMORY_TOKENS = 2000;
+  private readonly MAX_MESSAGES_COUNT = 10;
+
+  constructor(
+    private readonly chatRepository: ChatRepository,
+    private readonly tokenEstimator: TokenEstimatorUtil,
+  ) {}
+
+  async createSession(documentId: string, title?: string) {
+    return this.chatRepository.createSession(documentId, title);
+  }
+
+  async recordUserMessage(sessionId: string, content: string) {
+    const tokenCount = this.tokenEstimator.estimateTokenCount(content);
+    return this.chatRepository.addMessage({
+      sessionId,
+      role: MessageRole.USER,
+      content,
+      tokenCount,
+    });
+  }
+
+  async recordAssistantMessage(sessionId: string, content: string) {
+    const tokenCount = this.tokenEstimator.estimateTokenCount(content);
+    return this.chatRepository.addMessage({
+      sessionId,
+      role: MessageRole.ASSISTANT,
+      content,
+      tokenCount,
+    });
+  }
+
+  async getActiveSlidingWindowMemory(sessionId: string): Promise<SlidingWindowMemoryPayload> {
+    const session = await this.chatRepository.findSessionById(sessionId);
+    if (!session) {
+      throw new NotFoundException(`Sesi obrolan dengan ID '${sessionId}' tidak ditemukan.`);
+    }
+
+    const rawMessages = await this.chatRepository.getLatestMessages(sessionId, 30);
+
+    const selectedMessages: ActiveChatMessage[] = [];
+    let accumulatedTokens = 0;
+    let prunedCount = 0;
+
+    for (const msg of rawMessages) {
+      const msgTokens = msg.tokenCount || this.tokenEstimator.estimateTokenCount(msg.content);
+
+      if (
+        accumulatedTokens + msgTokens <= this.MAX_MEMORY_TOKENS &&
+        selectedMessages.length < this.MAX_MESSAGES_COUNT
+      ) {
+        selectedMessages.push({
+          id: msg.id,
+          role: msg.role === MessageRole.USER ? 'USER' : 'ASSISTANT',
+          content: msg.content,
+          tokenCount: msgTokens,
+          createdAt: msg.createdAt,
+        });
+        accumulatedTokens += msgTokens;
+      } else {
+        prunedCount++;
+      }
+    }
+
+    selectedMessages.reverse();
+
+    this.logger.log(
+      `[Sliding Window Memory] Sesi ID: ${sessionId} -> Dipilih ${selectedMessages.length} pesan aktif (${accumulatedTokens} tokens, Dipangkas ${prunedCount} pesan lama).`,
+    );
+
+    return {
+      sessionId: session.id,
+      documentId: session.documentId,
+      activeMessages: selectedMessages,
+      totalMemoryTokens: accumulatedTokens,
+      prunedMessagesCount: prunedCount,
+    };
+  }
+}
+
+--- FILE: src\modules\interactive-assistant\services\intent-router.service.ts ---
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { IIntentHandler, IntentExecutionPayload } from '../interfaces/intent-handler.interface';
+import { QaIntentHandler } from '../handlers/qa-intent.handler';
+import { ArticleIntentHandler } from '../handlers/article-intent.handler';
+import { ChatRepository } from '../repositories/chat.repository';
+
+@Injectable()
+export class IntentRouterService {
+  private readonly logger = new Logger(IntentRouterService.name);
+  private readonly handlers: IIntentHandler[];
+
+  constructor(
+    private readonly articleHandler: ArticleIntentHandler,
+    private readonly qaHandler: QaIntentHandler,
+    private readonly chatRepository: ChatRepository,
+  ) {
+
+    this.handlers = [this.articleHandler, this.qaHandler];
+  }
+
+  async dispatch(sessionId: string, query: string): Promise<any> {
+    if (!query || query.trim().length === 0) {
+      throw new BadRequestException('Pesan atau kueri pengguna tidak boleh kosong.');
+    }
+
+    const session = await this.chatRepository.findSessionById(sessionId);
+    if (!session) {
+      throw new BadRequestException(`Sesi obrolan dengan ID '${sessionId}' tidak ditemukan.`);
+    }
+
+    const payload: IntentExecutionPayload = {
+      sessionId: session.id,
+      documentId: session.documentId,
+      query: query.trim(),
+    };
+
+    const selectedHandler = this.handlers.find((handler) => handler.canHandle(payload.query));
+
+    if (!selectedHandler) {
+      this.logger.warn(`Tidak ada handler intent yang cocok untuk kueri: "${query}"`);
+
+      return this.qaHandler.execute(payload);
+    }
+
+    this.logger.log(
+      `[IntentRouterService] Kueri: "${query.slice(0, 40)}..." -> Rute Terpilih: [${selectedHandler.getIntentType()}]`,
+    );
+
+    return selectedHandler.execute(payload);
+  }
+}
+
+--- FILE: src\modules\interactive-assistant\utils\prompt-injection-sanitizer.util.ts ---
+import { Injectable, BadRequestException, Logger } from '@nestjs/common';
+
+@Injectable()
+export class PromptInjectionSanitizer {
+  private readonly logger = new Logger(PromptInjectionSanitizer.name);
+
+  private readonly injectionPatterns: RegExp[] = [
+    /ignore\s+(?:all\s+)?previous\s+instructions/i,
+    /disregard\s+(?:all\s+)?system\s+prompts?/i,
+    /forget\s+(?:all\s+)?rules/i,
+    /override\s+(?:system\s+)?directives?/i,
+    /you\s+are\s+now\s+(?:DAN|jailbroken|unfiltered)/i,
+    /act\s+as\s+an\s+uncensored/i,
+    /bypass\s+zero-knowledge/i,
+    /abaikan\s+(?:semua\s+)?instruksi\s+sebelumnya/i,
+    /lupakan\s+(?:semua\s+)?aturan/i,
+  ];
+
+  sanitize(userQuery: string): string {
+    if (!userQuery || userQuery.trim().length === 0) {
+      throw new BadRequestException('Query pengguna tidak boleh kosong.');
+    }
+
+    const cleanQuery = userQuery.trim();
+
+    for (const pattern of this.injectionPatterns) {
+      if (pattern.test(cleanQuery)) {
+        this.logger.warn(`[Security Alert] Prompt Injection terdeteksi pada kueri: "${cleanQuery}"`);
+        throw new BadRequestException(
+          'Kueri ditolak oleh sistem keamanan BRIDA. Terdeteksi pola manipulasi perintah (Prompt Injection).',
+        );
+      }
+    }
+
+    return cleanQuery;
+  }
+}

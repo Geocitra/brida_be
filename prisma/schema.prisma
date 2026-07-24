@@ -1,0 +1,148 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum DocumentStatus {
+  PENDING
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum LogStatus {
+  INFO
+  SUCCESS
+  WARNING
+  ERROR
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+  SYSTEM
+}
+
+model ReportDocument {
+  id           String             @id @default(uuid()) @db.Uuid
+  title        String
+  fileUrl      String
+  mimeType     String
+  checksumHash String             @unique
+  status       DocumentStatus     @default(PENDING)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  metadata     DocumentMetadata?
+  chunks       DocumentChunk[]
+  logs         ExtractionLog[]
+  aiLogs       AiAnalysisLog[]
+  chatSessions ChatSession[]
+
+  @@map("report_documents")
+}
+
+model DocumentMetadata {
+  id              String         @id @default(uuid()) @db.Uuid
+  documentId      String         @unique @db.Uuid
+  fileSizeBytes   BigInt
+  pageCount       Int            @default(0)
+  totalTokenCount Int            @default(0)
+  category        String         @default("General Report")
+  uploadedBy      String         @default("SYSTEM_STAF")
+  createdAt       DateTime       @default(now())
+
+  document        ReportDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@map("document_metadata")
+}
+
+model DocumentChunk {
+  id          String               @id @default(uuid()) @db.Uuid
+  documentId  String               @db.Uuid
+  chunkIndex  Int
+  rawText     String               @db.Text
+  tokenCount  Int
+  embedding   String?              @db.Text
+  createdAt   DateTime             @default(now())
+
+  document    ReportDocument       @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  locations   GeospatialLocation[]
+
+  @@index([documentId, chunkIndex])
+  @@map("document_chunks")
+}
+
+model ExtractionLog {
+  id              String         @id @default(uuid()) @db.Uuid
+  documentId      String         @db.Uuid
+  status          LogStatus      @default(INFO)
+  errorMessage    String?        @db.Text
+  executionTimeMs Int            @default(0)
+  createdAt       DateTime       @default(now())
+
+  document        ReportDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@map("extraction_logs")
+}
+
+model GeospatialLocation {
+  id              String                    @id @default(uuid()) @db.Uuid
+  chunkId         String                    @db.Uuid
+  locationName    String
+  latitude        Float
+  longitude       Float
+  confidenceScore Float                     @default(1.0)
+  createdAt       DateTime                  @default(now())
+
+  chunk           DocumentChunk             @relation(fields: [chunkId], references: [id], onDelete: Cascade)
+
+  @@map("geospatial_locations")
+}
+
+model AiAnalysisLog {
+  id              String         @id @default(uuid()) @db.Uuid
+  documentId      String         @db.Uuid
+  userQuery       String         @db.Text
+  status          LogStatus      @default(SUCCESS)
+  executionTimeMs Int            @default(0)
+  tokenCount      Int            @default(0)
+  responsePayload String?        @db.Text
+  errorMessage    String?        @db.Text
+  createdAt       DateTime       @default(now())
+
+  document        ReportDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@map("ai_analysis_logs")
+}
+
+model ChatSession {
+  id          String        @id @default(uuid()) @db.Uuid
+  documentId  String        @db.Uuid
+  title       String        @default("Sesi Analisis Kasus")
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  document    ReportDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  messages    ChatMessage[]
+
+  @@map("chat_sessions")
+}
+
+model ChatMessage {
+  id          String      @id @default(uuid()) @db.Uuid
+  sessionId   String      @db.Uuid
+  role        MessageRole
+  content     String      @db.Text
+  tokenCount  Int         @default(0)
+  createdAt   DateTime    @default(now())
+
+  session     ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, createdAt])
+  @@map("chat_messages")
+}
