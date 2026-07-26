@@ -2,7 +2,10 @@ import {
   Controller,
   Post,
   Get,
+  Delete,
   Param,
+  Res,
+  StreamableFile,
   UseInterceptors,
   UploadedFile,
   Body,
@@ -10,6 +13,8 @@ import {
   HttpCode,
   HttpStatus,
 } from '@nestjs/common';
+import type { Response } from 'express';
+import { createReadStream } from 'fs';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { DocumentIngestionService } from '../services/document-ingestion.service';
 import { UploadDocumentDto } from '../dtos/upload-document.dto';
@@ -59,4 +64,31 @@ export class DocumentIngestionController {
       data: result,
     };
   }
+
+  @Get(':id/file')
+  async streamDocumentFile(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const fileData = await this.ingestionService.getDocumentFile(id);
+    res.set({
+      'Content-Type': fileData.mimeType,
+      'Content-Disposition': `inline; filename="${fileData.fileName}"`,
+    });
+    const fileStream = createReadStream(fileData.filePath);
+    return new StreamableFile(fileStream);
+  }
+
+  @Delete(':id')
+  async deleteDocument(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+  ): Promise<{ success: boolean; message: string }> {
+    await this.ingestionService.deleteDocument(id);
+    return {
+      success: true,
+      message: 'Dokumen berhasil dihapus.',
+    };
+  }
 }
+
+

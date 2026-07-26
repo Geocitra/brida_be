@@ -16,4 +16,10 @@ export interface DocumentResponseDto {
   };
   chunkCount?: number;
   extractedLocationsCount?: number;
+  chunks?: {
+    chunkIndex: number;
+    rawText: string;
+    tokenCount: number;
+  }[];
 }
+

@@ -184,6 +184,39 @@ export class DocumentIngestionService {
         : undefined,
       chunkCount: doc.chunks ? doc.chunks.length : 0,
       extractedLocationsCount: locationCount,
+      chunks: doc.chunks
+        ? doc.chunks.map((c) => ({
+            chunkIndex: c.chunkIndex,
+            rawText: c.rawText,
+            tokenCount: c.tokenCount,
+          }))
+        : [],
+    };
+  }
+
+
+  async deleteDocument(documentId: string): Promise<boolean> {
+    const doc = await this.repository.findById(documentId);
+    if (!doc) {
+      throw new NotFoundException(`Dokumen dengan ID '${documentId}' tidak ditemukan.`);
+    }
+    return this.repository.deleteDocument(documentId);
+  }
+
+  async getDocumentFile(documentId: string): Promise<{ filePath: string; mimeType: string; fileName: string }> {
+    const doc = await this.repository.findById(documentId);
+    if (!doc) {
+      throw new NotFoundException(`Dokumen dengan ID '${documentId}' tidak ditemukan.`);
+    }
+    if (!fs.existsSync(doc.fileUrl)) {
+      throw new NotFoundException(`Berkas fisik dokumen tidak ditemukan di server.`);
+    }
+    return {
+      filePath: doc.fileUrl,
+      mimeType: doc.mimeType,
+      fileName: `${doc.title}${path.extname(doc.fileUrl)}`,
     };
   }
 }
+
+

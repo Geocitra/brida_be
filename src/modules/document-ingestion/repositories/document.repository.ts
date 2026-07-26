@@ -198,4 +198,17 @@ export class DocumentRepository {
       return document;
     });
   }
+
+  async deleteDocument(id: string): Promise<boolean> {
+    try {
+      await this.prisma.reportDocument.delete({
+        where: { id },
+      });
+      return true;
+    } catch (err) {
+      this.logger.error(`[Delete] Gagal menghapus dokumen ${id}:`, err);
+      return false;
+    }
+  }
 }
+
