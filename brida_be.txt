@@ -3846,6 +3846,7 @@ import {
   Get,
   Post,
   Delete,
+  Patch,
   Body,
   Param,
   HttpCode,
@@ -3863,7 +3864,7 @@ export class AssistantController {
     private readonly routerService: IntentRouterService,
     private readonly memoryService: ChatMemoryService,
     private readonly articleGeneratorService: ArticleGeneratorService,
-  ) {}
+  ) { }
 
   @Post('session')
   @HttpCode(HttpStatus.CREATED)
@@ -3900,7 +3901,7 @@ export class AssistantController {
   }
 
   @Get('sessions/:id')
-  async getQaSessionById(@Param('id') id: string) {
+  async getQaSessionById(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
     const data = await this.memoryService.getQaSessionDetails(id);
     return {
       success: true,
@@ -3909,7 +3910,7 @@ export class AssistantController {
   }
 
   @Delete('sessions/:id')
-  async deleteQaSession(@Param('id') id: string) {
+  async deleteQaSession(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
     await this.memoryService.deleteSession(id);
     return {
       success: true,
@@ -3962,7 +3963,7 @@ export class AssistantController {
   }
 
   @Get('article/sessions/:id')
-  async getArticleSessionById(@Param('id') id: string) {
+  async getArticleSessionById(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
     const data = await this.articleGeneratorService.getArticleSessionById(id);
     return {
       success: true,
@@ -3970,8 +3971,29 @@ export class AssistantController {
     };
   }
 
+  @Patch('article/sessions/:id/content')
+  @HttpCode(HttpStatus.OK)
+  async updateArticleContent(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body()
+    body: {
+      articleTitle: string;
+      fullArticleText: string;
+    },
+  ) {
+    const result = await this.articleGeneratorService.updateArticleContent(
+      id,
+      body.articleTitle,
+      body.fullArticleText,
+    );
+    return {
+      success: true,
+      data: result,
+    };
+  }
+
   @Delete('article/sessions/:id')
-  async deleteArticleSession(@Param('id') id: string) {
+  async deleteArticleSession(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
     await this.articleGeneratorService.deleteArticleSession(id);
     return {
       success: true,
@@ -4487,12 +4509,18 @@ export interface ArticleOutlineDto {
 }
 
 --- FILE: src\modules\interactive-assistant\services\article-generator.service.ts ---
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+  PayloadTooLargeException
+} from '@nestjs/common';
 import { DocumentRepository } from '../../document-ingestion/repositories/document.repository';
 import { VendorLlmAdapter } from '../../ai-agent/providers/vendor-llm.adapter';
 import { ChatRepository } from '../repositories/chat.repository';
 import { TokenEstimatorUtil } from '../../ai-agent/utils/token-estimator.util';
-import { ArticleLength, MessageRole } from '@prisma/client';
+import { ArticleLength, MessageRole, SessionType } from '@prisma/client';
 
 export interface GenerateArticleOptions {
   documentIds: string[];
@@ -4507,12 +4535,14 @@ export interface GenerateArticleOptions {
 export class ArticleGeneratorService {
   private readonly logger = new Logger(ArticleGeneratorService.name);
 
+  private readonly MAX_DRAFTING_TOKEN_BUDGET = 20000;
+
   constructor(
     private readonly documentRepository: DocumentRepository,
     private readonly chatRepository: ChatRepository,
     private readonly llmAdapter: VendorLlmAdapter,
     private readonly tokenEstimator: TokenEstimatorUtil,
-  ) {}
+  ) { }
 
   async generateArticle(options: GenerateArticleOptions): Promise<any> {
     const { documentIds, articleTitle, targetLength = ArticleLength.MEDIUM, tone = 'solutif', userInstruction } = options;
@@ -4552,11 +4582,11 @@ export class ArticleGeneratorService {
 
     const assembledDocsContext = docTexts.join('\n\n----------------------------------------\n\n');
 
-    let lengthGuidance = 'Target Panjang Teks: ~700 kata (Sedang, komprehensif)';
+    let lengthGuidance = 'Target Panjang Teks: Minimal 1000 kata (Sedang, komprehensif)';
     if (String(targetLength) === 'SHORT') {
-      lengthGuidance = 'Target Panjang Teks: ~300 kata (Ringkas & Padat untuk Rilis Media / Sosmed)';
+      lengthGuidance = 'Target Panjang Teks: Minimal 700 kata (Ringkas & Padat untuk Rilis Media)';
     } else if (String(targetLength) === 'LONG') {
-      lengthGuidance = 'Target Panjang Teks: ~1500 kata (Mendalam, Analisis Kebijakan Komprehensif)';
+      lengthGuidance = 'Target Panjang Teks: Minimal 1500 kata (Mendalam, Analisis Kebijakan Komprehensif)';
     }
 
     const promptUserInstruction = userInstruction
@@ -4574,6 +4604,9 @@ PANDUAN PENULISAN:
 `;
 
     const userPromptMessage = `Judul Artikel yang Diinginkan: "${articleTitle}"\n${promptUserInstruction}\n\nDOKUMEN ACUAN:\n${assembledDocsContext}`;
+
+    const compiledPrompts = [systemPrompt, userPromptMessage];
+    this.tokenEstimator.enforceBudgetCircuitBreaker(compiledPrompts, this.MAX_DRAFTING_TOKEN_BUDGET);
 
     await this.chatRepository.addMessage({
       sessionId: session.id,
@@ -4620,6 +4653,66 @@ PANDUAN PENULISAN:
     };
   }
 
+  async updateArticleContent(
+    sessionId: string,
+    articleTitle: string,
+    fullArticleText: string,
+  ): Promise<any> {
+    const session = await this.chatRepository.findSessionById(sessionId);
+    if (!session) {
+      throw new NotFoundException(`Sesi artikel dengan ID '${sessionId}' tidak ditemukan.`);
+    }
+
+    if (session.sessionType !== SessionType.ARTICLE_GENERATOR) {
+      throw new BadRequestException('Sesi ini bukan merupakan sesi penulisan rilis artikel.');
+    }
+
+    const trimmedTitle = articleTitle.trim();
+    if (!trimmedTitle) {
+      throw new BadRequestException('Judul artikel baru tidak boleh kosong.');
+    }
+
+    if (typeof (this.chatRepository as any).updateArticleMetadata === 'function') {
+      await (this.chatRepository as any).updateArticleMetadata(sessionId, trimmedTitle);
+    } else {
+      this.logger.warn(
+        `[Integrasi Repository] 'updateArticleMetadata' belum terimplementasi pada ChatRepository.`,
+      );
+    }
+
+    const auditContent = 'Naskah diperbarui secara manual oleh editor.';
+    await this.chatRepository.addMessage({
+      sessionId: session.id,
+      role: MessageRole.SYSTEM,
+      content: auditContent,
+      tokenCount: this.tokenEstimator.estimateTokenCount(auditContent),
+    });
+
+    await this.chatRepository.addMessage({
+      sessionId: session.id,
+      role: MessageRole.ASSISTANT,
+      content: fullArticleText,
+      tokenCount: this.tokenEstimator.estimateTokenCount(fullArticleText),
+    });
+
+    this.logger.log(
+      `[Draft Manual Sync] Berhasil melakukan pembaruan naskah manual untuk Sesi ID: ${sessionId}`,
+    );
+
+    const updatedSession = await this.chatRepository.findSessionById(sessionId);
+
+    return {
+      success: true,
+      sessionId: session.id,
+      articleTitle: trimmedTitle,
+      tone: updatedSession.tone,
+      targetLength: updatedSession.targetLength,
+      fullArticleText: fullArticleText,
+      sources: sanitizeSources(updatedSession.sources),
+      messages: updatedSession.messages,
+    };
+  }
+
   async interactWithArticleSession(sessionId: string, userInstruction: string): Promise<any> {
     const session = await this.chatRepository.findSessionById(sessionId);
     if (!session) {
@@ -4640,6 +4733,9 @@ PANDUAN PENULISAN:
 
     const systemPrompt = `Anda adalah Asisten Penulis & Editor Artikel BRIDA Kabupaten Mimika.
 Perbarui / revisi draf artikel berdasarkan instruksi revisi terbaru dari pengguna. Pertahankan gaya bahasa ${session.tone || 'SOLUTIF'}.`;
+
+    const rawConversationTexts = conversationMessages.map((m: any) => m.content).concat([systemPrompt, userInstruction]);
+    this.tokenEstimator.enforceBudgetCircuitBreaker(rawConversationTexts, this.MAX_DRAFTING_TOKEN_BUDGET);
 
     let revisedArticleText = '';
     try {
@@ -5416,7 +5512,7 @@ Tugas Anda: Sintesiskan seluruh informasi faktual dari DOKUMEN ACUAN yang diberi
 PANDUAN STRUKTUR & BIAYA OUTPUT JSON ESEKUTIF PRESISI:
 1. "title": Judul laporan resmi eksekutif (Maksimal 15 kata).
 2. "executiveSummary": Ringkasan eksekutif padat, faktual, dan solutif (Maksimal 200 - 250 kata).
-3. "urgency": "TINGGI" | "SEDANG" | "SANGAT TINGGI".
+3. "urgency": "TINGGI" | "SEDANG" | "RENDAH".
 4. "recipient": "Bupati Mimika".
 5. "sender": "Kepala Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika".
 6. "period": Periode data (e.g. "Triwulan I - IV 2024 / Realtime Analysis").
@@ -5605,7 +5701,7 @@ const REPORT_OUTPUT_SCHEMA = {
 function normalizeReportPayload(raw: any, docs: any[]): any {
   return {
     title: raw.title || `Nota Dinas Hasil Analisis Multidokumen (${docs.length} Dokumen Acuan)`,
-    urgency: raw.urgency || 'SANGAT TINGGI (MEMERLUKAN DISPOSISI CEPAT)',
+    urgency: raw.urgency || 'TINGGI',
     recipient: raw.recipient || 'Bupati Mimika',
     sender: raw.sender || 'Kepala Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika',
     period: raw.period || 'Hasil Analisis Terintegrasi 2024',

@@ -177,4 +177,19 @@ export class ChatRepository {
       take: fetchLimit,
     });
   }
+
+  /**
+   * Memperbarui judul artikel (articleTitle) pada sesi percakapan [1].
+   * Dipanggil oleh ArticleGeneratorService.updateArticleContent ketika editor menyimpan naskah.
+   */
+  async updateArticleMetadata(sessionId: string, articleTitle: string): Promise<void> {
+    await this.prisma.chatSession.update({
+      where: { id: sessionId },
+      data: {
+        articleTitle,
+        title: articleTitle,
+        updatedAt: new Date(),
+      } as any,
+    });
+  }
 }

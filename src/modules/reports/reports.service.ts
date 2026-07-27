@@ -121,7 +121,7 @@ Tugas Anda: Sintesiskan seluruh informasi faktual dari DOKUMEN ACUAN yang diberi
 PANDUAN STRUKTUR & BIAYA OUTPUT JSON ESEKUTIF PRESISI:
 1. "title": Judul laporan resmi eksekutif (Maksimal 15 kata).
 2. "executiveSummary": Ringkasan eksekutif padat, faktual, dan solutif (Maksimal 200 - 250 kata).
-3. "urgency": "TINGGI" | "SEDANG" | "SANGAT TINGGI".
+3. "urgency": "TINGGI" | "SEDANG" | "RENDAH".
 4. "recipient": "Bupati Mimika".
 5. "sender": "Kepala Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika".
 6. "period": Periode data (e.g. "Triwulan I - IV 2024 / Realtime Analysis").
@@ -314,7 +314,7 @@ const REPORT_OUTPUT_SCHEMA = {
 function normalizeReportPayload(raw: any, docs: any[]): any {
   return {
     title: raw.title || `Nota Dinas Hasil Analisis Multidokumen (${docs.length} Dokumen Acuan)`,
-    urgency: raw.urgency || 'SANGAT TINGGI (MEMERLUKAN DISPOSISI CEPAT)',
+    urgency: raw.urgency || 'TINGGI',
     recipient: raw.recipient || 'Bupati Mimika',
     sender: raw.sender || 'Kepala Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika',
     period: raw.period || 'Hasil Analisis Terintegrasi 2024',

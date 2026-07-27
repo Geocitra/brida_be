@@ -1,9 +1,15 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+  PayloadTooLargeException // Impor untuk penanganan kegagalan batas aman token [5, 7]
+} from '@nestjs/common';
 import { DocumentRepository } from '../../document-ingestion/repositories/document.repository';
 import { VendorLlmAdapter } from '../../ai-agent/providers/vendor-llm.adapter';
 import { ChatRepository } from '../repositories/chat.repository';
 import { TokenEstimatorUtil } from '../../ai-agent/utils/token-estimator.util';
-import { ArticleLength, MessageRole } from '@prisma/client';
+import { ArticleLength, MessageRole, SessionType } from '@prisma/client'; // Menambahkan impor SessionType dari Prisma Client [1]
 
 export interface GenerateArticleOptions {
   documentIds: string[];
@@ -18,13 +24,19 @@ export interface GenerateArticleOptions {
 export class ArticleGeneratorService {
   private readonly logger = new Logger(ArticleGeneratorService.name);
 
+  // Anggaran token keras maksimum untuk sintesis draf artikel (20.000 token)
+  private readonly MAX_DRAFTING_TOKEN_BUDGET = 20000;
+
   constructor(
     private readonly documentRepository: DocumentRepository,
     private readonly chatRepository: ChatRepository,
     private readonly llmAdapter: VendorLlmAdapter,
     private readonly tokenEstimator: TokenEstimatorUtil,
-  ) {}
+  ) { }
 
+  /**
+   * Mensintesis draf naskah artikel baru berdasarkan multi-dokumen rujukan.
+   */
   async generateArticle(options: GenerateArticleOptions): Promise<any> {
     const { documentIds, articleTitle, targetLength = ArticleLength.MEDIUM, tone = 'solutif', userInstruction } = options;
 
@@ -35,7 +47,7 @@ export class ArticleGeneratorService {
       throw new BadRequestException('Judul artikel tidak boleh kosong.');
     }
 
-    // 1. Create or retrieve ChatSession for Article Generator
+    // 1. Ambil atau buat ChatSession baru untuk Article Generator
     let session = options.sessionId
       ? await this.chatRepository.findSessionById(options.sessionId)
       : null;
@@ -50,7 +62,7 @@ export class ArticleGeneratorService {
       });
     }
 
-    // 2. Fetch context from all selected reference documents
+    // 2. Ekstraksi konteks dari seluruh dokumen acuan terpilih
     const docTexts: string[] = [];
     const sourceDocs: any[] = [];
 
@@ -65,12 +77,12 @@ export class ArticleGeneratorService {
 
     const assembledDocsContext = docTexts.join('\n\n----------------------------------------\n\n');
 
-    // Determine target word count based on ArticleLength
-    let lengthGuidance = 'Target Panjang Teks: ~700 kata (Sedang, komprehensif)';
+    // Tentukan panduan panjang tulisan berdasarkan parameter Target Length
+    let lengthGuidance = 'Target Panjang Teks: Minimal 1000 kata (Sedang, komprehensif)';
     if (String(targetLength) === 'SHORT') {
-      lengthGuidance = 'Target Panjang Teks: ~300 kata (Ringkas & Padat untuk Rilis Media / Sosmed)';
+      lengthGuidance = 'Target Panjang Teks: Minimal 700 kata (Ringkas & Padat untuk Rilis Media)';
     } else if (String(targetLength) === 'LONG') {
-      lengthGuidance = 'Target Panjang Teks: ~1500 kata (Mendalam, Analisis Kebijakan Komprehensif)';
+      lengthGuidance = 'Target Panjang Teks: Minimal 1500 kata (Mendalam, Analisis Kebijakan Komprehensif)';
     }
 
     const promptUserInstruction = userInstruction
@@ -89,7 +101,12 @@ PANDUAN PENULISAN:
 
     const userPromptMessage = `Judul Artikel yang Diinginkan: "${articleTitle}"\n${promptUserInstruction}\n\nDOKUMEN ACUAN:\n${assembledDocsContext}`;
 
-    // Record User Prompt Message in DB
+    // --- INTEGRASI TOKEN BUDGET CIRCUIT BREAKER (DEFENSIVE PROGRAMMING) [5, 7] ---
+    // Evaluasi total muatan pesan (system prompt + user context) sebelum diteruskan ke Gemini
+    const compiledPrompts = [systemPrompt, userPromptMessage];
+    this.tokenEstimator.enforceBudgetCircuitBreaker(compiledPrompts, this.MAX_DRAFTING_TOKEN_BUDGET);
+
+    // Rekam pesan prompt pengguna ke database PostgreSQL
     await this.chatRepository.addMessage({
       sessionId: session.id,
       role: MessageRole.USER,
@@ -97,7 +114,7 @@ PANDUAN PENULISAN:
       tokenCount: this.tokenEstimator.estimateTokenCount(userPromptMessage),
     });
 
-    // 3. Call LLM to generate structured article text with creative temperature 0.7
+    // 3. Panggil LLM Adapter dengan parameter kreatif (temperature 0.7)
     let fullArticleText = '';
     try {
       const llmResult = await this.llmAdapter.generateStructuredAnalysis<any>(
@@ -115,7 +132,7 @@ PANDUAN PENULISAN:
       fullArticleText = createFallbackArticleText(articleTitle, sourceDocs, tone, targetLength);
     }
 
-    // Record Assistant Generated Article in DB
+    // Rekam draf artikel yang berhasil disintesis asisten ke DB
     await this.chatRepository.addMessage({
       sessionId: session.id,
       role: MessageRole.ASSISTANT,
@@ -137,13 +154,80 @@ PANDUAN PENULISAN:
     };
   }
 
+  /**
+   * Memperbarui konten draf naskah artikel secara manual berdasarkan suntingan editor (Two-Way Sync) [1].
+   * Mengintegrasikan audit log ke dalam riwayat percakapan tanpa mengubah struktur tabel database [1].
+   */
+  async updateArticleContent(
+    sessionId: string,
+    articleTitle: string,
+    fullArticleText: string,
+  ): Promise<any> {
+    const session = await this.chatRepository.findSessionById(sessionId);
+    if (!session) {
+      throw new NotFoundException(`Sesi artikel dengan ID '${sessionId}' tidak ditemukan.`);
+    }
+
+    if (session.sessionType !== SessionType.ARTICLE_GENERATOR) {
+      throw new BadRequestException('Sesi ini bukan merupakan sesi penulisan rilis artikel.');
+    }
+
+    const trimmedTitle = articleTitle.trim();
+    if (!trimmedTitle) {
+      throw new BadRequestException('Judul artikel baru tidak boleh kosong.');
+    }
+
+    // 1. Sinkronisasi judul draf pada metadata sesi obrolan di database [1]
+    if (typeof (this.chatRepository as any).updateArticleMetadata === 'function') {
+      await (this.chatRepository as any).updateArticleMetadata(sessionId, trimmedTitle);
+    } else {
+      this.logger.warn(
+        `[Integrasi Repository] 'updateArticleMetadata' belum terimplementasi pada ChatRepository.`,
+      );
+    }
+
+    // 2. Tambah Jejak Audit (Audit Trail Log) sebagai pesan sistem otomatis ke DB [1]
+    const auditContent = 'Naskah diperbarui secara manual oleh editor.';
+    await this.chatRepository.addMessage({
+      sessionId: session.id,
+      role: MessageRole.SYSTEM,
+      content: auditContent,
+      tokenCount: this.tokenEstimator.estimateTokenCount(auditContent),
+    });
+
+    // 3. Simpan draf naskah hasil suntingan manual terbaru sebagai pesan asisten baru [1]
+    await this.chatRepository.addMessage({
+      sessionId: session.id,
+      role: MessageRole.ASSISTANT,
+      content: fullArticleText,
+      tokenCount: this.tokenEstimator.estimateTokenCount(fullArticleText),
+    });
+
+    this.logger.log(
+      `[Draft Manual Sync] Berhasil melakukan pembaruan naskah manual untuk Sesi ID: ${sessionId}`,
+    );
+
+    const updatedSession = await this.chatRepository.findSessionById(sessionId);
+
+    return {
+      success: true,
+      sessionId: session.id,
+      articleTitle: trimmedTitle,
+      tone: updatedSession.tone,
+      targetLength: updatedSession.targetLength,
+      fullArticleText: fullArticleText,
+      sources: sanitizeSources(updatedSession.sources),
+      messages: updatedSession.messages,
+    };
+  }
+
   async interactWithArticleSession(sessionId: string, userInstruction: string): Promise<any> {
     const session = await this.chatRepository.findSessionById(sessionId);
     if (!session) {
       throw new NotFoundException(`Sesi artikel dengan ID '${sessionId}' tidak ditemukan.`);
     }
 
-    // Record User Follow-up Instruction in DB
+    // Rekam pesan instruksi revisi baru dari pengguna ke DB
     await this.chatRepository.addMessage({
       sessionId: session.id,
       role: MessageRole.USER,
@@ -151,7 +235,7 @@ PANDUAN PENULISAN:
       tokenCount: this.tokenEstimator.estimateTokenCount(userInstruction),
     });
 
-    // Assemble conversation history
+    // Susun riwayat percakapan revisi
     const conversationMessages = session.messages.map((m: any) => ({
       role: m.role === MessageRole.USER ? ('user' as const) : ('assistant' as const),
       content: m.content,
@@ -159,6 +243,11 @@ PANDUAN PENULISAN:
 
     const systemPrompt = `Anda adalah Asisten Penulis & Editor Artikel BRIDA Kabupaten Mimika.
 Perbarui / revisi draf artikel berdasarkan instruksi revisi terbaru dari pengguna. Pertahankan gaya bahasa ${session.tone || 'SOLUTIF'}.`;
+
+    // --- INTEGRASI TOKEN BUDGET CIRCUIT BREAKER PADA PROSES INTERAKSI REVISI [5, 7] ---
+    // Audit akumulasi riwayat chat sebelum dikirim ulang ke LLM
+    const rawConversationTexts = conversationMessages.map((m: any) => m.content).concat([systemPrompt, userInstruction]);
+    this.tokenEstimator.enforceBudgetCircuitBreaker(rawConversationTexts, this.MAX_DRAFTING_TOKEN_BUDGET);
 
     let revisedArticleText = '';
     try {
@@ -177,7 +266,7 @@ Perbarui / revisi draf artikel berdasarkan instruksi revisi terbaru dari penggun
       revisedArticleText = `[Hasil Revisi Draf Artikel - ${new Date().toLocaleTimeString('id-ID')}]\n\n${userInstruction}\n\n` + (conversationMessages[conversationMessages.length - 1]?.content || '');
     }
 
-    // Record Assistant Revision Response in DB
+    // Rekam draf revisi terbaru ke DB
     await this.chatRepository.addMessage({
       sessionId: session.id,
       role: MessageRole.ASSISTANT,
@@ -246,7 +335,7 @@ Perbarui / revisi draf artikel berdasarkan instruksi revisi terbaru dari penggun
   }
 }
 
-// Helpers
+// Skema output visual naskah
 const ARTICLE_OUTPUT_SCHEMA = {
   type: 'object',
   properties: {

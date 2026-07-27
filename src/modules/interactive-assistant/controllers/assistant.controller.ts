@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Delete,
+  Patch, // Impor baru dekorator Patch untuk modifikasi parsial [1]
   Body,
   Param,
   HttpCode,
@@ -20,7 +21,7 @@ export class AssistantController {
     private readonly routerService: IntentRouterService,
     private readonly memoryService: ChatMemoryService,
     private readonly articleGeneratorService: ArticleGeneratorService,
-  ) {}
+  ) { }
 
   @Post('session')
   @HttpCode(HttpStatus.CREATED)
@@ -59,7 +60,7 @@ export class AssistantController {
   }
 
   @Get('sessions/:id')
-  async getQaSessionById(@Param('id') id: string) {
+  async getQaSessionById(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
     const data = await this.memoryService.getQaSessionDetails(id);
     return {
       success: true,
@@ -68,7 +69,7 @@ export class AssistantController {
   }
 
   @Delete('sessions/:id')
-  async deleteQaSession(@Param('id') id: string) {
+  async deleteQaSession(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
     await this.memoryService.deleteSession(id);
     return {
       success: true,
@@ -123,7 +124,7 @@ export class AssistantController {
   }
 
   @Get('article/sessions/:id')
-  async getArticleSessionById(@Param('id') id: string) {
+  async getArticleSessionById(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
     const data = await this.articleGeneratorService.getArticleSessionById(id);
     return {
       success: true,
@@ -131,8 +132,33 @@ export class AssistantController {
     };
   }
 
+  /**
+   * Endpoint PATCH Baru untuk pembaruan manual naskah draf artikel (Two-Way Sync) [1].
+   * Membuka rute modifikasi parsial aman dengan pipa validasi UUID v4 [1].
+   */
+  @Patch('article/sessions/:id/content')
+  @HttpCode(HttpStatus.OK)
+  async updateArticleContent(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Body()
+    body: {
+      articleTitle: string;
+      fullArticleText: string;
+    },
+  ) {
+    const result = await this.articleGeneratorService.updateArticleContent(
+      id,
+      body.articleTitle,
+      body.fullArticleText,
+    );
+    return {
+      success: true,
+      data: result,
+    };
+  }
+
   @Delete('article/sessions/:id')
-  async deleteArticleSession(@Param('id') id: string) {
+  async deleteArticleSession(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
     await this.articleGeneratorService.deleteArticleSession(id);
     return {
       success: true,
