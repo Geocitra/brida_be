@@ -9,6 +9,7 @@ export interface ActiveChatMessage {
 export interface SlidingWindowMemoryPayload {
   sessionId: string;
   documentId: string;
+  documentIds?: string[];
   activeMessages: ActiveChatMessage[];
   totalMemoryTokens: number;
   prunedMessagesCount: number;

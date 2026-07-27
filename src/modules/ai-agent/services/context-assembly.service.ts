@@ -6,7 +6,8 @@ import { PromptAssemblyBuilder, QuadBlockPromptPayload } from '../utils/prompt-a
 import { DYNAMIC_CONTEXT_TOKEN_THRESHOLD } from '../constants/system-prompts.constant';
 
 export interface AssemblePromptOptions {
-  documentId: string;
+  documentId?: string;
+  documentIds?: string[];
   userQuery: string;
   topK?: number;
   similarityThreshold?: number;
@@ -24,39 +25,59 @@ export class ContextAssemblyService {
   ) {}
 
   async assemblePromptPayload(options: AssemblePromptOptions): Promise<QuadBlockPromptPayload> {
-    const { documentId, userQuery, topK = 10, similarityThreshold = 0.5 } = options;
+    const { documentId, documentIds = [], userQuery, topK = 10, similarityThreshold = 0.5 } = options;
 
-    // 1. Fetch document and metadata
-    const doc = await this.repository.findById(documentId);
-    if (!doc) {
-      throw new NotFoundException(`Dokumen laporan dengan ID '${documentId}' tidak ditemukan.`);
+    const targetDocIds = documentIds.length > 0 ? documentIds : (documentId ? [documentId] : []);
+    const docs = await Promise.all(targetDocIds.map(id => this.repository.findById(id)));
+    const validDocs = docs.filter((d): d is NonNullable<typeof d> => d !== null && d !== undefined);
+
+    if (validDocs.length === 0) {
+      throw new NotFoundException(`Dokumen acuan untuk kueri tidak ditemukan.`);
     }
 
-    const totalTokens = doc.metadata?.totalTokenCount || 0;
+    const totalTokens = validDocs.reduce((acc, doc) => acc + (doc.metadata?.totalTokenCount || 0), 0);
     let contextPayloadText = '';
 
     // 2. Hybrid Context-Aware Retrieval Decision
-    if (totalTokens < DYNAMIC_CONTEXT_TOKEN_THRESHOLD && doc.chunks && doc.chunks.length > 0) {
-      // Strategy A: Full-Document Stuffing (< 80,000 tokens) -> Maximizes Prompt Caching Hit Rate
+    if (totalTokens < DYNAMIC_CONTEXT_TOKEN_THRESHOLD) {
+      // Strategy A: Full-Document Stuffing (< 80,000 tokens) -> Stuff all selected docs
       this.logger.log(
-        `[Hybrid Strategy A] Total tokens (${totalTokens}) < ${DYNAMIC_CONTEXT_TOKEN_THRESHOLD}. Menggunakan Full-Document Stuffing untuk Prompt Caching.`,
+        `[Hybrid Strategy A] Total tokens (${totalTokens}) < ${DYNAMIC_CONTEXT_TOKEN_THRESHOLD}. Menggunakan Full-Document Stuffing untuk ${validDocs.length} dokumen.`,
       );
-      contextPayloadText = doc.chunks.map((c) => c.rawText).join('\n\n');
-    } else {
-      // Strategy B: Vector Retrieval (>= 80,000 tokens) -> Retrieves Top-K chunks via pgvector
-      this.logger.log(
-        `[Hybrid Strategy B] Total tokens (${totalTokens}) >= ${DYNAMIC_CONTEXT_TOKEN_THRESHOLD}. Menggunakan Vector Retrieval (pgvector Top-${topK}).`,
-      );
-      const retrievedChunks = await this.vectorRetrieval.searchRelevantChunks({
-        documentId,
-        queryText: userQuery,
-        topK,
-        similarityThreshold,
+      const allChunksText: string[] = [];
+      validDocs.forEach((doc) => {
+        if (doc.chunks && doc.chunks.length > 0) {
+          allChunksText.push(`=== DOKUMEN: ${doc.title} ===\n` + doc.chunks.map((c) => c.rawText).join('\n\n'));
+        }
       });
+      contextPayloadText = allChunksText.join('\n\n');
+    } else {
+      // Strategy B: Vector Retrieval (>= 80,000 tokens) -> Retrieves Top-K chunks via pgvector across all selected docs
+      this.logger.log(
+        `[Hybrid Strategy B] Total tokens (${totalTokens}) >= ${DYNAMIC_CONTEXT_TOKEN_THRESHOLD}. Menggunakan Vector Retrieval lintas ${validDocs.length} dokumen.`,
+      );
+      const allResultsList = await Promise.all(
+        validDocs.map((doc) =>
+          this.vectorRetrieval.searchRelevantChunks({
+            documentId: doc.id,
+            queryText: userQuery,
+            topK,
+            similarityThreshold,
+          })
+        )
+      );
 
-      if (retrievedChunks.length > 0) {
-        contextPayloadText = retrievedChunks
-          .map((item, idx) => `--- CHUNK ${idx + 1} (Score: ${item.similarityScore.toFixed(3)}) ---\n${item.rawText}`)
+      const combinedResults = allResultsList
+        .flat()
+        .sort((a, b) => b.similarityScore - a.similarityScore)
+        .slice(0, topK);
+
+      if (combinedResults.length > 0) {
+        contextPayloadText = combinedResults
+          .map(
+            (item, idx) =>
+              `--- CHUNK ${idx + 1} (Dokumen ID: ${item.documentId}, Score: ${item.similarityScore.toFixed(3)}) ---\n${item.rawText}`,
+          )
           .join('\n\n');
       } else {
         contextPayloadText = 'Teks relevan tidak ditemukan pada dokumen.';

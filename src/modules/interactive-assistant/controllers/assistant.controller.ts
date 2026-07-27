@@ -25,10 +25,12 @@ export class AssistantController {
   @Post('session')
   @HttpCode(HttpStatus.CREATED)
   async createSession(
-    @Body('documentId', new ParseUUIDPipe({ version: '4' })) documentId: string,
+    @Body('documentId') documentId?: string,
+    @Body('documentIds') documentIds?: string[],
     @Body('title') title?: string,
   ) {
-    const session = await this.memoryService.createSession(documentId, title);
+    const targetIds = documentIds && documentIds.length > 0 ? documentIds : (documentId ? [documentId] : []);
+    const session = await this.memoryService.createSession(targetIds, title);
     return {
       success: true,
       data: session,

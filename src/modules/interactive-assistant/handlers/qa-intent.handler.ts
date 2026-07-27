@@ -107,6 +107,7 @@ export class QaIntentHandler implements IIntentHandler {
     // 4. Assemble Composite Quad-Block Prompt Payload
     const promptPayload = await this.contextAssembly.assemblePromptPayload({
       documentId: memory.documentId,
+      documentIds: memory.documentIds,
       userQuery: sanitizedQuery,
     });
 

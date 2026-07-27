@@ -17,8 +17,8 @@ export class ChatMemoryService {
     private readonly tokenEstimator: TokenEstimatorUtil,
   ) {}
 
-  async createSession(documentId: string, title?: string) {
-    return this.chatRepository.createSession(documentId, title);
+  async createSession(documentIds: string[], title?: string) {
+    return this.chatRepository.createSession(documentIds, title);
   }
 
   async recordUserMessage(sessionId: string, content: string) {
@@ -85,9 +85,16 @@ export class ChatMemoryService {
       `[Sliding Window Memory] Sesi ID: ${sessionId} -> Dipilih ${selectedMessages.length} pesan aktif (${accumulatedTokens} tokens, Dipangkas ${prunedCount} pesan lama).`,
     );
 
+    const documentIds = Array.from(
+      new Set(
+        (session.sources || []).map((s: any) => s.documentId).concat(session.documentId ? [session.documentId] : [])
+      )
+    ).filter(Boolean) as string[];
+
     return {
       sessionId: session.id,
       documentId: session.documentId,
+      documentIds,
       activeMessages: selectedMessages,
       totalMemoryTokens: accumulatedTokens,
       prunedMessagesCount: prunedCount,

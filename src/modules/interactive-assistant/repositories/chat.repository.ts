@@ -23,12 +23,18 @@ export class ChatRepository {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async createSession(documentId: string, title?: string): Promise<ChatSession> {
+  async createSession(documentIds: string[], title?: string): Promise<ChatSession> {
+    const primaryDocId = documentIds.length > 0 ? documentIds[0] : null;
     return this.prisma.chatSession.create({
       data: {
-        documentId,
+        documentId: primaryDocId,
         sessionType: SessionType.QA_CHAT,
         title: title || 'Sesi Analisis Kasus',
+        sources: {
+          create: documentIds.map((docId) => ({
+            document: { connect: { id: docId } },
+          })),
+        },
       },
     });
   }
