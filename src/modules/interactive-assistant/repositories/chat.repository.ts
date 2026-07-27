@@ -157,6 +157,16 @@ export class ChatRepository {
     });
   }
 
+  async updateSessionSummary(sessionId: string, summary: string): Promise<ChatSession> {
+    return this.prisma.chatSession.update({
+      where: { id: sessionId },
+      data: {
+        runningSummary: summary,
+        updatedAt: new Date(),
+      } as any,
+    });
+  }
+
   /**
    * Fetches latest N messages ordered newest first for sliding window truncation
    */

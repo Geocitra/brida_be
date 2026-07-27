@@ -29,7 +29,6 @@ export const ARTICLE_OUTLINE_JSON_SCHEMA = {
       description: 'Kesimpulan dan rekomendasi aksi.',
     },
   },
-  additionalProperties: false,
 };
 
 export interface ArticleOutlineDto {

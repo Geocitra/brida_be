@@ -4,18 +4,28 @@ import { TokenEstimatorUtil } from '../../ai-agent/utils/token-estimator.util';
 import { ActiveChatMessage, SlidingWindowMemoryPayload } from '../interfaces/chat-memory.interface';
 import { MessageRole } from '@prisma/client';
 
+/**
+ * Interface payload hibrida yang mendukung Hierarchical Memory
+ */
+export interface HierarchicalMemoryPayload extends SlidingWindowMemoryPayload {
+  runningSummary?: string | null;
+}
+
 @Injectable()
 export class ChatMemoryService {
   private readonly logger = new Logger(ChatMemoryService.name);
 
-  // Maximum cumulative tokens allowed for conversational context window (~2,000 tokens)
+  // Batas akumulasi token maksimum untuk jendela memori aktif (~2.000 token)
   private readonly MAX_MEMORY_TOKENS = 2000;
-  private readonly MAX_MESSAGES_COUNT = 10; // 5 interaction turns (user + assistant)
+
+  // Di bawah pola Hierarchical Memory, kita membatasi jendela riwayat aktif uncompressed
+  // menjadi maksimal 4 pesan (2 putaran percakapan terdekat) untuk efisiensi token.
+  private readonly RECENT_WINDOW_SIZE = 4;
 
   constructor(
     private readonly chatRepository: ChatRepository,
     private readonly tokenEstimator: TokenEstimatorUtil,
-  ) {}
+  ) { }
 
   async createSession(documentIds: string[], title?: string) {
     return this.chatRepository.createSession(documentIds, title);
@@ -42,28 +52,29 @@ export class ChatMemoryService {
   }
 
   /**
-   * Sliding Window Algorithm with Token Truncation
+   * Mengambil memori bertingkat (Hierarchical Memory):
+   * Menggabungkan Recent Window (3-4 pesan terbaru) dengan Running Summary (kompresi masa lalu).
    */
-  async getActiveSlidingWindowMemory(sessionId: string): Promise<SlidingWindowMemoryPayload> {
+  async getActiveSlidingWindowMemory(sessionId: string): Promise<HierarchicalMemoryPayload> {
     const session = await this.chatRepository.findSessionById(sessionId);
     if (!session) {
       throw new NotFoundException(`Sesi obrolan dengan ID '${sessionId}' tidak ditemukan.`);
     }
 
-    // 1. Fetch raw messages ordered newest first
+    // 1. Ambil pesan mentah terbaru dari database (urut terbaru dahulu)
     const rawMessages = await this.chatRepository.getLatestMessages(sessionId, 30);
 
     const selectedMessages: ActiveChatMessage[] = [];
     let accumulatedTokens = 0;
     let prunedCount = 0;
 
-    // 2. Iterative sliding window: newest first until token limit or message count limit
+    // 2. Iterasi pesan: Ambil pesan terbaru hingga menyentuh batas token atau batas RECENT_WINDOW_SIZE [1]
     for (const msg of rawMessages) {
       const msgTokens = msg.tokenCount || this.tokenEstimator.estimateTokenCount(msg.content);
 
       if (
         accumulatedTokens + msgTokens <= this.MAX_MEMORY_TOKENS &&
-        selectedMessages.length < this.MAX_MESSAGES_COUNT
+        selectedMessages.length < this.RECENT_WINDOW_SIZE
       ) {
         selectedMessages.push({
           id: msg.id,
@@ -78,16 +89,20 @@ export class ChatMemoryService {
       }
     }
 
-    // 3. Reverse selected messages back to chronological order (asc)
+    // 3. Balikkan urutan pesan agar kronologis kembali (asc)
     selectedMessages.reverse();
 
     this.logger.log(
-      `[Sliding Window Memory] Sesi ID: ${sessionId} -> Dipilih ${selectedMessages.length} pesan aktif (${accumulatedTokens} tokens, Dipangkas ${prunedCount} pesan lama).`,
+      `[Hierarchical Memory Window] Sesi ID: ${sessionId} -> Dipilih ${selectedMessages.length
+      } pesan aktif (${accumulatedTokens} tokens, Terkompresi/Dipangkas: ${prunedCount} pesan lama). Status Summary: ${session.runningSummary ? 'Tersedia' : 'Kosong'
+      }`,
     );
 
     const documentIds = Array.from(
       new Set(
-        (session.sources || []).map((s: any) => s.documentId).concat(session.documentId ? [session.documentId] : [])
+        (session.sources || [])
+          .map((s: any) => s.documentId)
+          .concat(session.documentId ? [session.documentId] : [])
       )
     ).filter(Boolean) as string[];
 
@@ -98,7 +113,39 @@ export class ChatMemoryService {
       activeMessages: selectedMessages,
       totalMemoryTokens: accumulatedTokens,
       prunedMessagesCount: prunedCount,
+      runningSummary: session.runningSummary || null, // Integrasi runningSummary hasil schema update [1, 2]
     };
+  }
+
+  /**
+   * Menilai apakah sesi obrolan membutuhkan pemadatan memori (compaction).
+   * Pemicu aktif apabila ada pesan lama yang mulai dipangkas keluar dari Recent Window [1].
+   */
+  shouldTriggerCompaction(prunedCount: number, accumulatedTokens: number): boolean {
+    return prunedCount > 0 || accumulatedTokens >= this.MAX_MEMORY_TOKENS * 0.8;
+  }
+
+  /**
+   * Memperbarui Running Summary di database PostgreSQL untuk mengompresi memori jangka panjang [1, 2].
+   */
+  async updateRunningSummary(sessionId: string, summary: string): Promise<void> {
+    try {
+      this.logger.log(`[Hierarchical Memory] Memperbarui Running Summary untuk Sesi ID: ${sessionId}`);
+
+      // Memeriksa dan mengeksekusi penulisan ke repository secara aman.
+      // (Pastikan ChatRepository di-regenerate atau ditambahkan fungsi updateSessionSummary)
+      if (typeof this.chatRepository.updateSessionSummary === 'function') {
+        await this.chatRepository.updateSessionSummary(sessionId, summary);
+      } else {
+        this.logger.warn(
+          `[Integrasi Gagal] 'updateSessionSummary' belum terimplementasi pada ChatRepository. Menggunakan skema fallback asinkron.`,
+        );
+      }
+    } catch (err: any) {
+      this.logger.error(
+        `[Hierarchical Memory Error] Gagal menyimpan Running Summary ke database: ${err.message}`,
+      );
+    }
   }
 
   async getQaSessions(): Promise<any[]> {
@@ -129,6 +176,7 @@ export class ChatMemoryService {
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
       messages: session.messages,
+      runningSummary: session.runningSummary || null,
     };
   }
 

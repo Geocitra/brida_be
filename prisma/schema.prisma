@@ -38,25 +38,31 @@ enum ArticleLength {
   LONG
 }
 
-model ReportDocument {
-  id           String             @id @default(uuid()) @db.Uuid
-  title        String
-  fileUrl      String
-  mimeType     String
-  checksumHash String             @unique
-  status       DocumentStatus     @default(PENDING)
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
+enum InteractionType {
+  MANUAL_INPUT
+  SUGGESTION_CHIP
+  SYSTEM_GENERATED
+}
 
-  metadata     DocumentMetadata?
-  chunks       DocumentChunk[]
-  logs         ExtractionLog[]
-  aiLogs       AiAnalysisLog[]
-  chatSessions ChatSession[]
+model ReportDocument {
+  id                     String                 @id @default(uuid()) @db.Uuid
+  title                  String
+  fileUrl                String
+  mimeType               String
+  checksumHash           String                 @unique
+  status                 DocumentStatus         @default(PENDING)
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+
+  metadata               DocumentMetadata?
+  chunks                 DocumentChunk[]
+  logs                   ExtractionLog[]
+  aiLogs                 AiAnalysisLog[]
+  chatSessions           ChatSession[]
   generatedReportSources ReportSourceRef[]
-  chatSessionSources ChatSessionSourceRef[]
-  baselines IndicatorBaseline[]
-  realizations IndicatorRealization[]
+  chatSessionSources     ChatSessionSourceRef[]
+  baselines              IndicatorBaseline[]
+  realizations           IndicatorRealization[]
 
   @@map("report_documents")
 }
@@ -137,19 +143,20 @@ model AiAnalysisLog {
 }
 
 model ChatSession {
-  id           String                 @id @default(uuid()) @db.Uuid
-  documentId   String?                @db.Uuid
-  sessionType  SessionType            @default(QA_CHAT)
-  title        String                 @default("Sesi Analisis Kasus")
-  articleTitle String?                @db.Text
-  targetLength ArticleLength?         @default(MEDIUM)
-  tone         String?                @default("solutif")
-  createdAt    DateTime               @default(now())
-  updatedAt    DateTime               @updatedAt
+  id             String                 @id @default(uuid()) @db.Uuid
+  documentId     String?                @db.Uuid
+  sessionType    SessionType            @default(QA_CHAT)
+  title          String                 @default("Sesi Analisis Kasus")
+  articleTitle   String?                @db.Text
+  targetLength   ArticleLength?         @default(MEDIUM)
+  tone           String?                @default("solutif")
+  runningSummary String?                @db.Text
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
 
-  document     ReportDocument?        @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  messages     ChatMessage[]
-  sources      ChatSessionSourceRef[]
+  document       ReportDocument?        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  messages       ChatMessage[]
+  sources        ChatSessionSourceRef[]
 
   @@map("chat_sessions")
 }
@@ -168,14 +175,16 @@ model ChatSessionSourceRef {
 }
 
 model ChatMessage {
-  id          String      @id @default(uuid()) @db.Uuid
-  sessionId   String      @db.Uuid
-  role        MessageRole
-  content     String      @db.Text
-  tokenCount  Int         @default(0)
-  createdAt   DateTime    @default(now())
+  id              String          @id @default(uuid()) @db.Uuid
+  sessionId       String          @db.Uuid
+  role            MessageRole
+  content         String          @db.Text
+  tokenCount      Int             @default(0)
+  interactionType InteractionType @default(MANUAL_INPUT)
+  metadata        Json?
+  createdAt       DateTime        @default(now())
 
-  session     ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session         ChatSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([sessionId, createdAt])
   @@map("chat_messages")
@@ -257,5 +266,3 @@ model DeviationAnalysis {
 
   @@map("deviation_analyses")
 }
-
-

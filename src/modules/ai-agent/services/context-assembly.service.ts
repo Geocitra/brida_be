@@ -22,7 +22,7 @@ export class ContextAssemblyService {
     private readonly vectorRetrieval: VectorRetrievalService,
     private readonly tokenEstimator: TokenEstimatorUtil,
     private readonly promptBuilder: PromptAssemblyBuilder,
-  ) {}
+  ) { }
 
   async assemblePromptPayload(options: AssemblePromptOptions): Promise<QuadBlockPromptPayload> {
     const { documentId, documentIds = [], userQuery, topK = 10, similarityThreshold = 0.5 } = options;
@@ -38,53 +38,20 @@ export class ContextAssemblyService {
     const totalTokens = validDocs.reduce((acc, doc) => acc + (doc.metadata?.totalTokenCount || 0), 0);
     let contextPayloadText = '';
 
-    // 2. Hybrid Context-Aware Retrieval Decision
+    // Liskov Substitution: Kedua strategi mengembalikan data bertipe Promise<string> yang identik
     if (totalTokens < DYNAMIC_CONTEXT_TOKEN_THRESHOLD) {
-      // Strategy A: Full-Document Stuffing (< 80,000 tokens) -> Stuff all selected docs
-      this.logger.log(
-        `[Hybrid Strategy A] Total tokens (${totalTokens}) < ${DYNAMIC_CONTEXT_TOKEN_THRESHOLD}. Menggunakan Full-Document Stuffing untuk ${validDocs.length} dokumen.`,
-      );
-      const allChunksText: string[] = [];
-      validDocs.forEach((doc) => {
-        if (doc.chunks && doc.chunks.length > 0) {
-          allChunksText.push(`=== DOKUMEN: ${doc.title} ===\n` + doc.chunks.map((c) => c.rawText).join('\n\n'));
-        }
-      });
-      contextPayloadText = allChunksText.join('\n\n');
+      contextPayloadText = await this.executeFullDocumentStuffingStrategy(validDocs, totalTokens);
     } else {
-      // Strategy B: Vector Retrieval (>= 80,000 tokens) -> Retrieves Top-K chunks via pgvector across all selected docs
-      this.logger.log(
-        `[Hybrid Strategy B] Total tokens (${totalTokens}) >= ${DYNAMIC_CONTEXT_TOKEN_THRESHOLD}. Menggunakan Vector Retrieval lintas ${validDocs.length} dokumen.`,
+      contextPayloadText = await this.executeDynamicRagStrategy(
+        validDocs,
+        totalTokens,
+        userQuery,
+        topK,
+        similarityThreshold,
       );
-      const allResultsList = await Promise.all(
-        validDocs.map((doc) =>
-          this.vectorRetrieval.searchRelevantChunks({
-            documentId: doc.id,
-            queryText: userQuery,
-            topK,
-            similarityThreshold,
-          })
-        )
-      );
-
-      const combinedResults = allResultsList
-        .flat()
-        .sort((a, b) => b.similarityScore - a.similarityScore)
-        .slice(0, topK);
-
-      if (combinedResults.length > 0) {
-        contextPayloadText = combinedResults
-          .map(
-            (item, idx) =>
-              `--- CHUNK ${idx + 1} (Dokumen ID: ${item.documentId}, Score: ${item.similarityScore.toFixed(3)}) ---\n${item.rawText}`,
-          )
-          .join('\n\n');
-      } else {
-        contextPayloadText = 'Teks relevan tidak ditemukan pada dokumen.';
-      }
     }
 
-    // 3. Creational Builder Pattern Assembly (Quad-Block Prompt)
+    // 3. Rakit Prompt Composite Quad-Block
     const payload = this.promptBuilder
       .reset()
       .setContextPayload(contextPayloadText)
@@ -100,5 +67,86 @@ export class ContextAssemblyService {
     );
 
     return payload;
+  }
+
+  /**
+   * Strategi A: Memuat seluruh isi dokumen ke dalam prompt payload.
+   * Digunakan apabila ukuran kumulatif dokumen masih berada di bawah ambang batas aman token (< 80,000).
+   */
+  private async executeFullDocumentStuffingStrategy(
+    validDocs: any[],
+    totalTokens: number,
+  ): Promise<string> {
+    this.logger.log(
+      `[Hybrid Strategy A - Stuffed] Total tokens (${totalTokens}) < ${DYNAMIC_CONTEXT_TOKEN_THRESHOLD}. Menggunakan Full-Document Stuffing untuk ${validDocs.length} dokumen.`,
+    );
+
+    const allChunksText: string[] = [];
+    validDocs.forEach((doc) => {
+      if (doc.chunks && doc.chunks.length > 0) {
+        allChunksText.push(`=== DOKUMEN: ${doc.title} ===\n` + doc.chunks.map((c: any) => c.rawText).join('\n\n'));
+      }
+    });
+
+    return allChunksText.join('\n\n');
+  }
+
+  /**
+   * Strategi B: Melakukan RAG Dinamis lintas dokumen acuan.
+   * Menerapkan logika Dynamic Semantic Swapping untuk menyaring sampah konteks [4].
+   */
+  private async executeDynamicRagStrategy(
+    validDocs: any[],
+    totalTokens: number,
+    userQuery: string,
+    topK: number,
+    similarityThreshold: number,
+  ): Promise<string> {
+    this.logger.log(
+      `[Hybrid Strategy B - Dynamic RAG] Total tokens (${totalTokens}) >= ${DYNAMIC_CONTEXT_TOKEN_THRESHOLD}. Mengevaluasi kedekatan semantik kueri...`,
+    );
+
+    // 1. Eksekusi pencarian relevansi semantik lintas seluruh dokumen aktif secara paralel
+    const retrievalTasks = validDocs.map((doc) =>
+      this.vectorRetrieval.searchRelevantChunks({
+        documentId: doc.id,
+        queryText: userQuery,
+        topK,
+        similarityThreshold,
+      }).catch((err) => {
+        this.logger.warn(
+          `Gagal mengambil chunks semantik untuk Dokumen ID '${doc.id}': ${err.message}`,
+        );
+        return [];
+      }),
+    );
+
+    const allResultsList = await Promise.all(retrievalTasks);
+    const combinedFlatResults = allResultsList.flat();
+
+    // 2. Logika Dynamic Semantic Swapping & Pruning [4]
+    // Chunks dengan skor di bawah threshold dibuang (Swapped Out)
+    const highlyRelevantResults = combinedFlatResults
+      .filter((chunk) => chunk.similarityScore >= similarityThreshold)
+      .sort((a, b) => b.similarityScore - a.similarityScore)
+      .slice(0, topK);
+
+    const swappedOutCount = combinedFlatResults.length - highlyRelevantResults.length;
+
+    this.logger.log(
+      `[Dynamic Semantic Swapping] Selesai menyaring konteks. ${highlyRelevantResults.length} chunks relevan dimasukkan (SWAPPED IN), ${swappedOutCount} chunks sampah semantik dibuang (SWAPPED OUT) dari prompt payload [4].`,
+    );
+
+    if (highlyRelevantResults.length > 0) {
+      return highlyRelevantResults
+        .map(
+          (item, idx) =>
+            `--- CHUNK ${idx + 1} (Dokumen: ${item.documentId}, Indeks: ${item.chunkIndex
+            }, Skor Semantik: ${item.similarityScore.toFixed(3)}) ---\n${item.rawText}`,
+        )
+        .join('\n\n');
+    }
+
+    return 'Konteks dokumen rujukan yang relevan dengan topik pertanyaan tidak ditemukan.';
   }
 }

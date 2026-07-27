@@ -64,6 +64,26 @@ export class VendorLlmAdapter implements ILlmProvider {
       parts: [{ text: m.content }],
     }));
 
+    let cleanedSchema = undefined;
+    if (jsonSchema) {
+      try {
+        cleanedSchema = JSON.parse(JSON.stringify(jsonSchema));
+        const sanitizeSchema = (obj: any) => {
+          if (obj && typeof obj === 'object') {
+            if ('additionalProperties' in obj) {
+              delete obj.additionalProperties;
+            }
+            for (const key of Object.keys(obj)) {
+              sanitizeSchema(obj[key]);
+            }
+          }
+        };
+        sanitizeSchema(cleanedSchema);
+      } catch (err) {
+        cleanedSchema = jsonSchema;
+      }
+    }
+
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -74,7 +94,7 @@ export class VendorLlmAdapter implements ILlmProvider {
           maxOutputTokens: 8192,
           responseMimeType: 'application/json',
           // Enforce native structured output at token-generation level
-          responseSchema: jsonSchema,
+          responseSchema: cleanedSchema,
         },
       }),
     });

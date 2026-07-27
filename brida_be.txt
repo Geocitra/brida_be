@@ -147,25 +147,31 @@ enum ArticleLength {
   LONG
 }
 
-model ReportDocument {
-  id           String             @id @default(uuid()) @db.Uuid
-  title        String
-  fileUrl      String
-  mimeType     String
-  checksumHash String             @unique
-  status       DocumentStatus     @default(PENDING)
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
+enum InteractionType {
+  MANUAL_INPUT
+  SUGGESTION_CHIP
+  SYSTEM_GENERATED
+}
 
-  metadata     DocumentMetadata?
-  chunks       DocumentChunk[]
-  logs         ExtractionLog[]
-  aiLogs       AiAnalysisLog[]
-  chatSessions ChatSession[]
+model ReportDocument {
+  id                     String                 @id @default(uuid()) @db.Uuid
+  title                  String
+  fileUrl                String
+  mimeType               String
+  checksumHash           String                 @unique
+  status                 DocumentStatus         @default(PENDING)
+  createdAt              DateTime               @default(now())
+  updatedAt              DateTime               @updatedAt
+
+  metadata               DocumentMetadata?
+  chunks                 DocumentChunk[]
+  logs                   ExtractionLog[]
+  aiLogs                 AiAnalysisLog[]
+  chatSessions           ChatSession[]
   generatedReportSources ReportSourceRef[]
-  chatSessionSources ChatSessionSourceRef[]
-  baselines IndicatorBaseline[]
-  realizations IndicatorRealization[]
+  chatSessionSources     ChatSessionSourceRef[]
+  baselines              IndicatorBaseline[]
+  realizations           IndicatorRealization[]
 
   @@map("report_documents")
 }
@@ -246,19 +252,20 @@ model AiAnalysisLog {
 }
 
 model ChatSession {
-  id           String                 @id @default(uuid()) @db.Uuid
-  documentId   String?                @db.Uuid
-  sessionType  SessionType            @default(QA_CHAT)
-  title        String                 @default("Sesi Analisis Kasus")
-  articleTitle String?                @db.Text
-  targetLength ArticleLength?         @default(MEDIUM)
-  tone         String?                @default("solutif")
-  createdAt    DateTime               @default(now())
-  updatedAt    DateTime               @updatedAt
+  id             String                 @id @default(uuid()) @db.Uuid
+  documentId     String?                @db.Uuid
+  sessionType    SessionType            @default(QA_CHAT)
+  title          String                 @default("Sesi Analisis Kasus")
+  articleTitle   String?                @db.Text
+  targetLength   ArticleLength?         @default(MEDIUM)
+  tone           String?                @default("solutif")
+  runningSummary String?                @db.Text
+  createdAt      DateTime               @default(now())
+  updatedAt      DateTime               @updatedAt
 
-  document     ReportDocument?        @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  messages     ChatMessage[]
-  sources      ChatSessionSourceRef[]
+  document       ReportDocument?        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  messages       ChatMessage[]
+  sources        ChatSessionSourceRef[]
 
   @@map("chat_sessions")
 }
@@ -277,14 +284,16 @@ model ChatSessionSourceRef {
 }
 
 model ChatMessage {
-  id          String      @id @default(uuid()) @db.Uuid
-  sessionId   String      @db.Uuid
-  role        MessageRole
-  content     String      @db.Text
-  tokenCount  Int         @default(0)
-  createdAt   DateTime    @default(now())
+  id              String          @id @default(uuid()) @db.Uuid
+  sessionId       String          @db.Uuid
+  role            MessageRole
+  content         String          @db.Text
+  tokenCount      Int             @default(0)
+  interactionType InteractionType @default(MANUAL_INPUT)
+  metadata        Json?
+  createdAt       DateTime        @default(now())
 
-  session     ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session         ChatSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
 
   @@index([sessionId, createdAt])
   @@map("chat_messages")
@@ -367,6 +376,282 @@ model DeviationAnalysis {
   @@map("deviation_analyses")
 }
 
+--- FILE: prisma\migrations\20260727041023_26juli\migration.sql ---
+-- CreateEnum
+CREATE TYPE "DocumentStatus" AS ENUM ('PENDING', 'PROCESSING', 'READY', 'FAILED');
+
+-- CreateEnum
+CREATE TYPE "LogStatus" AS ENUM ('INFO', 'SUCCESS', 'WARNING', 'ERROR');
+
+-- CreateEnum
+CREATE TYPE "MessageRole" AS ENUM ('USER', 'ASSISTANT', 'SYSTEM');
+
+-- CreateEnum
+CREATE TYPE "SessionType" AS ENUM ('QA_CHAT', 'ARTICLE_GENERATOR');
+
+-- CreateEnum
+CREATE TYPE "ArticleLength" AS ENUM ('SHORT', 'MEDIUM', 'LONG');
+
+-- CreateTable
+CREATE TABLE "report_documents" (
+    "id" UUID NOT NULL,
+    "title" TEXT NOT NULL,
+    "fileUrl" TEXT NOT NULL,
+    "mimeType" TEXT NOT NULL,
+    "checksumHash" TEXT NOT NULL,
+    "status" "DocumentStatus" NOT NULL DEFAULT 'PENDING',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "report_documents_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "document_metadata" (
+    "id" UUID NOT NULL,
+    "documentId" UUID NOT NULL,
+    "fileSizeBytes" BIGINT NOT NULL,
+    "pageCount" INTEGER NOT NULL DEFAULT 0,
+    "totalTokenCount" INTEGER NOT NULL DEFAULT 0,
+    "category" TEXT NOT NULL DEFAULT 'General Report',
+    "uploadedBy" TEXT NOT NULL DEFAULT 'SYSTEM_STAF',
+    "docType" TEXT NOT NULL DEFAULT 'REALIZATION',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "document_metadata_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "document_chunks" (
+    "id" UUID NOT NULL,
+    "documentId" UUID NOT NULL,
+    "chunkIndex" INTEGER NOT NULL,
+    "rawText" TEXT NOT NULL,
+    "tokenCount" INTEGER NOT NULL,
+    "embedding" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "document_chunks_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "extraction_logs" (
+    "id" UUID NOT NULL,
+    "documentId" UUID NOT NULL,
+    "status" "LogStatus" NOT NULL DEFAULT 'INFO',
+    "errorMessage" TEXT,
+    "executionTimeMs" INTEGER NOT NULL DEFAULT 0,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "extraction_logs_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "geospatial_locations" (
+    "id" UUID NOT NULL,
+    "chunkId" UUID NOT NULL,
+    "locationName" TEXT NOT NULL,
+    "latitude" DOUBLE PRECISION NOT NULL,
+    "longitude" DOUBLE PRECISION NOT NULL,
+    "confidenceScore" DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "geospatial_locations_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "ai_analysis_logs" (
+    "id" UUID NOT NULL,
+    "documentId" UUID NOT NULL,
+    "userQuery" TEXT NOT NULL,
+    "status" "LogStatus" NOT NULL DEFAULT 'SUCCESS',
+    "executionTimeMs" INTEGER NOT NULL DEFAULT 0,
+    "tokenCount" INTEGER NOT NULL DEFAULT 0,
+    "responsePayload" TEXT,
+    "errorMessage" TEXT,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "ai_analysis_logs_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "chat_sessions" (
+    "id" UUID NOT NULL,
+    "documentId" UUID,
+    "sessionType" "SessionType" NOT NULL DEFAULT 'QA_CHAT',
+    "title" TEXT NOT NULL DEFAULT 'Sesi Analisis Kasus',
+    "articleTitle" TEXT,
+    "targetLength" "ArticleLength" DEFAULT 'MEDIUM',
+    "tone" TEXT DEFAULT 'solutif',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "chat_sessions_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "chat_session_source_refs" (
+    "id" UUID NOT NULL,
+    "sessionId" UUID NOT NULL,
+    "documentId" UUID NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "chat_session_source_refs_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "chat_messages" (
+    "id" UUID NOT NULL,
+    "sessionId" UUID NOT NULL,
+    "role" "MessageRole" NOT NULL,
+    "content" TEXT NOT NULL,
+    "tokenCount" INTEGER NOT NULL DEFAULT 0,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "chat_messages_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "generated_reports" (
+    "id" UUID NOT NULL,
+    "title" TEXT NOT NULL,
+    "reportType" TEXT NOT NULL DEFAULT 'NOTA_DINAS_BUPATI',
+    "documentIdsHash" TEXT NOT NULL,
+    "executiveSummary" TEXT NOT NULL,
+    "contentPayload" JSONB NOT NULL,
+    "tokenCount" INTEGER NOT NULL DEFAULT 0,
+    "llmProvider" TEXT NOT NULL DEFAULT 'GEMINI_FLASH',
+    "status" "DocumentStatus" NOT NULL DEFAULT 'READY',
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "generated_reports_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "report_source_refs" (
+    "id" UUID NOT NULL,
+    "reportId" UUID NOT NULL,
+    "documentId" UUID NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "report_source_refs_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "indicator_baselines" (
+    "id" UUID NOT NULL,
+    "document_id" UUID NOT NULL,
+    "indicator_name" TEXT NOT NULL,
+    "target_value" DOUBLE PRECISION NOT NULL,
+    "unit" TEXT NOT NULL DEFAULT 'M',
+    "timeframe" TEXT NOT NULL DEFAULT '2026',
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "indicator_baselines_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "indicator_realizations" (
+    "id" UUID NOT NULL,
+    "document_id" UUID NOT NULL,
+    "indicator_name" TEXT NOT NULL,
+    "realization_value" DOUBLE PRECISION NOT NULL,
+    "unit" TEXT NOT NULL DEFAULT 'M',
+    "timeframe" TEXT NOT NULL DEFAULT '2026',
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "indicator_realizations_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
+CREATE TABLE "deviation_analyses" (
+    "id" UUID NOT NULL,
+    "baseline_doc_id" UUID,
+    "realization_doc_id" UUID,
+    "indicator_name" TEXT NOT NULL,
+    "target_value" DOUBLE PRECISION NOT NULL,
+    "realization_value" DOUBLE PRECISION NOT NULL,
+    "deviation_value" DOUBLE PRECISION NOT NULL,
+    "deviation_percentage" DOUBLE PRECISION NOT NULL,
+    "urgency_status" TEXT NOT NULL,
+    "causal_factors" JSONB NOT NULL,
+    "recommendations" JSONB NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "deviation_analyses_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "report_documents_checksumHash_key" ON "report_documents"("checksumHash");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "document_metadata_documentId_key" ON "document_metadata"("documentId");
+
+-- CreateIndex
+CREATE INDEX "document_chunks_documentId_chunkIndex_idx" ON "document_chunks"("documentId", "chunkIndex");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "chat_session_source_refs_sessionId_documentId_key" ON "chat_session_source_refs"("sessionId", "documentId");
+
+-- CreateIndex
+CREATE INDEX "chat_messages_sessionId_createdAt_idx" ON "chat_messages"("sessionId", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "generated_reports_documentIdsHash_idx" ON "generated_reports"("documentIdsHash");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "report_source_refs_reportId_documentId_key" ON "report_source_refs"("reportId", "documentId");
+
+-- AddForeignKey
+ALTER TABLE "document_metadata" ADD CONSTRAINT "document_metadata_documentId_fkey" FOREIGN KEY ("documentId") REFERENCES "report_documents"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "document_chunks" ADD CONSTRAINT "document_chunks_documentId_fkey" FOREIGN KEY ("documentId") REFERENCES "report_documents"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "extraction_logs" ADD CONSTRAINT "extraction_logs_documentId_fkey" FOREIGN KEY ("documentId") REFERENCES "report_documents"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "geospatial_locations" ADD CONSTRAINT "geospatial_locations_chunkId_fkey" FOREIGN KEY ("chunkId") REFERENCES "document_chunks"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "ai_analysis_logs" ADD CONSTRAINT "ai_analysis_logs_documentId_fkey" FOREIGN KEY ("documentId") REFERENCES "report_documents"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "chat_sessions" ADD CONSTRAINT "chat_sessions_documentId_fkey" FOREIGN KEY ("documentId") REFERENCES "report_documents"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "chat_session_source_refs" ADD CONSTRAINT "chat_session_source_refs_sessionId_fkey" FOREIGN KEY ("sessionId") REFERENCES "chat_sessions"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "chat_session_source_refs" ADD CONSTRAINT "chat_session_source_refs_documentId_fkey" FOREIGN KEY ("documentId") REFERENCES "report_documents"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "chat_messages" ADD CONSTRAINT "chat_messages_sessionId_fkey" FOREIGN KEY ("sessionId") REFERENCES "chat_sessions"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "report_source_refs" ADD CONSTRAINT "report_source_refs_reportId_fkey" FOREIGN KEY ("reportId") REFERENCES "generated_reports"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "report_source_refs" ADD CONSTRAINT "report_source_refs_documentId_fkey" FOREIGN KEY ("documentId") REFERENCES "report_documents"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "indicator_baselines" ADD CONSTRAINT "indicator_baselines_document_id_fkey" FOREIGN KEY ("document_id") REFERENCES "report_documents"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "indicator_realizations" ADD CONSTRAINT "indicator_realizations_document_id_fkey" FOREIGN KEY ("document_id") REFERENCES "report_documents"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+--- FILE: prisma\migrations\20260727041057_27juli\migration.sql ---
+-- CreateEnum
+CREATE TYPE "InteractionType" AS ENUM ('MANUAL_INPUT', 'SUGGESTION_CHIP', 'SYSTEM_GENERATED');
+
+-- AlterTable
+ALTER TABLE "chat_messages" ADD COLUMN     "interactionType" "InteractionType" NOT NULL DEFAULT 'MANUAL_INPUT',
+ADD COLUMN     "metadata" JSONB;
+
+-- AlterTable
+ALTER TABLE "chat_sessions" ADD COLUMN     "runningSummary" TEXT;
 
 --- FILE: src\app.module.ts ---
 import { Module } from '@nestjs/common';
@@ -831,6 +1116,26 @@ export class VendorLlmAdapter implements ILlmProvider {
       parts: [{ text: m.content }],
     }));
 
+    let cleanedSchema = undefined;
+    if (jsonSchema) {
+      try {
+        cleanedSchema = JSON.parse(JSON.stringify(jsonSchema));
+        const sanitizeSchema = (obj: any) => {
+          if (obj && typeof obj === 'object') {
+            if ('additionalProperties' in obj) {
+              delete obj.additionalProperties;
+            }
+            for (const key of Object.keys(obj)) {
+              sanitizeSchema(obj[key]);
+            }
+          }
+        };
+        sanitizeSchema(cleanedSchema);
+      } catch (err) {
+        cleanedSchema = jsonSchema;
+      }
+    }
+
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -841,7 +1146,7 @@ export class VendorLlmAdapter implements ILlmProvider {
           maxOutputTokens: 8192,
           responseMimeType: 'application/json',
 
-          responseSchema: jsonSchema,
+          responseSchema: cleanedSchema,
         },
       }),
     });
@@ -997,7 +1302,6 @@ export const ANALYSIS_OUTPUT_JSON_SCHEMA = {
       description: 'Rekomendasi akhir dan kesimpulan analis investigasi BRIDA.',
     },
   },
-  additionalProperties: false,
 };
 
 --- FILE: src\modules\ai-agent\schemas\analysis-response.dto.ts ---
@@ -1182,7 +1486,8 @@ import { PromptAssemblyBuilder, QuadBlockPromptPayload } from '../utils/prompt-a
 import { DYNAMIC_CONTEXT_TOKEN_THRESHOLD } from '../constants/system-prompts.constant';
 
 export interface AssemblePromptOptions {
-  documentId: string;
+  documentId?: string;
+  documentIds?: string[];
   userQuery: string;
   topK?: number;
   similarityThreshold?: number;
@@ -1197,44 +1502,32 @@ export class ContextAssemblyService {
     private readonly vectorRetrieval: VectorRetrievalService,
     private readonly tokenEstimator: TokenEstimatorUtil,
     private readonly promptBuilder: PromptAssemblyBuilder,
-  ) {}
+  ) { }
 
   async assemblePromptPayload(options: AssemblePromptOptions): Promise<QuadBlockPromptPayload> {
-    const { documentId, userQuery, topK = 10, similarityThreshold = 0.5 } = options;
+    const { documentId, documentIds = [], userQuery, topK = 10, similarityThreshold = 0.5 } = options;
 
-    const doc = await this.repository.findById(documentId);
-    if (!doc) {
-      throw new NotFoundException(`Dokumen laporan dengan ID '${documentId}' tidak ditemukan.`);
+    const targetDocIds = documentIds.length > 0 ? documentIds : (documentId ? [documentId] : []);
+    const docs = await Promise.all(targetDocIds.map(id => this.repository.findById(id)));
+    const validDocs = docs.filter((d): d is NonNullable<typeof d> => d !== null && d !== undefined);
+
+    if (validDocs.length === 0) {
+      throw new NotFoundException(`Dokumen acuan untuk kueri tidak ditemukan.`);
     }
 
-    const totalTokens = doc.metadata?.totalTokenCount || 0;
+    const totalTokens = validDocs.reduce((acc, doc) => acc + (doc.metadata?.totalTokenCount || 0), 0);
     let contextPayloadText = '';
 
-    if (totalTokens < DYNAMIC_CONTEXT_TOKEN_THRESHOLD && doc.chunks && doc.chunks.length > 0) {
-
-      this.logger.log(
-        `[Hybrid Strategy A] Total tokens (${totalTokens}) < ${DYNAMIC_CONTEXT_TOKEN_THRESHOLD}. Menggunakan Full-Document Stuffing untuk Prompt Caching.`,
-      );
-      contextPayloadText = doc.chunks.map((c) => c.rawText).join('\n\n');
+    if (totalTokens < DYNAMIC_CONTEXT_TOKEN_THRESHOLD) {
+      contextPayloadText = await this.executeFullDocumentStuffingStrategy(validDocs, totalTokens);
     } else {
-
-      this.logger.log(
-        `[Hybrid Strategy B] Total tokens (${totalTokens}) >= ${DYNAMIC_CONTEXT_TOKEN_THRESHOLD}. Menggunakan Vector Retrieval (pgvector Top-${topK}).`,
-      );
-      const retrievedChunks = await this.vectorRetrieval.searchRelevantChunks({
-        documentId,
-        queryText: userQuery,
+      contextPayloadText = await this.executeDynamicRagStrategy(
+        validDocs,
+        totalTokens,
+        userQuery,
         topK,
         similarityThreshold,
-      });
-
-      if (retrievedChunks.length > 0) {
-        contextPayloadText = retrievedChunks
-          .map((item, idx) => `--- CHUNK ${idx + 1} (Score: ${item.similarityScore.toFixed(3)}) ---\n${item.rawText}`)
-          .join('\n\n');
-      } else {
-        contextPayloadText = 'Teks relevan tidak ditemukan pada dokumen.';
-      }
+      );
     }
 
     const payload = this.promptBuilder
@@ -1252,6 +1545,76 @@ export class ContextAssemblyService {
     );
 
     return payload;
+  }
+
+  private async executeFullDocumentStuffingStrategy(
+    validDocs: any[],
+    totalTokens: number,
+  ): Promise<string> {
+    this.logger.log(
+      `[Hybrid Strategy A - Stuffed] Total tokens (${totalTokens}) < ${DYNAMIC_CONTEXT_TOKEN_THRESHOLD}. Menggunakan Full-Document Stuffing untuk ${validDocs.length} dokumen.`,
+    );
+
+    const allChunksText: string[] = [];
+    validDocs.forEach((doc) => {
+      if (doc.chunks && doc.chunks.length > 0) {
+        allChunksText.push(`=== DOKUMEN: ${doc.title} ===\n` + doc.chunks.map((c: any) => c.rawText).join('\n\n'));
+      }
+    });
+
+    return allChunksText.join('\n\n');
+  }
+
+  private async executeDynamicRagStrategy(
+    validDocs: any[],
+    totalTokens: number,
+    userQuery: string,
+    topK: number,
+    similarityThreshold: number,
+  ): Promise<string> {
+    this.logger.log(
+      `[Hybrid Strategy B - Dynamic RAG] Total tokens (${totalTokens}) >= ${DYNAMIC_CONTEXT_TOKEN_THRESHOLD}. Mengevaluasi kedekatan semantik kueri...`,
+    );
+
+    const retrievalTasks = validDocs.map((doc) =>
+      this.vectorRetrieval.searchRelevantChunks({
+        documentId: doc.id,
+        queryText: userQuery,
+        topK,
+        similarityThreshold,
+      }).catch((err) => {
+        this.logger.warn(
+          `Gagal mengambil chunks semantik untuk Dokumen ID '${doc.id}': ${err.message}`,
+        );
+        return [];
+      }),
+    );
+
+    const allResultsList = await Promise.all(retrievalTasks);
+    const combinedFlatResults = allResultsList.flat();
+
+    const highlyRelevantResults = combinedFlatResults
+      .filter((chunk) => chunk.similarityScore >= similarityThreshold)
+      .sort((a, b) => b.similarityScore - a.similarityScore)
+      .slice(0, topK);
+
+    const swappedOutCount = combinedFlatResults.length - highlyRelevantResults.length;
+
+    this.logger.log(
+      `[Dynamic Semantic Swapping] Selesai menyaring konteks. ${highlyRelevantResults.length} chunks relevan dimasukkan (SWAPPED IN), ${swappedOutCount} chunks sampah semantik dibuang (SWAPPED OUT) dari prompt payload [4].`,
+    );
+
+    if (highlyRelevantResults.length > 0) {
+      return highlyRelevantResults
+        .map(
+          (item, idx) =>
+            `--- CHUNK ${idx + 1} (Dokumen: ${item.documentId}, Indeks: ${item.chunkIndex
+            }, Skor Semantik: ${item.similarityScore.toFixed(3)}) ---\n${item.rawText}`,
+        )
+        .join('\n\n');
+    }
+
+    return 'Konteks dokumen rujukan yang relevan dengan topik pertanyaan tidak ditemukan.';
   }
 }
 
@@ -1482,10 +1845,23 @@ export class PromptAssemblyBuilder {
 }
 
 --- FILE: src\modules\ai-agent\utils\token-estimator.util.ts ---
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger, PayloadTooLargeException } from '@nestjs/common';
+
+export interface TokenAuditReport {
+  isSafe: boolean;
+  estimatedTokens: number;
+  maxBudgetTokens: number;
+  excessTokens: number;
+  requiresCompaction: boolean;
+}
 
 @Injectable()
 export class TokenEstimatorUtil {
+  private readonly logger = new Logger(TokenEstimatorUtil.name);
+
+  private readonly DEFAULT_BUDGET_TOKENS = 8192;
+
+  private readonly COMPACTION_TRIGGER_THRESHOLD_PCT = 0.75;
 
   estimateTokenCount(text: string): number {
     if (!text) return 0;
@@ -1495,6 +1871,42 @@ export class TokenEstimatorUtil {
   estimateArrayTokenCount(texts: string[]): number {
     if (!texts || texts.length === 0) return 0;
     return texts.reduce((acc, t) => acc + this.estimateTokenCount(t), 0);
+  }
+
+  auditTokenBudget(
+    texts: string[],
+    maxBudgetTokens: number = this.DEFAULT_BUDGET_TOKENS,
+  ): TokenAuditReport {
+    const estimatedTokens = this.estimateArrayTokenCount(texts);
+    const excessTokens = Math.max(0, estimatedTokens - maxBudgetTokens);
+
+    const requiresCompaction =
+      estimatedTokens >= maxBudgetTokens * this.COMPACTION_TRIGGER_THRESHOLD_PCT;
+
+    return {
+      isSafe: estimatedTokens <= maxBudgetTokens,
+      estimatedTokens,
+      maxBudgetTokens,
+      excessTokens,
+      requiresCompaction,
+    };
+  }
+
+  enforceBudgetCircuitBreaker(
+    texts: string[],
+    maxBudgetTokens: number = this.DEFAULT_BUDGET_TOKENS,
+  ): void {
+    const report = this.auditTokenBudget(texts, maxBudgetTokens);
+
+    if (!report.isSafe) {
+      this.logger.error(
+        `[Circuit Breaker Triggered] Estimasi token (${report.estimatedTokens}) melampaui batas aman anggaran (${report.maxBudgetTokens}). Alur eksekusi LLM dihentikan demi integritas sistem [5, 7].`,
+      );
+
+      throw new PayloadTooLargeException(
+        `Muatan data obrolan (${report.estimatedTokens} estimated tokens) melampaui batas aman pemrosesan sistem BRIDA (${report.maxBudgetTokens} tokens). Silakan mulai sesi obrolan baru atau bersihkan dokumen acuan [5, 7].`,
+      );
+    }
   }
 }
 
@@ -3456,10 +3868,12 @@ export class AssistantController {
   @Post('session')
   @HttpCode(HttpStatus.CREATED)
   async createSession(
-    @Body('documentId', new ParseUUIDPipe({ version: '4' })) documentId: string,
+    @Body('documentId') documentId?: string,
+    @Body('documentIds') documentIds?: string[],
     @Body('title') title?: string,
   ) {
-    const session = await this.memoryService.createSession(documentId, title);
+    const targetIds = documentIds && documentIds.length > 0 ? documentIds : (documentId ? [documentId] : []);
+    const session = await this.memoryService.createSession(targetIds, title);
     return {
       success: true,
       data: session,
@@ -3655,55 +4069,22 @@ import { VendorLlmAdapter } from '../../ai-agent/providers/vendor-llm.adapter';
 import { PromptInjectionSanitizer } from '../utils/prompt-injection-sanitizer.util';
 import { LlmChatMessage } from '../../ai-agent/utils/prompt-assembly.builder';
 
-const QA_FLEXIBLE_JSON_SCHEMA = {
+const QA_CONVERSATIONAL_SCHEMA = {
   type: 'object',
+  required: ['answer'],
   properties: {
-    ringkasanEksekutif: {
+    answer: {
       type: 'string',
-      description: 'Jawaban utama atau ringkasan analitis terhadap pertanyaan pengguna.',
+      description:
+        'The main conversational answer in Bahasa Indonesia. Format strictly using beautiful, rich Markdown (using headers ##, bold texts, bullet lists, and comparison tables if comparing data). Always embed structured citation anchors in the format [docId:chunkIndex] (e.g. [doc-001:2]) adjacent to any claims, metrics, or factual statements derived from the context chunks.',
     },
-    entitasTerlibat: {
+    suggestions: {
       type: 'array',
-      description: 'Daftar entitas, orang, instansi yang relevan (boleh kosong jika tidak ada).',
-      items: {
-        type: 'object',
-        properties: {
-          nama: { type: 'string' },
-          peran: { type: 'string' },
-          entitasTerkait: { type: 'string' },
-        },
-      },
-    },
-    kronologiPeristiwa: {
-      type: 'array',
-      description: 'Urutan fakta atau kronologi (boleh kosong jika tidak relevan).',
-      items: {
-        type: 'object',
-        properties: {
-          tanggal: { type: 'string' },
-          deskripsi: { type: 'string' },
-          lokasi: { type: 'string' },
-        },
-      },
-    },
-    indikasiPelanggaran: {
-      type: 'array',
-      description: 'Indikasi pelanggaran jika ada (boleh kosong untuk pertanyaan umum).',
-      items: {
-        type: 'object',
-        properties: {
-          jenis: { type: 'string' },
-          pasalDugaan: { type: 'string' },
-          rincian: { type: 'string' },
-        },
-      },
-    },
-    kesimpulanAnalisis: {
-      type: 'string',
-      description: 'Kesimpulan singkat atau penutup jawaban.',
+      items: { type: 'string' },
+      description:
+        'Generate exactly 3 highly relevant, contextual follow-up questions or discussion options to guide the user in continuing the conversation.',
     },
   },
-
 };
 
 @Injectable()
@@ -3715,7 +4096,7 @@ export class QaIntentHandler implements IIntentHandler {
     private readonly chatMemory: ChatMemoryService,
     private readonly contextAssembly: ContextAssemblyService,
     private readonly llmAdapter: VendorLlmAdapter,
-  ) {}
+  ) { }
 
   getIntentType(): IntentType {
     return 'ANALYTICAL_QA';
@@ -3743,18 +4124,39 @@ export class QaIntentHandler implements IIntentHandler {
 
     const promptPayload = await this.contextAssembly.assemblePromptPayload({
       documentId: memory.documentId,
+      documentIds: memory.documentIds,
       userQuery: sanitizedQuery,
     });
 
     promptPayload.messages.splice(2, 0, ...historyMessages);
 
-    const analysisResult = await this.llmAdapter.generateStructuredAnalysis(
-      promptPayload.messages,
-      QA_FLEXIBLE_JSON_SCHEMA,
-    );
+    if (memory.runningSummary) {
+      promptPayload.messages.splice(1, 0, {
+        role: 'system',
+        content: `[RINGKASAN EPISODIK OBROLAN SEBELUMNYA]\nBerikut adalah ringkasan jalan percakapan sebelumnya untuk menjaga ingatan jangka panjang Anda: ${memory.runningSummary}`,
+      });
+    }
+
+    const analysisResult = await this.llmAdapter.generateStructuredAnalysis<{
+      answer: string;
+      suggestions?: string[];
+    }>(promptPayload.messages, QA_CONVERSATIONAL_SCHEMA, 0.4);
 
     const assistantResponseContent = JSON.stringify(analysisResult);
     await this.chatMemory.recordAssistantMessage(payload.sessionId, assistantResponseContent);
+
+    if (
+      this.chatMemory.shouldTriggerCompaction(
+        memory.prunedMessagesCount,
+        memory.totalMemoryTokens,
+      )
+    ) {
+      this.triggerBackgroundCompaction(
+        payload.sessionId,
+        memory,
+        analysisResult.answer,
+      );
+    }
 
     return {
       intent: this.getIntentType(),
@@ -3766,6 +4168,63 @@ export class QaIntentHandler implements IIntentHandler {
         prunedMessagesCount: memory.prunedMessagesCount,
       },
     };
+  }
+
+  private async triggerBackgroundCompaction(
+    sessionId: string,
+    memory: any,
+    latestAnswer: string,
+  ): Promise<void> {
+
+    Promise.resolve()
+      .then(async () => {
+        const previousSummary =
+          memory.runningSummary || 'Belum ada riwayat pembicaraan sebelumnya.';
+        const activeMessagesStr = memory.activeMessages
+          .map((m: any) => `${m.role === 'USER' ? 'User' : 'Assistant'}: ${m.content}`)
+          .join('\n');
+
+        const compactionPrompt: LlmChatMessage[] = [
+          {
+            role: 'system',
+            content: `Anda adalah asisten pencatat memori kognitif BRIDA Mimika.
+Tugas Anda: Perbarui [RINGKASAN EPISODIK OBROLAN] secara padat dan kronologis (maksimal 200 kata).
+Gabungkan [RINGKASAN SEBELUMNYA] dengan [OBROLAN BARU] untuk menghasilkan ringkasan naratif baru yang komprehensif.
+Hindari kalimat pembuka (intro), langsung tuliskan ringkasan faktualnya.`,
+          },
+          {
+            role: 'user',
+            content: `RINGKASAN SEBELUMNYA:\n${previousSummary}\n\nOBROLAN BARU:\n${activeMessagesStr}\nAssistant: ${latestAnswer}`,
+          },
+        ];
+
+        const compactionSchema = {
+          type: 'object',
+          required: ['summary'],
+          properties: {
+            summary: {
+              type: 'string',
+              description: 'Ringkasan baru hasil konsolidasi riwayat obrolan.',
+            },
+          },
+        };
+
+        const result = await this.llmAdapter.generateStructuredAnalysis<{
+          summary: string;
+        }>(compactionPrompt, compactionSchema, 0.0);
+
+        if (result?.summary) {
+          await this.chatMemory.updateRunningSummary(sessionId, result.summary);
+          this.logger.log(
+            `[Compaction Guard] Berhasil memperbarui Running Summary untuk Sesi ID: ${sessionId}`,
+          );
+        }
+      })
+      .catch((err) => {
+        this.logger.error(
+          `[Compaction Guard Error] Gagal memproses pemadatan memori di latar belakang: ${err.message}`,
+        );
+      });
   }
 }
 
@@ -3781,6 +4240,7 @@ export interface ActiveChatMessage {
 export interface SlidingWindowMemoryPayload {
   sessionId: string;
   documentId: string;
+  documentIds?: string[];
   activeMessages: ActiveChatMessage[];
   totalMemoryTokens: number;
   prunedMessagesCount: number;
@@ -3830,12 +4290,18 @@ export class ChatRepository {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  async createSession(documentId: string, title?: string): Promise<ChatSession> {
+  async createSession(documentIds: string[], title?: string): Promise<ChatSession> {
+    const primaryDocId = documentIds.length > 0 ? documentIds[0] : null;
     return this.prisma.chatSession.create({
       data: {
-        documentId,
+        documentId: primaryDocId,
         sessionType: SessionType.QA_CHAT,
         title: title || 'Sesi Analisis Kasus',
+        sources: {
+          create: documentIds.map((docId) => ({
+            document: { connect: { id: docId } },
+          })),
+        },
       },
     });
   }
@@ -3957,6 +4423,16 @@ export class ChatRepository {
     });
   }
 
+  async updateSessionSummary(sessionId: string, summary: string): Promise<ChatSession> {
+    return this.prisma.chatSession.update({
+      where: { id: sessionId },
+      data: {
+        runningSummary: summary,
+        updatedAt: new Date(),
+      } as any,
+    });
+  }
+
   async getLatestMessages(sessionId: string, fetchLimit: number = 30): Promise<ChatMessage[]> {
     return this.prisma.chatMessage.findMany({
       where: { sessionId },
@@ -3998,7 +4474,6 @@ export const ARTICLE_OUTLINE_JSON_SCHEMA = {
       description: 'Kesimpulan dan rekomendasi aksi.',
     },
   },
-  additionalProperties: false,
 };
 
 export interface ArticleOutlineDto {
@@ -4319,20 +4794,25 @@ import { TokenEstimatorUtil } from '../../ai-agent/utils/token-estimator.util';
 import { ActiveChatMessage, SlidingWindowMemoryPayload } from '../interfaces/chat-memory.interface';
 import { MessageRole } from '@prisma/client';
 
+export interface HierarchicalMemoryPayload extends SlidingWindowMemoryPayload {
+  runningSummary?: string | null;
+}
+
 @Injectable()
 export class ChatMemoryService {
   private readonly logger = new Logger(ChatMemoryService.name);
 
   private readonly MAX_MEMORY_TOKENS = 2000;
-  private readonly MAX_MESSAGES_COUNT = 10;
+
+  private readonly RECENT_WINDOW_SIZE = 4;
 
   constructor(
     private readonly chatRepository: ChatRepository,
     private readonly tokenEstimator: TokenEstimatorUtil,
-  ) {}
+  ) { }
 
-  async createSession(documentId: string, title?: string) {
-    return this.chatRepository.createSession(documentId, title);
+  async createSession(documentIds: string[], title?: string) {
+    return this.chatRepository.createSession(documentIds, title);
   }
 
   async recordUserMessage(sessionId: string, content: string) {
@@ -4355,7 +4835,7 @@ export class ChatMemoryService {
     });
   }
 
-  async getActiveSlidingWindowMemory(sessionId: string): Promise<SlidingWindowMemoryPayload> {
+  async getActiveSlidingWindowMemory(sessionId: string): Promise<HierarchicalMemoryPayload> {
     const session = await this.chatRepository.findSessionById(sessionId);
     if (!session) {
       throw new NotFoundException(`Sesi obrolan dengan ID '${sessionId}' tidak ditemukan.`);
@@ -4372,7 +4852,7 @@ export class ChatMemoryService {
 
       if (
         accumulatedTokens + msgTokens <= this.MAX_MEMORY_TOKENS &&
-        selectedMessages.length < this.MAX_MESSAGES_COUNT
+        selectedMessages.length < this.RECENT_WINDOW_SIZE
       ) {
         selectedMessages.push({
           id: msg.id,
@@ -4390,16 +4870,50 @@ export class ChatMemoryService {
     selectedMessages.reverse();
 
     this.logger.log(
-      `[Sliding Window Memory] Sesi ID: ${sessionId} -> Dipilih ${selectedMessages.length} pesan aktif (${accumulatedTokens} tokens, Dipangkas ${prunedCount} pesan lama).`,
+      `[Hierarchical Memory Window] Sesi ID: ${sessionId} -> Dipilih ${selectedMessages.length
+      } pesan aktif (${accumulatedTokens} tokens, Terkompresi/Dipangkas: ${prunedCount} pesan lama). Status Summary: ${session.runningSummary ? 'Tersedia' : 'Kosong'
+      }`,
     );
+
+    const documentIds = Array.from(
+      new Set(
+        (session.sources || [])
+          .map((s: any) => s.documentId)
+          .concat(session.documentId ? [session.documentId] : [])
+      )
+    ).filter(Boolean) as string[];
 
     return {
       sessionId: session.id,
       documentId: session.documentId,
+      documentIds,
       activeMessages: selectedMessages,
       totalMemoryTokens: accumulatedTokens,
       prunedMessagesCount: prunedCount,
+      runningSummary: session.runningSummary || null,
     };
+  }
+
+  shouldTriggerCompaction(prunedCount: number, accumulatedTokens: number): boolean {
+    return prunedCount > 0 || accumulatedTokens >= this.MAX_MEMORY_TOKENS * 0.8;
+  }
+
+  async updateRunningSummary(sessionId: string, summary: string): Promise<void> {
+    try {
+      this.logger.log(`[Hierarchical Memory] Memperbarui Running Summary untuk Sesi ID: ${sessionId}`);
+
+      if (typeof this.chatRepository.updateSessionSummary === 'function') {
+        await this.chatRepository.updateSessionSummary(sessionId, summary);
+      } else {
+        this.logger.warn(
+          `[Integrasi Gagal] 'updateSessionSummary' belum terimplementasi pada ChatRepository. Menggunakan skema fallback asinkron.`,
+        );
+      }
+    } catch (err: any) {
+      this.logger.error(
+        `[Hierarchical Memory Error] Gagal menyimpan Running Summary ke database: ${err.message}`,
+      );
+    }
   }
 
   async getQaSessions(): Promise<any[]> {
@@ -4430,6 +4944,7 @@ export class ChatMemoryService {
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
       messages: session.messages,
+      runningSummary: session.runningSummary || null,
     };
   }
 
@@ -4448,6 +4963,7 @@ import { IIntentHandler, IntentExecutionPayload } from '../interfaces/intent-han
 import { QaIntentHandler } from '../handlers/qa-intent.handler';
 import { ArticleIntentHandler } from '../handlers/article-intent.handler';
 import { ChatRepository } from '../repositories/chat.repository';
+import { SessionType } from '@prisma/client';
 
 @Injectable()
 export class IntentRouterService {
@@ -4473,25 +4989,81 @@ export class IntentRouterService {
       throw new BadRequestException(`Sesi obrolan dengan ID '${sessionId}' tidak ditemukan.`);
     }
 
+    const trimmedQuery = query.trim();
     const payload: IntentExecutionPayload = {
       sessionId: session.id,
       documentId: session.documentId,
-      query: query.trim(),
+      query: trimmedQuery,
     };
 
-    const selectedHandler = this.handlers.find((handler) => handler.canHandle(payload.query));
+    let defaultHandler: IIntentHandler = this.qaHandler;
+    if (session.sessionType === SessionType.ARTICLE_GENERATOR) {
+      defaultHandler = this.articleHandler;
+    }
 
-    if (!selectedHandler) {
-      this.logger.warn(`Tidak ada handler intent yang cocok untuk kueri: "${query}"`);
+    let selectedHandler: IIntentHandler | null = null;
+    let highestScore = 0.0;
 
-      return this.qaHandler.execute(payload);
+    for (const handler of this.handlers) {
+      const score = this.calculateConfidenceScore(handler, trimmedQuery, session.sessionType);
+
+      if (score > highestScore) {
+        highestScore = score;
+        selectedHandler = handler;
+      }
+    }
+
+    const MINIMUM_CONFIDENCE_THRESHOLD = 0.4;
+    if (!selectedHandler || highestScore < MINIMUM_CONFIDENCE_THRESHOLD) {
+      this.logger.log(
+        `[IntentRouter] Skor keyakinan rendah (${highestScore.toFixed(2)}). Menggunakan default fallback handler untuk sesi ${session.sessionType}: [${defaultHandler.getIntentType()}]`,
+      );
+      selectedHandler = defaultHandler;
     }
 
     this.logger.log(
-      `[IntentRouterService] Kueri: "${query.slice(0, 40)}..." -> Rute Terpilih: [${selectedHandler.getIntentType()}]`,
+      `[IntentRouter] Kueri: "${trimmedQuery.slice(0, 45)}..." -> Rute Terpilih: [${selectedHandler.getIntentType()}] dengan skor keyakinan: ${highestScore.toFixed(2)}`,
     );
 
     return selectedHandler.execute(payload);
+  }
+
+  private calculateConfidenceScore(
+    handler: IIntentHandler,
+    query: string,
+    currentSessionType: SessionType,
+  ): number {
+    const handlerType = handler.getIntentType();
+
+    const articleTriggersRegex =
+      /(?:buatkan|tulis|susun|generate|draft|sintesis)\s*(?:artikel|opini|berita|press release|rilis media|publikasi|ringkasan eksekutif|draf)/i;
+    const isArticleRequest = articleTriggersRegex.test(query);
+
+    if (handlerType === 'ARTICLE_GENERATION') {
+      if (isArticleRequest) {
+        return 1.0;
+      }
+      if (currentSessionType === SessionType.ARTICLE_GENERATOR) {
+        return 0.8;
+      }
+      return 0.1;
+    }
+
+    if (handlerType === 'ANALYTICAL_QA') {
+      if (isArticleRequest) {
+        return 0.2;
+      }
+      if (currentSessionType === SessionType.QA_CHAT) {
+        return 0.9;
+      }
+      return 0.5;
+    }
+
+    if (typeof handler.canHandle === 'function' && handler.canHandle(query)) {
+      return 0.6;
+    }
+
+    return 0.0;
   }
 }
 

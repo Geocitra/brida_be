@@ -58,5 +58,4 @@ export const ANALYSIS_OUTPUT_JSON_SCHEMA = {
       description: 'Rekomendasi akhir dan kesimpulan analis investigasi BRIDA.',
     },
   },
-  additionalProperties: false,
 };
