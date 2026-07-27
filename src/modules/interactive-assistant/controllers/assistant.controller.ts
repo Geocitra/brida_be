@@ -165,4 +165,20 @@ export class AssistantController {
       message: `Sesi artikel ID '${id}' berhasil dihapus.`,
     };
   }
+
+  // Tambahkan di AssistantController
+  @Get('article/sessions/:id/export-data')
+  async getArticleExportData(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
+    // Menggunakan service yang sudah ada
+    const data = await this.articleGeneratorService.getArticleSessionById(id);
+    return {
+      success: true,
+      data: {
+        title: data.articleTitle,
+        content: data.fullArticleText,
+        tone: data.tone,
+        generatedAt: data.updatedAt
+      }
+    };
+  }
 }
