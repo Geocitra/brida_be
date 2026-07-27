@@ -74,6 +74,11 @@ export class DocumentRepository {
     const threshold = params.similarityThreshold ?? 0.5;
     const vectorStr = `[${params.queryVector.join(',')}]`;
 
+    // Skor placeholder yang digunakan saat pgvector tidak tersedia.
+    // Nilai 0.5 dipilih secara sadar sebagai sinyal "medium-confidence fallback" —
+    // bukan nilai tinggi (agar tidak menyesatkan pipeline RAG) dan bukan 0 (agar tidak diabaikan).
+    const FALLBACK_SIMILARITY_SCORE = 0.5;
+
     try {
       // Parameterized Raw SQL using 1 - (embedding <=> $1::vector) as Cosine Similarity Score
       const rawResults: any[] = await this.prisma.$queryRawUnsafe(
@@ -108,8 +113,21 @@ export class DocumentRepository {
         tokenCount: r.tokenCount,
         similarityScore: parseFloat(r.similarityScore) || 0.85,
       }));
-    } catch {
-      // Fallback query if vector extension is not loaded in local DB
+    } catch (err: unknown) {
+      // [FAIL-TRANSPARENT] Catat galat pgvector secara eksplisit sebelum beralih ke fallback.
+      // Kegagalan diam-diam di sini akan menyebabkan RAG pipeline mendapatkan hasil non-semantik
+      // tanpa ada sinyal peringatan, mempersulit debugging produksi secara signifikan.
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      const errorStack   = err instanceof Error ? err.stack : undefined;
+      this.logger.error(
+        `[pgvector FALLBACK] Gagal menjalankan vector similarity search untuk Dokumen ID: ${params.documentId}. ` +
+        `Beralih ke sequential chunk retrieval (hasil NON-SEMANTIK). ` +
+        `Pastikan ekstensi pgvector aktif di PostgreSQL dan indeks vektor tidak rusak. ` +
+        `Error: ${errorMessage}`,
+        errorStack,
+      );
+
+      // Fallback query — mengambil chunk awal secara sekuensial (BUKAN semantic search)
       const chunks = await this.prisma.documentChunk.findMany({
         where: { documentId: params.documentId },
         take: limit,
@@ -122,7 +140,9 @@ export class DocumentRepository {
         chunkIndex: c.chunkIndex,
         rawText: c.rawText,
         tokenCount: c.tokenCount,
-        similarityScore: 0.88,
+        // Skor eksplisit rendah — menandai bahwa hasil ini adalah fallback non-semantik,
+        // bukan hasil cosine similarity sesungguhnya
+        similarityScore: FALLBACK_SIMILARITY_SCORE,
       }));
     }
   }

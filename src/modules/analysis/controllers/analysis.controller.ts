@@ -1,5 +1,5 @@
 import { Controller, Post, Get, Body, HttpCode, HttpStatus } from '@nestjs/common';
-import { IsString, IsNumber, IsOptional } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsArray } from 'class-validator';
 import { AnalysisMathService } from '../services/analysis-math.service';
 import { AnalysisCausalService } from '../services/analysis-causal.service';
 import { PrismaService } from '../../../common/prisma/prisma.service';
@@ -35,6 +35,8 @@ export class CompareAnalysisDto {
   realizationDocId?: string;
 
   @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
   documentIds?: string[];
 }
 
@@ -44,7 +46,7 @@ export class AnalysisController {
     private readonly mathService: AnalysisMathService,
     private readonly causalService: AnalysisCausalService,
     private readonly prisma: PrismaService,
-  ) {}
+  ) { }
 
   @Get('indicators')
   async getIndicatorMatrix() {
@@ -135,12 +137,55 @@ export class AnalysisController {
       dto.unitSuffix || ' M',
     );
 
-    // 2. AI Causal Inference & Recommendation Engine
+    // 2. Resolusi Peran Dokumen secara Cerdas (Fallback & Auto-Detection)
+    let resolvedBaselineId = dto.baselineDocId;
+    let resolvedRealizationId = dto.realizationDocId;
+
+    // Jika salah satu ID kosong, tetapi frontend mengirimkan kumpulan documentIds mentah
+    if (
+      (!resolvedBaselineId || !resolvedRealizationId) &&
+      dto.documentIds &&
+      dto.documentIds.length > 0
+    ) {
+      // Ambil metadata dari PostgreSQL untuk mendeteksi 'docType' dokumen yang diteruskan
+      const docs = await this.prisma.reportDocument.findMany({
+        where: {
+          id: { in: dto.documentIds },
+        },
+        include: {
+          metadata: true,
+        },
+      });
+
+      // Deteksi otomatis untuk Baseline
+      if (!resolvedBaselineId) {
+        const foundBaseline = docs.find((d) => d.metadata?.docType === 'BASELINE');
+        if (foundBaseline) {
+          resolvedBaselineId = foundBaseline.id;
+        } else if (docs.length > 0) {
+          // Fallback teraman: Gunakan dokumen pertama dalam antrean
+          resolvedBaselineId = docs[0].id;
+        }
+      }
+
+      // Deteksi otomatis untuk Realisasi
+      if (!resolvedRealizationId) {
+        const foundRealization = docs.find((d) => d.metadata?.docType === 'REALIZATION');
+        if (foundRealization) {
+          resolvedRealizationId = foundRealization.id;
+        } else if (docs.length > 0) {
+          // Fallback teraman: Gunakan dokumen kedua (jika ada), atau gunakan dokumen pertama
+          resolvedRealizationId = docs[1]?.id || docs[0].id;
+        }
+      }
+    }
+
+    // 3. AI Causal Inference & Recommendation Engine
     const causalResult = await this.causalService.analyzeCausalFactors(
       dto.indicatorName,
       mathResult.deviationPercentage,
-      dto.baselineDocId,
-      dto.realizationDocId,
+      resolvedBaselineId,
+      resolvedRealizationId,
     );
 
     return {

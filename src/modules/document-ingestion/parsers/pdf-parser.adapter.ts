@@ -1,5 +1,5 @@
 import { Injectable, UnprocessableEntityException, Logger } from '@nestjs/common';
-import * as pdfParse from 'pdf-parse';
+import pdfParse from 'pdf-parse';
 import { IDocumentParser, ParsedDocumentOutput } from '../interfaces/document-parser.interface';
 
 @Injectable()

@@ -4462,6 +4462,17 @@ export class ChatRepository {
       take: fetchLimit,
     });
   }
+
+  async updateArticleMetadata(sessionId: string, articleTitle: string): Promise<void> {
+    await this.prisma.chatSession.update({
+      where: { id: sessionId },
+      data: {
+        articleTitle,
+        title: articleTitle,
+        updatedAt: new Date(),
+      } as any,
+    });
+  }
 }
 
 --- FILE: src\modules\interactive-assistant\schemas\article-outline.schema.ts ---
