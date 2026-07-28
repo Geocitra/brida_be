@@ -3,13 +3,13 @@ import {
   Logger,
   NotFoundException,
   BadRequestException,
-  PayloadTooLargeException // Impor untuk penanganan kegagalan batas aman token [5, 7]
+  PayloadTooLargeException // Penanganan defensive anggaran token [5, 7]
 } from '@nestjs/common';
 import { DocumentRepository } from '../../document-ingestion/repositories/document.repository';
 import { VendorLlmAdapter } from '../../ai-agent/providers/vendor-llm.adapter';
 import { ChatRepository } from '../repositories/chat.repository';
 import { TokenEstimatorUtil } from '../../ai-agent/utils/token-estimator.util';
-import { ArticleLength, MessageRole, SessionType } from '@prisma/client'; // Menambahkan impor SessionType dari Prisma Client [1]
+import { ArticleLength, MessageRole, SessionType } from '@prisma/client';
 
 export interface GenerateArticleOptions {
   documentIds: string[];
@@ -24,9 +24,9 @@ export interface GenerateArticleOptions {
       fakta: string;
       sitasiAsli: string;
     }>;
-    kesimpulanRingkas?: string;
-  }; // Parameter Baru untuk menampung SSM dari Pass-1
-  parentSessionId?: string; // Parameter Baru penampung ID sesi QA asal
+    kesiaxialRingkas?: string;
+  };
+  parentSessionId?: string;
 }
 
 @Injectable()
@@ -45,7 +45,7 @@ export class ArticleGeneratorService {
 
   /**
    * Mensintesis draf naskah artikel baru berdasarkan multi-dokumen rujukan,
-   * dengan dukungan integrasi SSM (Structured Synthesis Manifest) hasil transisi diskusi.
+   * dengan jaminan output format Markdown bersih dan terstandarisasi.
    */
   async generateArticle(options: GenerateArticleOptions): Promise<any> {
     const {
@@ -58,7 +58,6 @@ export class ArticleGeneratorService {
       parentSessionId
     } = options;
 
-    // documentIds can be empty (Zero-Reference Mode)
     const validDocIds = documentIds || [];
     if (!articleTitle || !articleTitle.trim()) {
       throw new BadRequestException('Judul artikel tidak boleh kosong.');
@@ -76,7 +75,7 @@ export class ArticleGeneratorService {
         targetLength: targetLength as ArticleLength,
         tone,
         initialPrompt: userInstruction,
-        parentSessionId, // Hubungkan ke Sesi QA Asal
+        parentSessionId,
       });
     }
 
@@ -95,7 +94,6 @@ export class ArticleGeneratorService {
 
     const assembledDocsContext = docTexts.join('\n\n----------------------------------------\n\n');
 
-    // Tentukan panduan panjang tulisan berdasarkan parameter Target Length
     let lengthGuidance = 'Target Panjang Teks: Minimal 1000 kata (Sedang, komprehensif)';
     if (String(targetLength) === 'SHORT') {
       lengthGuidance = 'Target Panjang Teks: Minimal 700 kata (Ringkas & Padat untuk Rilis Media)';
@@ -128,11 +126,12 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
       ? `Instruksi Khusus Tambahan: ${userInstruction}`
       : 'Buatkan draf artikel publikasi yang menarik, solutif, dan berbasis data/ide yang kuat.';
 
+    // SYSTEM PROMPT: Enforcing strict CommonMark compliance (No HTML inline styles)
     const systemPrompt = `Anda adalah Penulis Artikel Utama & Analis Kebijakan BRIDA Kabupaten Mimika.
 ${validDocIds.length > 0
-  ? 'Tugas Anda: Susun artikel publikasi berbasis data aktual dari DOKUMEN ACUAN yang diberikan.'
-  : 'Tugas Anda: Susun artikel publikasi berdasarkan instruksi dan pengetahuan internal Anda (Mode Kreasi Bebas).'
-}
+        ? 'Tugas Anda: Susun artikel publikasi berbasis data aktual dari DOKUMEN ACUAN yang diberikan.'
+        : 'Tugas Anda: Susun artikel publikasi berdasarkan instruksi dan pengetahuan internal Anda (Mode Kreasi Bebas).'
+      }
 
 PANDUAN PENULISAN:
 - Judul Artikel: "${articleTitle}"
@@ -140,6 +139,12 @@ PANDUAN PENULISAN:
 - ${lengthGuidance}
 - Gunakan struktur narasi jurnalistik publik yang kuat (Judul, Subjudul, Analisis Faktual, Solusi Rekomendasi).
 ${manifestPromptSection}
+
+ATURAN FORMATTING MUTLAK (COMMONMARK COMPLIANCE - ZERO RANDOM HTML):
+1. DILARANG KERAS menghasilkan atau menyisipkan tag HTML pemformatan visual mentah kustom (seperti <p style="...">, <font>, <span style="...">, dll.) ke dalam isi naskah artikel.
+2. Semua bentuk daftar/poin wajib ditulis menggunakan simbol list standar CommonMark: gunakan tanda minus (-) atau bintang (*) diikuti oleh spasi (misalnya: - Poin Rekomendasi). Jangan gunakan tag HTML <ul> atau <li> secara manual.
+3. Penulisan judul/subjudul bab wajib menggunakan sintaks header ATX standar (# untuk Judul Utama, ## untuk Sub-judul, ### untuk Sub-sub-judul).
+4. Hindari manipulasi layout seperti menyematkan properti alignment teks visual secara inline dalam HTML. Biarkan representasi struktur dokumen murni menggunakan sintaks Markdown bersih.
 `;
 
     const userPromptMessage = validDocIds.length > 0
@@ -200,8 +205,8 @@ ${manifestPromptSection}
   }
 
   /**
-   * Memperbarui konten draf naskah artikel secara manual berdasarkan suntingan editor (Two-Way Sync) [1].
-   * Mengintegrasikan audit log ke dalam riwayat percakapan tanpa mengubah struktur tabel database [1].
+   * Memperbarui konten draf naskah artikel secara manual berdasarkan suntingan editor (Two-Way Sync).
+   * Mengintegrasikan audit log ke dalam riwayat percakapan tanpa mengubah struktur tabel database.
    */
   async updateArticleContent(
     sessionId: string,
@@ -222,7 +227,7 @@ ${manifestPromptSection}
       throw new BadRequestException('Judul artikel baru tidak boleh kosong.');
     }
 
-    // 1. Sinkronisasi judul draf pada metadata sesi obrolan di database [1]
+    // 1. Sinkronisasi judul draf pada metadata sesi obrolan di database
     if (typeof (this.chatRepository as any).updateArticleMetadata === 'function') {
       await (this.chatRepository as any).updateArticleMetadata(sessionId, trimmedTitle);
     } else {
@@ -231,7 +236,7 @@ ${manifestPromptSection}
       );
     }
 
-    // 2. Tambah Jejak Audit (Audit Trail Log) sebagai pesan sistem otomatis ke DB [1]
+    // 2. Tambah Jejak Audit (Audit Trail Log) sebagai pesan sistem otomatis ke DB
     const auditContent = 'Naskah diperbarui secara manual oleh editor.';
     await this.chatRepository.addMessage({
       sessionId: session.id,
@@ -240,7 +245,7 @@ ${manifestPromptSection}
       tokenCount: this.tokenEstimator.estimateTokenCount(auditContent),
     });
 
-    // 3. Simpan draf naskah hasil suntingan manual terbaru sebagai pesan asisten baru [1]
+    // 3. Simpan draf naskah hasil suntingan manual terbaru sebagai pesan asisten baru
     await this.chatRepository.addMessage({
       sessionId: session.id,
       role: MessageRole.ASSISTANT,
@@ -267,6 +272,10 @@ ${manifestPromptSection}
     };
   }
 
+  /**
+   * Menangani diskusi revisi kolaboratif untuk memperbarui dokumen aktif.
+   * Menjamin format tetap dalam bentuk Markdown standar demi meminimalkan noise pada RAG.
+   */
   async interactWithArticleSession(sessionId: string, userInstruction: string): Promise<any> {
     const session = await this.chatRepository.findSessionById(sessionId);
     if (!session) {
@@ -287,8 +296,16 @@ ${manifestPromptSection}
       content: m.content,
     }));
 
+    // SYSTEM PROMPT: Enforcing strict CommonMark compliance (No HTML inline styles) during iterations
     const systemPrompt = `Anda adalah Asisten Penulis & Editor Artikel BRIDA Kabupaten Mimika.
-Perbarui / revisi draf artikel berdasarkan instruksi revisi terbaru dari pengguna. Pertahankan gaya bahasa ${session.tone || 'SOLUTIF'}.`;
+Perbarui / revisi draf naskah artikel berdasarkan instruksi revisi terbaru dari pengguna. Pertahankan gaya bahasa ${session.tone || 'SOLUTIF'}.
+
+ATURAN FORMATTING MUTLAK (COMMONMARK COMPLIANCE - ZERO RANDOM HTML):
+1. DILARANG KERAS menghasilkan atau menyisipkan tag HTML kustom visual (seperti <p style="...">, <font>, dll.) ke dalam teks naskah revisi Anda.
+2. Semua daftar wajib menggunakan simbol list standar CommonMark: gunakan tanda minus (-) atau bintang (*) diikuti oleh spasi (misalnya: - Poin Evaluasi). Jangan gunakan tag HTML <ul> atau <li> secara manual.
+3. Penulisan judul/subjudul wajib menggunakan sintaks header ATX standar (#, ##, ###).
+4. Hasil revisi naskah harus dikembalikan sebagai Markdown bersih, terstruktur, dan memiliki keterbacaan tinggi.
+`;
 
     // --- INTEGRASI TOKEN BUDGET CIRCUIT BREAKER PADA PROSES INTERAKSI REVISI [5, 7] ---
     const rawConversationTexts = conversationMessages.map((m: any) => m.content).concat([systemPrompt, userInstruction]);
@@ -405,7 +422,10 @@ const ARTICLE_OUTPUT_SCHEMA = {
   properties: {
     judulUsulan: { type: 'string' },
     ringkasan: { type: 'string' },
-    fullText: { type: 'string' },
+    fullText: {
+      type: 'string',
+      description: 'Isi lengkap naskah artikel dalam format CommonMark Markdown bersih (tanpa tag HTML kustom visual).'
+    },
   },
   required: ['fullText'],
 };

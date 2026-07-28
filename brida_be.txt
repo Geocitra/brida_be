@@ -55,7 +55,7 @@ volumes:
     "@nestjs/config": "^3.1.1",
     "@nestjs/core": "^10.3.0",
     "@nestjs/platform-express": "^10.3.0",
-    "@prisma/client": "5.10.2",
+    "@prisma/client": "^5.10.2",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "jsonrepair": "^3.15.0",
@@ -252,20 +252,29 @@ model AiAnalysisLog {
 }
 
 model ChatSession {
-  id             String                 @id @default(uuid()) @db.Uuid
-  documentId     String?                @db.Uuid
-  sessionType    SessionType            @default(QA_CHAT)
-  title          String                 @default("Sesi Analisis Kasus")
-  articleTitle   String?                @db.Text
-  targetLength   ArticleLength?         @default(MEDIUM)
-  tone           String?                @default("solutif")
-  runningSummary String?                @db.Text
-  createdAt      DateTime               @default(now())
-  updatedAt      DateTime               @updatedAt
+  id              String                 @id @default(uuid()) @db.Uuid
+  documentId      String?                @db.Uuid
+  sessionType     SessionType            @default(QA_CHAT)
+  title           String                 @default("Sesi Analisis Kasus")
+  articleTitle    String?                @db.Text
+  targetLength    ArticleLength?         @default(MEDIUM)
+  tone            String?                @default("solutif")
+  runningSummary  String?                @db.Text
 
-  document       ReportDocument?        @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  messages       ChatMessage[]
-  sources        ChatSessionSourceRef[]
+  // Bidang Baru: State Synchronization Cache untuk Lembar Kerja Kanan (Pane Kanan)
+  currentDraft    String?                @db.Text
+
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  // Hubungan Mandiri (Self-Referencing Relation) untuk Transisi Sesi
+  parentSessionId String?                @db.Uuid
+  parentSession   ChatSession?           @relation("SessionTransition", fields: [parentSessionId], references: [id], onDelete: SetNull)
+  derivedSessions ChatSession[]          @relation("SessionTransition")
+
+  document        ReportDocument?        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  messages        ChatMessage[]
+  sources         ChatSessionSourceRef[]
 
   @@map("chat_sessions")
 }
@@ -284,19 +293,37 @@ model ChatSessionSourceRef {
 }
 
 model ChatMessage {
-  id              String          @id @default(uuid()) @db.Uuid
-  sessionId       String          @db.Uuid
+  id              String             @id @default(uuid()) @db.Uuid
+  sessionId       String             @db.Uuid
   role            MessageRole
-  content         String          @db.Text
-  tokenCount      Int             @default(0)
-  interactionType InteractionType @default(MANUAL_INPUT)
+  content         String             @db.Text
+  tokenCount      Int                @default(0)
+  interactionType InteractionType    @default(MANUAL_INPUT)
   metadata        Json?
-  createdAt       DateTime        @default(now())
+  createdAt       DateTime           @default(now())
 
-  session         ChatSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session         ChatSession        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  // Relasi Baru: Menghubungkan Pesan Obrolan dengan Lampiran Multimedia/File
+  attachments     MessageAttachment[]
 
   @@index([sessionId, createdAt])
   @@map("chat_messages")
+}
+
+// Model Baru: Menyimpan Metadata File/Screenshot yang Dikirim di Ruang Obrolan
+model MessageAttachment {
+  id            String      @id @default(uuid()) @db.Uuid
+  messageId     String      @db.Uuid
+  fileUrl       String      // Lokasi path fisik penyimpanan file di server lokal / S3 Bucket
+  fileName      String
+  mimeType      String
+  fileSizeBytes BigInt
+  createdAt     DateTime    @default(now())
+
+  message       ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@map("message_attachments")
 }
 
 model GeneratedReport {
@@ -352,7 +379,7 @@ model IndicatorRealization {
   realizationValue Float          @map("realization_value")
   unit             String         @default("M")
   timeframe        String         @default("2026")
-  createdAt        DateTime       @default(now()) @map("created_at")
+  createdAt     DateTime       @default(now()) @map("created_at")
 
   document         ReportDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
 
@@ -652,6 +679,33 @@ ADD COLUMN     "metadata" JSONB;
 
 -- AlterTable
 ALTER TABLE "chat_sessions" ADD COLUMN     "runningSummary" TEXT;
+
+--- FILE: prisma\migrations\20260727101253_chatsession\migration.sql ---
+-- AlterTable
+ALTER TABLE "chat_sessions" ADD COLUMN     "parentSessionId" UUID;
+
+-- AddForeignKey
+ALTER TABLE "chat_sessions" ADD CONSTRAINT "chat_sessions_parentSessionId_fkey" FOREIGN KEY ("parentSessionId") REFERENCES "chat_sessions"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+--- FILE: prisma\migrations\20260728024116_add_message_attachments_and_current_draft\migration.sql ---
+-- AlterTable
+ALTER TABLE "chat_sessions" ADD COLUMN     "currentDraft" TEXT;
+
+-- CreateTable
+CREATE TABLE "message_attachments" (
+    "id" UUID NOT NULL,
+    "messageId" UUID NOT NULL,
+    "fileUrl" TEXT NOT NULL,
+    "fileName" TEXT NOT NULL,
+    "mimeType" TEXT NOT NULL,
+    "fileSizeBytes" BIGINT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "message_attachments_pkey" PRIMARY KEY ("id")
+);
+
+-- AddForeignKey
+ALTER TABLE "message_attachments" ADD CONSTRAINT "message_attachments_messageId_fkey" FOREIGN KEY ("messageId") REFERENCES "chat_messages"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
 --- FILE: src\app.module.ts ---
 import { Module } from '@nestjs/common';
@@ -1051,6 +1105,7 @@ export interface VectorSearchParams {
   queryVector: number[];
   limit?: number;
   similarityThreshold?: number;
+  queryText?: string;
 }
 
 --- FILE: src\modules\ai-agent\providers\vendor-llm.adapter.ts ---
@@ -1062,6 +1117,16 @@ import { LlmChatMessage } from '../utils/prompt-assembly.builder';
 import { NetworkResilienceUtil } from '../utils/network-resilience.util';
 import { AnalysisResponseDto } from '../schemas/analysis-response.dto';
 
+export interface MultimodalChatMessage extends LlmChatMessage {
+  parts?: Array<{
+    text?: string;
+    inlineData?: {
+      mimeType: string;
+      data: string;
+    };
+  }>;
+}
+
 @Injectable()
 export class VendorLlmAdapter implements ILlmProvider {
   private readonly logger = new Logger(VendorLlmAdapter.name);
@@ -1069,34 +1134,52 @@ export class VendorLlmAdapter implements ILlmProvider {
   constructor(
     private readonly resilienceUtil: NetworkResilienceUtil,
     private readonly configService: ConfigService,
-  ) {}
+  ) { }
 
   getProviderName(): string {
+    const provider = this.getActiveProvider();
+
+    if (provider === 'openai') {
+      const model = this.configService.get<string>('OPENAI_MODEL') || 'gpt-4o-mini';
+      return `OpenAiChatGptAdapter (${model})`;
+    }
+
     const model = this.configService.get<string>('GEMINI_MODEL') || 'gemini-1.5-flash';
     return `GoogleGeminiAdapter (${model})`;
   }
 
   async generateStructuredAnalysis<T = AnalysisResponseDto>(
-    messages: LlmChatMessage[],
+    messages: MultimodalChatMessage[],
     jsonSchema: any,
     temperature: number = 0.0,
   ): Promise<T> {
-    const apiKey = this.configService.get<string>('GEMINI_API_KEY');
+    const provider = this.getActiveProvider();
 
     this.logger.log(
-      `[VendorLlmAdapter] Mengirim ${messages.length} pesan ke Gemini LLM API (temperature=${temperature})...`,
+      `[VendorLlmAdapter] Provider aktif: ${provider.toUpperCase()} | Mengirim ${messages.length} pesan (temperature=${temperature})...`,
     );
 
     return this.resilienceUtil.executeWithRetry(async () => {
       let rawResponse: string;
 
-      if (apiKey && apiKey.trim().length > 0) {
-        rawResponse = await this.callRealGeminiApi(apiKey, messages, jsonSchema, temperature);
+      if (provider === 'openai') {
+
+        const apiKey = this.configService.get<string>('OPENAI_API_KEY');
+        if (!apiKey || apiKey.trim().length === 0) {
+          this.logger.warn('[OPENAI_API_KEY Kosong] Jatuh ke mock response. Set OPENAI_API_KEY pada .env.');
+          rawResponse = await this.mockVendorApiCall();
+        } else {
+          rawResponse = await this.callRealOpenAiApi(apiKey, messages, jsonSchema, temperature);
+        }
       } else {
-        this.logger.warn(
-          `[GEMINI_API_KEY Kosong] Menggunakan mock response terstruktur untuk fase testing. Masukkan GEMINI_API_KEY pada .env untuk memanggil API sungguhan.`,
-        );
-        rawResponse = await this.mockVendorApiCall();
+
+        const apiKey = this.configService.get<string>('GEMINI_API_KEY');
+        if (!apiKey || apiKey.trim().length === 0) {
+          this.logger.warn('[GEMINI_API_KEY Kosong] Jatuh ke mock response. Set GEMINI_API_KEY pada .env.');
+          rawResponse = await this.mockVendorApiCall();
+        } else {
+          rawResponse = await this.callRealGeminiApi(apiKey, messages, jsonSchema, temperature);
+        }
       }
 
       return this.validateAndParseOutput<T>(rawResponse);
@@ -1105,17 +1188,29 @@ export class VendorLlmAdapter implements ILlmProvider {
 
   private async callRealGeminiApi(
     apiKey: string,
-    messages: LlmChatMessage[],
+    messages: MultimodalChatMessage[],
     jsonSchema?: any,
     temperature: number = 0.0,
   ): Promise<string> {
     const modelName = this.configService.get<string>('GEMINI_MODEL') || 'gemini-1.5-flash';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
-    const contents = messages.map((m) => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }],
-    }));
+    const contents = messages
+      .filter((m) => m.role !== 'system')
+      .map((m) => {
+        const role = m.role === 'assistant' ? 'model' : 'user';
+
+        if (m.parts && m.parts.length > 0) {
+          return { role, parts: m.parts };
+        }
+
+        return { role, parts: [{ text: m.content }] };
+      });
+
+    const systemMsg = messages.find((m) => m.role === 'system');
+    const systemInstruction = systemMsg
+      ? { parts: [{ text: systemMsg.content }] }
+      : undefined;
 
     let cleanedSchema = undefined;
     if (jsonSchema) {
@@ -1137,19 +1232,26 @@ export class VendorLlmAdapter implements ILlmProvider {
       }
     }
 
+    const requestBody: any = {
+      contents,
+      generationConfig: {
+        temperature,
+        maxOutputTokens: 8192,
+        responseMimeType: 'application/json',
+        responseSchema: cleanedSchema,
+      },
+    };
+
+    if (systemInstruction) {
+      requestBody.systemInstruction = systemInstruction;
+    }
+
+    this.logger.log(`[Gemini] Mengirim request ke model: ${modelName}`);
+
     const response = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents,
-        generationConfig: {
-          temperature,
-          maxOutputTokens: 8192,
-          responseMimeType: 'application/json',
-
-          responseSchema: cleanedSchema,
-        },
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     const data = await response.json();
@@ -1163,7 +1265,160 @@ export class VendorLlmAdapter implements ILlmProvider {
       throw new Error('API Gemini mengembalikan respons kosong.');
     }
 
+    this.logger.log(`[Gemini] Response diterima (${textOutput.length} karakter).`);
     return textOutput;
+  }
+
+  private async callRealOpenAiApi(
+    apiKey: string,
+    messages: MultimodalChatMessage[],
+    jsonSchema?: any,
+    temperature: number = 0.0,
+  ): Promise<string> {
+    const modelName = this.configService.get<string>('OPENAI_MODEL') || 'gpt-4o-mini';
+    const url = 'https://api.openai.com/v1/chat/completions';
+
+    const openAiMessages: any[] = messages.map((m) => {
+      const role = m.role as 'system' | 'user' | 'assistant';
+
+      if (m.parts && m.parts.length > 0) {
+        const contentArray = m.parts.map((part) => {
+          if (part.inlineData) {
+            return {
+              type: 'image_url',
+              image_url: {
+                url: `data:${part.inlineData.mimeType};base64,${part.inlineData.data}`,
+              },
+            };
+          }
+          return {
+            type: 'text',
+            text: part.text || '',
+          };
+        });
+
+        return {
+          role,
+          content: contentArray,
+        };
+      }
+
+      return {
+        role,
+        content: m.content || '',
+      };
+    });
+
+    if (jsonSchema) {
+      const systemMsgIndex = openAiMessages.findIndex((m) => m.role === 'system');
+      const jsonInstruction = [
+        '\n\n[FORMAT OUTPUT — WAJIB DIIKUTI]',
+        'Kembalikan output HANYA dalam format JSON valid sesuai schema.',
+        'PENTING: Nilai dari field string (terutama "answer", "fullText", "draftMarkdown") WAJIB menggunakan format Markdown yang kaya dan terstruktur:',
+        '  - Gunakan ## untuk subjudul, **teks** untuk bold, - untuk bullet list',
+        '  - Gunakan tabel Markdown jika membandingkan data',
+        '  - Sertakan token sitasi [docId:chunkIndex] di sebelah klaim faktual',
+        '  - Jangan mengembalikan teks polos/plain tanpa formatting',
+        'Output harus berupa JSON object tunggal, tanpa teks apapun di luar kurung kurawal {}.',
+      ].join('\n');
+
+      if (systemMsgIndex >= 0) {
+        openAiMessages[systemMsgIndex].content += jsonInstruction;
+      } else {
+        openAiMessages.unshift({
+          role: 'system',
+          content: `Anda adalah asisten AI BRIDA yang menghasilkan output JSON dengan konten Markdown kaya.${jsonInstruction}`,
+        });
+      }
+    }
+
+    const requestBody: any = {
+      model: modelName,
+      messages: openAiMessages,
+      temperature,
+      max_completion_tokens: 8192,
+    };
+
+    if (jsonSchema) {
+      try {
+        const openAiSchema = JSON.parse(JSON.stringify(jsonSchema));
+        delete openAiSchema.$schema;
+        delete openAiSchema.title;
+
+        const makeStrictSchema = (schema: any) => {
+          if (schema && typeof schema === 'object') {
+            if (schema.type === 'object') {
+              schema.additionalProperties = false;
+              if (schema.properties) {
+                schema.required = Object.keys(schema.properties);
+                for (const key of Object.keys(schema.properties)) {
+                  makeStrictSchema(schema.properties[key]);
+                }
+              }
+            } else if (schema.type === 'array' && schema.items) {
+              makeStrictSchema(schema.items);
+            }
+          }
+        };
+
+        makeStrictSchema(openAiSchema);
+
+        requestBody.response_format = {
+          type: 'json_schema',
+          json_schema: {
+            name: 'brida_analysis_response',
+            strict: true,
+            schema: openAiSchema,
+          },
+        };
+        this.logger.log(`[OpenAI] Mengaktifkan Structured Outputs (json_schema) untuk kepatuhan skema.`);
+      } catch (err: any) {
+        this.logger.warn(`[OpenAI Schema Conv Failed] Gagal konversi ke strict schema: ${err.message}. Fallback ke json_object.`);
+        requestBody.response_format = { type: 'json_object' };
+      }
+    }
+
+    this.logger.log(`[OpenAI] Mengirim request ke model: ${modelName} | JSON Mode: ${jsonSchema ? 'ON' : 'OFF'}`);
+
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      const errorMsg = data?.error?.message || 'Gagal memanggil API OpenAI.';
+      const errorCode = data?.error?.code || response.status;
+      this.logger.error(`[OpenAI API Error ${errorCode}]: ${errorMsg}`);
+      throw new Error(`[OpenAI API Error ${errorCode}]: ${errorMsg}`);
+    }
+
+    const textOutput = data?.choices?.[0]?.message?.content;
+    if (!textOutput) {
+      throw new Error('API OpenAI mengembalikan respons kosong.');
+    }
+
+    const usage = data?.usage;
+    if (usage) {
+      this.logger.log(
+        `[OpenAI] Response diterima | Prompt tokens: ${usage.prompt_tokens} | Completion tokens: ${usage.completion_tokens} | Total: ${usage.total_tokens}`,
+      );
+    }
+
+    return textOutput;
+  }
+
+  private getActiveProvider(): 'gemini' | 'openai' {
+    const raw = this.configService.get<string>('LLM_PROVIDER') || 'gemini';
+    const normalized = raw.trim().toLowerCase();
+
+    if (normalized === 'openai') return 'openai';
+    return 'gemini';
   }
 
   private async mockVendorApiCall(): Promise<string> {
@@ -1197,7 +1452,7 @@ export class VendorLlmAdapter implements ILlmProvider {
         {
           jenis: 'Dugaan Perbuatan Melawan Hukum & Penyalahgunaan Wewenang',
           pasalDugaan: 'Pasal 2 dan Pasal 3 UU No. 31 Tahun 1999 jo. UU No. 20 Tahun 2001',
-          rincian: 'Penyalur dana termin tidak sesuai dengan persentase realisasi fisik pekerjaan di lapangan.',
+          rincian: 'Penyaluran dana termin tidak sesuai dengan persentase realisasi fisik pekerjaan di lapangan.',
         },
       ],
       kesimpulanAnalisis:
@@ -1218,7 +1473,7 @@ export class VendorLlmAdapter implements ILlmProvider {
       try {
         const repairedString = jsonrepair(sanitized);
         const parsedRepaired = JSON.parse(repairedString);
-        this.logger.log(`[JSON Auto-Repair Pass] Successfully recovered valid JSON structure via jsonrepair.`);
+        this.logger.log(`[JSON Auto-Repair Pass] Berhasil memulihkan struktur JSON menggunakan jsonrepair.`);
         return parsedRepaired as T;
       } catch (repairErr: any) {
         this.logger.error(`[Post-Generation Validation Warning]: ${repairErr.message}`);
@@ -1401,7 +1656,7 @@ export class AiAgentService {
   ): Promise<FinalAnalysisResponse> {
 
     const promptPayload = await this.contextAssembly.assemblePromptPayload({
-      documentId: dto.documentId,
+      documentIds: [dto.documentId],
       userQuery: dto.query,
     });
 
@@ -1483,16 +1738,50 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { DocumentRepository } from '../../document-ingestion/repositories/document.repository';
 import { VectorRetrievalService } from './vector-retrieval.service';
 import { TokenEstimatorUtil } from '../utils/token-estimator.util';
-import { PromptAssemblyBuilder, QuadBlockPromptPayload } from '../utils/prompt-assembly.builder';
-import { DYNAMIC_CONTEXT_TOKEN_THRESHOLD } from '../constants/system-prompts.constant';
+import { MultimodalChatMessage } from '../providers/vendor-llm.adapter';
+import { DYNAMIC_CONTEXT_TOKEN_THRESHOLD, BRIDA_SYSTEM_PERSONA, BRIDA_GUARDRAIL_POSTFIX } from '../constants/system-prompts.constant';
 
-export interface AssemblePromptOptions {
-  documentId?: string;
+export interface MultimodalAssembleOptions {
   documentIds?: string[];
+  images?: Array<{
+    mimeType: string;
+    base64Data: string;
+  }>;
   userQuery: string;
+  currentDraft?: string;
+  tone?: string;
+  targetLength?: string;
   topK?: number;
   similarityThreshold?: number;
 }
+
+export interface MultimodalPromptPayload {
+  messages: MultimodalChatMessage[];
+  estimatedTokens: number;
+}
+
+const TONE_AUDIENCE_STEERING_MAP: Record<string, { target: string; focus: string; style: string }> = {
+  solutif: {
+    target: 'Bupati Kabupaten Mimika',
+    focus: 'Rekomendasi tindakan taktis, dampak makro-fiskal daerah, penyusunan rancangan regulasi taktis, serta perumusan langkah konkret cepat (Quick Wins).',
+    style: 'Eksekutif, berorientasi solusi, berwibawa, lugas, padat, dan mencerminkan kepemimpinan daerah.',
+  },
+  kritis: {
+    target: 'Kepala Organisasi Perangkat Daerah (OPD) Mimika',
+    focus: 'Audit kepatuhan tata kelola, evaluasi deviasi operasional sektoral dinas, transparansi pertanggungjawaban anggaran, dan identifikasi sumbatan teknis (bottlenecks).',
+    style: 'Tajam, analitis, ketat, menuntut akuntabilitas teknis sektoral, serta berorientasi evaluatif-korektif.',
+  },
+  akademis: {
+    target: 'Rekan Jurnalis Media Massa, Akademisi Perguruan Tinggi, dan Pengurus LSM (Lembaga Swadaya Masyarakat)',
+    focus: 'Metodologi evaluasi kebijakan, analisis kausalitas data berbasis bukti faktual (*evidence-based*), komparasi indikator standar nasional, dan landasan teori kebijakan publik.',
+    style: 'Rasional, metodologis, objektif, berimbang (*cover-both-sides*), serta menggunakan istilah tata kelola standar ilmiah.',
+  },
+  populer: {
+    target: 'Masyarakat Umum Kabupaten Mimika',
+    focus: 'Dampak nyata langsung dari kebijakan terhadap kehidupan warga, penyederhanaan istilah birokrasi, keterbukaan alokasi dana publik, dan kegunaan fasilitas pembangunan.',
+    style: 'Sederhana, naratif, mengalir, komunikatif, ramah pembaca (*highly readable*), serta menggunakan analogi kehidupan sehari-hari.',
+  },
+};
 
 @Injectable()
 export class ContextAssemblyService {
@@ -1502,50 +1791,124 @@ export class ContextAssemblyService {
     private readonly repository: DocumentRepository,
     private readonly vectorRetrieval: VectorRetrievalService,
     private readonly tokenEstimator: TokenEstimatorUtil,
-    private readonly promptBuilder: PromptAssemblyBuilder,
   ) { }
 
-  async assemblePromptPayload(options: AssemblePromptOptions): Promise<QuadBlockPromptPayload> {
-    const { documentId, documentIds = [], userQuery, topK = 10, similarityThreshold = 0.5 } = options;
+  async assemblePromptPayload(options: MultimodalAssembleOptions): Promise<MultimodalPromptPayload> {
+    const {
+      documentIds = [],
+      images = [],
+      userQuery,
+      currentDraft,
+      tone = 'solutif',
+      targetLength = 'MEDIUM',
+      topK = 10,
+      similarityThreshold = 0.5,
+    } = options;
 
-    const targetDocIds = documentIds.length > 0 ? documentIds : (documentId ? [documentId] : []);
-    const docs = await Promise.all(targetDocIds.map(id => this.repository.findById(id)));
-    const validDocs = docs.filter((d): d is NonNullable<typeof d> => d !== null && d !== undefined);
-
-    if (validDocs.length === 0) {
-      throw new NotFoundException(`Dokumen acuan untuk kueri tidak ditemukan.`);
-    }
-
-    const totalTokens = validDocs.reduce((acc, doc) => acc + (doc.metadata?.totalTokenCount || 0), 0);
     let contextPayloadText = '';
+    const activeTone = tone.toLowerCase();
 
-    if (totalTokens < DYNAMIC_CONTEXT_TOKEN_THRESHOLD) {
-      contextPayloadText = await this.executeFullDocumentStuffingStrategy(validDocs, totalTokens);
+    if (documentIds.length > 0) {
+      const docs = await Promise.all(documentIds.map((id) => this.repository.findById(id)));
+      const validDocs = docs.filter((d): d is NonNullable<typeof d> => d !== null && d !== undefined);
+
+      if (validDocs.length > 0) {
+        const totalTokens = validDocs.reduce((acc, doc) => acc + (doc.metadata?.totalTokenCount || 0), 0);
+
+        if (totalTokens < DYNAMIC_CONTEXT_TOKEN_THRESHOLD) {
+          contextPayloadText = await this.executeFullDocumentStuffingStrategy(validDocs, totalTokens);
+        } else {
+          contextPayloadText = await this.executeDynamicRagStrategy(
+            validDocs,
+            totalTokens,
+            userQuery,
+            topK,
+            similarityThreshold,
+          );
+        }
+      }
     } else {
-      contextPayloadText = await this.executeDynamicRagStrategy(
-        validDocs,
-        totalTokens,
-        userQuery,
-        topK,
-        similarityThreshold,
-      );
+      this.logger.log('[Zero-Reference Mode] Tidak ada dokumen acuan terdaftar. AI berfokus pada draf & ketikan pengguna.');
+      contextPayloadText = 'Sistem berjalan dalam mode mandiri. Gunakan draf ketikan pengguna dan pengetahuan internal Anda untuk menulis naskah.';
     }
 
-    const payload = this.promptBuilder
-      .reset()
-      .setContextPayload(contextPayloadText)
-      .setUserQuery(userQuery)
-      .build();
+    let lengthGuidance = 'Target Panjang Teks: Minimal 1000 kata (Sedang, komprehensif)';
+    if (targetLength === 'SHORT') {
+      lengthGuidance = 'Target Panjang Teks: Minimal 700 kata (Ringkas & Padat)';
+    } else if (targetLength === 'LONG') {
+      lengthGuidance = 'Target Panjang Teks: Minimal 1500 kata (Mendalam & Komprehensif)';
+    }
 
-    const estimatedTotalTokens = this.tokenEstimator.estimateArrayTokenCount(
-      payload.messages.map((m) => m.content),
-    );
+    const steering = TONE_AUDIENCE_STEERING_MAP[activeTone] || TONE_AUDIENCE_STEERING_MAP['solutif'];
+    const customSystemPersona = `
+${BRIDA_SYSTEM_PERSONA}
+
+ATURAN TARGET AUDIENS GAYA BAHASA (TONE STEERING):
+- Artikel ini ditujukan kepada: **${steering.target}**
+- Fokus utama penulisan: ${steering.focus}
+- Gaya penyampaian bahasa: ${steering.style}
+
+ATURAN PANJANG NASKAH:
+- ${lengthGuidance}
+- Anda WAJIB mengembangkan pembahasan, analisis, rekomendasi, dan data pendukung agar memenuhi target panjang naskah di atas. Jangan mengembalikan respons singkat jika target adalah LONG/MEDIUM.
+
+ATURAN COLLABORATIVE CO-WRITING:
+- Jika pengguna memasukkan draf tulisan pribadinya di dalam prompt, prioritas utama Anda adalah memoles, menyempurnakan struktur kalimat, memparafrase, atau melanjutkan draf tersebut secara mulus (*seamless*).
+- Pertahankan ide orisinal dan fakta yang ditulis oleh pengguna, tingkatkan kualitas bahasanya agar sesuai dengan target audiens di atas.
+`;
+
+    const userParts: any[] = [];
+
+    let userTextContent = `[INSTRUKSI / DRAF INPUT PENGGUNA]\n${userQuery}`;
+
+    if (currentDraft && currentDraft.trim().length > 0) {
+      userTextContent += `\n\n[DRAF ARTIKEL AKTIF SAAT INI (PANE KANAN)]\n${currentDraft}`;
+    }
+    userParts.push({ text: userTextContent });
+
+    if (images.length > 0) {
+      this.logger.log(`[Multimodal Ingest] Memasukkan ${images.length} data biner visual (screenshot) ke prompt user parts.`);
+      images.forEach((img) => {
+        userParts.push({
+          inlineData: {
+            mimeType: img.mimeType,
+            data: img.base64Data,
+          },
+        });
+      });
+    }
+
+    const messages: MultimodalChatMessage[] = [
+      {
+        role: 'system',
+        content: customSystemPersona.trim()
+      },
+      {
+        role: 'system',
+        content: `[DOKUMEN TERLAMPIR - RUANG KONTEKS STATIS]\n${contextPayloadText}`
+      },
+      {
+        role: 'user',
+        content: '',
+        parts: userParts,
+      },
+      {
+        role: 'user',
+        content: BRIDA_GUARDRAIL_POSTFIX
+      },
+    ];
+
+    const rawTextsForEstimation = messages.map((m) => m.content).concat([userTextContent]);
+    const estimatedTokens = this.tokenEstimator.estimateArrayTokenCount(rawTextsForEstimation);
 
     this.logger.log(
-      `[ContextAssemblyService] Payload 4-Blok berhasil dirakit (Est. Total Payload Tokens: ${estimatedTotalTokens}).`,
+      `[ContextAssemblyBroker] Sukses merakit Composite Multimodal Prompt (Estimasi Input: ${estimatedTokens} tokens).`,
     );
 
-    return payload;
+    return {
+      messages,
+      estimatedTokens,
+    };
   }
 
   private async executeFullDocumentStuffingStrategy(
@@ -1661,6 +2024,7 @@ export class VectorRetrievalService {
       queryVector,
       limit: topK,
       similarityThreshold,
+      queryText,
     });
 
     this.logger.log(
@@ -1864,9 +2228,69 @@ export class TokenEstimatorUtil {
 
   private readonly COMPACTION_TRIGGER_THRESHOLD_PCT = 0.75;
 
+  private readonly GEMINI_BASE_IMAGE_TOKENS = 258;
+
   estimateTokenCount(text: string): number {
     if (!text) return 0;
-    return Math.max(1, Math.ceil(text.length / 4));
+
+    const words = text.trim().split(/\s+/).length;
+    const charCount = text.length;
+
+    const wordBasedEstimation = Math.ceil(words * 1.5);
+    const charBasedEstimation = Math.ceil(charCount / 2.8);
+
+    return Math.max(1, Math.max(wordBasedEstimation, charBasedEstimation));
+  }
+
+  estimateImageTokenCount(width?: number, height?: number): number {
+
+    if (!width || !height) {
+      return this.GEMINI_BASE_IMAGE_TOKENS;
+    }
+
+    if (width <= 384 && height <= 384) {
+      return this.GEMINI_BASE_IMAGE_TOKENS;
+    }
+
+    const minDimension = Math.min(width, height);
+    let tileSize = Math.floor(minDimension / 1.5);
+    tileSize = Math.max(256, Math.min(768, tileSize));
+
+    const horizontalTiles = Math.ceil(width / tileSize);
+    const verticalTiles = Math.ceil(height / tileSize);
+    const totalTiles = horizontalTiles * verticalTiles;
+
+    const estimatedTokens = totalTiles * this.GEMINI_BASE_IMAGE_TOKENS;
+
+    this.logger.log(
+      `[Image Token Calc] Resolusi: ${width}x${height} -> Terbagi menjadi ${totalTiles} ubin (${horizontalTiles}x${verticalTiles}). Est. Token: ${estimatedTokens}`,
+    );
+
+    return estimatedTokens;
+  }
+
+  estimateMultimodalPayloadTokens(
+    texts: string[],
+    imagesCount: number,
+    imageDimensions?: Array<{ width: number; height: number }>,
+  ): number {
+    const textTokens = this.estimateArrayTokenCount(texts);
+    let imageTokens = 0;
+
+    if (imagesCount > 0) {
+      if (imageDimensions && imageDimensions.length === imagesCount) {
+
+        imageTokens = imageDimensions.reduce(
+          (acc, dim) => acc + this.estimateImageTokenCount(dim.width, dim.height),
+          0,
+        );
+      } else {
+
+        imageTokens = imagesCount * this.GEMINI_BASE_IMAGE_TOKENS;
+      }
+    }
+
+    return textTokens + imageTokens;
   }
 
   estimateArrayTokenCount(texts: string[]): number {
@@ -1876,9 +2300,15 @@ export class TokenEstimatorUtil {
 
   auditTokenBudget(
     texts: string[],
+    imagesCount: number = 0,
+    imageDimensions?: Array<{ width: number; height: number }>,
     maxBudgetTokens: number = this.DEFAULT_BUDGET_TOKENS,
   ): TokenAuditReport {
-    const estimatedTokens = this.estimateArrayTokenCount(texts);
+    const estimatedTokens = this.estimateMultimodalPayloadTokens(
+      texts,
+      imagesCount,
+      imageDimensions,
+    );
     const excessTokens = Math.max(0, estimatedTokens - maxBudgetTokens);
 
     const requiresCompaction =
@@ -1895,17 +2325,19 @@ export class TokenEstimatorUtil {
 
   enforceBudgetCircuitBreaker(
     texts: string[],
+    imagesCount: number = 0,
+    imageDimensions?: Array<{ width: number; height: number }>,
     maxBudgetTokens: number = this.DEFAULT_BUDGET_TOKENS,
   ): void {
-    const report = this.auditTokenBudget(texts, maxBudgetTokens);
+    const report = this.auditTokenBudget(texts, imagesCount, imageDimensions, maxBudgetTokens);
 
     if (!report.isSafe) {
       this.logger.error(
-        `[Circuit Breaker Triggered] Estimasi token (${report.estimatedTokens}) melampaui batas aman anggaran (${report.maxBudgetTokens}). Alur eksekusi LLM dihentikan demi integritas sistem [5, 7].`,
+        `[Circuit Breaker Triggered] Estimasi token multimodal (${report.estimatedTokens}) melampaui batas aman anggaran (${report.maxBudgetTokens}). Alur eksekusi LLM dihentikan demi integritas sistem [5, 7].`,
       );
 
       throw new PayloadTooLargeException(
-        `Muatan data obrolan (${report.estimatedTokens} estimated tokens) melampaui batas aman pemrosesan sistem BRIDA (${report.maxBudgetTokens} tokens). Silakan mulai sesi obrolan baru atau bersihkan dokumen acuan [5, 7].`,
+        `Muatan data kolaborasi (${report.estimatedTokens} estimated tokens, termasuk ${imagesCount} gambar) melampaui batas aman pemrosesan sistem BRIDA (${report.maxBudgetTokens} tokens). Silakan perkecil ukuran teks atau kurangi gambar screenshot [5, 7].`,
       );
     }
   }
@@ -2490,10 +2922,11 @@ import { DocumentIngestionService } from '../services/document-ingestion.service
 import { UploadDocumentDto } from '../dtos/upload-document.dto';
 import { DocumentResponseDto } from '../dtos/document-response.dto';
 import { FileSignatureValidationPipe } from '../../../common/pipes/file-signature-validation.pipe';
+import { ChatAttachmentSignatureValidationPipe } from '../pipes/chat-attachment-validation.pipe';
 
 @Controller('documents')
 export class DocumentIngestionController {
-  constructor(private readonly ingestionService: DocumentIngestionService) {}
+  constructor(private readonly ingestionService: DocumentIngestionService) { }
 
   @Post('upload')
   @HttpCode(HttpStatus.CREATED)
@@ -2509,6 +2942,34 @@ export class DocumentIngestionController {
     @Body() dto: UploadDocumentDto,
   ): Promise<{ success: boolean; data: DocumentResponseDto }> {
     const result = await this.ingestionService.processDocumentUpload(file, dto);
+    return {
+      success: true,
+      data: result,
+    };
+  }
+
+  @Post('temp-upload')
+  @HttpCode(HttpStatus.CREATED)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: {
+        fileSize: 20 * 1024 * 1024,
+      },
+    }),
+  )
+  async uploadTemporaryFile(
+    @UploadedFile(new ChatAttachmentSignatureValidationPipe()) file: Express.Multer.File,
+  ): Promise<{
+    success: boolean;
+    data: {
+      tempFileId: string;
+      fileName: string;
+      mimeType: string;
+      fileSizeBytes: string;
+      tempPath: string;
+    };
+  }> {
+    const result = await this.ingestionService.processTemporaryUpload(file);
     return {
       success: true,
       data: result,
@@ -2560,7 +3021,6 @@ export class DocumentIngestionController {
     };
   }
 }
-
 
 --- FILE: src\modules\document-ingestion\dtos\document-response.dto.ts ---
 export interface DocumentResponseDto {
@@ -2812,6 +3272,104 @@ export class TxtParserAdapter implements IDocumentParser {
   }
 }
 
+--- FILE: src\modules\document-ingestion\pipes\chat-attachment-validation.pipe.ts ---
+import {
+    PipeTransform,
+    Injectable,
+    BadRequestException,
+    PayloadTooLargeException,
+    UnsupportedMediaTypeException,
+    Logger,
+} from '@nestjs/common';
+import 'multer';
+
+@Injectable()
+export class ChatAttachmentSignatureValidationPipe implements PipeTransform {
+    private readonly logger = new Logger(ChatAttachmentSignatureValidationPipe.name);
+    private readonly MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
+
+    private readonly PDF_MAGIC = [0x25, 0x50, 0x44, 0x46];
+    private readonly DOCX_ZIP_MAGIC = [0x50, 0x4b, 0x03, 0x04];
+    private readonly PNG_MAGIC = [0x89, 0x50, 0x4e, 0x47];
+    private readonly JPEG_MAGIC = [0xff, 0xd8, 0xff];
+
+    transform(file: Express.Multer.File): Express.Multer.File {
+        if (!file) {
+            throw new BadRequestException('Berkas lampiran wajib disertakan.');
+        }
+
+        if (file.size > this.MAX_FILE_SIZE_BYTES) {
+            const sizeMb = (file.size / (1024 * 1024)).toFixed(2);
+            throw new PayloadTooLargeException(
+                `Ukuran berkas (${sizeMb} MB) melampaui batas maksimum 20 MB.`,
+            );
+        }
+
+        const buffer = file.buffer;
+        if (!buffer || buffer.length === 0) {
+            throw new BadRequestException('Buffer berkas kosong atau tidak valid.');
+        }
+
+        const detectedType = this.detectMagicNumberType(buffer);
+
+        if (detectedType === 'UNKNOWN') {
+            this.logger.warn(`Berkas '${file.originalname}' ditolak: Tanda biner tidak didukung.`);
+            throw new UnsupportedMediaTypeException(
+                `Format berkas '${file.originalname}' tidak didukung. Sistem hanya menerima PDF, DOCX, TXT, PNG, dan JPEG.`,
+            );
+        }
+
+        this.normalizeMimeType(file, detectedType);
+
+        this.logger.log(
+            `[Signature Pass] Berkas '${file.originalname}' divalidasi sebagai: ${detectedType}`,
+        );
+
+        return file;
+    }
+
+    private detectMagicNumberType(buffer: Buffer): 'PDF' | 'DOCX' | 'TXT' | 'PNG' | 'JPEG' | 'UNKNOWN' {
+        if (this.checkMagicBytes(buffer, this.PDF_MAGIC)) return 'PDF';
+        if (this.checkMagicBytes(buffer, this.DOCX_ZIP_MAGIC)) return 'DOCX';
+        if (this.checkMagicBytes(buffer, this.PNG_MAGIC)) return 'PNG';
+        if (this.checkMagicBytes(buffer, this.JPEG_MAGIC)) return 'JPEG';
+        if (this.isPrintableTextBuffer(buffer)) return 'TXT';
+        return 'UNKNOWN';
+    }
+
+    private checkMagicBytes(buffer: Buffer, magic: number[]): boolean {
+        if (buffer.length < magic.length) return false;
+        for (let i = 0; i < magic.length; i++) {
+            if (buffer[i] !== magic[i]) return false;
+        }
+        return true;
+    }
+
+    private isPrintableTextBuffer(buffer: Buffer): boolean {
+        const sampleLength = Math.min(buffer.length, 512);
+        for (let i = 0; i < sampleLength; i++) {
+            const byte = buffer[i];
+            if (byte !== 9 && byte !== 10 && byte !== 13 && byte < 32) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private normalizeMimeType(file: Express.Multer.File, type: string): void {
+        const mimeMap: Record<string, string> = {
+            PDF: 'application/pdf',
+            DOCX: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            PNG: 'image/png',
+            JPEG: 'image/jpeg',
+            TXT: 'text/plain',
+        };
+        if (mimeMap[type]) {
+            file.mimetype = mimeMap[type];
+        }
+    }
+}
+
 --- FILE: src\modules\document-ingestion\providers\external-embedding.adapter.ts ---
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -3010,17 +3568,75 @@ export class DocumentRepository {
       const errorStack   = err instanceof Error ? err.stack : undefined;
       this.logger.error(
         `[pgvector FALLBACK] Gagal menjalankan vector similarity search untuk Dokumen ID: ${params.documentId}. ` +
-        `Beralih ke sequential chunk retrieval (hasil NON-SEMANTIK). ` +
-        `Pastikan ekstensi pgvector aktif di PostgreSQL dan indeks vektor tidak rusak. ` +
+        `Beralih ke smart keyword-based fallback. ` +
         `Error: ${errorMessage}`,
         errorStack,
       );
 
-      const chunks = await this.prisma.documentChunk.findMany({
-        where: { documentId: params.documentId },
-        take: limit,
-        orderBy: { chunkIndex: 'asc' },
-      });
+      let chunks: any[] = [];
+      const queryText = params.queryText;
+      if (queryText) {
+
+        const stopwords = new Set([
+          'dan', 'di', 'ke', 'dari', 'yang', 'untuk', 'dengan', 'ini', 'itu', 'adalah', 'yaitu', 'pada', 'atau', 'dalam', 'saya', 'kami', 'anda', 'mereka', 'dia'
+        ]);
+        const words = queryText
+          .toLowerCase()
+          .split(/[^a-zA-Z0-9]+/)
+          .filter((w) => w.length > 2 && !stopwords.has(w));
+
+        if (words.length > 0) {
+
+          const matchedDbChunks = await this.prisma.documentChunk.findMany({
+            where: {
+              documentId: params.documentId,
+              OR: words.map((word) => ({
+                rawText: {
+                  contains: word,
+                  mode: 'insensitive',
+                },
+              })),
+            },
+          });
+
+          if (matchedDbChunks.length > 0) {
+
+            const scoredChunks = matchedDbChunks.map((chunk) => {
+              let matches = 0;
+              const textLower = chunk.rawText.toLowerCase();
+              for (const word of words) {
+                let pos = textLower.indexOf(word);
+                while (pos !== -1) {
+                  matches++;
+                  pos = textLower.indexOf(word, pos + word.length);
+                }
+              }
+              return { chunk, matches };
+            });
+
+            chunks = scoredChunks
+              .filter((sc) => sc.matches > 0)
+              .sort((a, b) => b.matches - a.matches)
+              .map((sc) => sc.chunk)
+              .slice(0, limit);
+
+            this.logger.log(
+              `[pgvector FALLBACK] Keyword search berhasil. Ditemukan ${chunks.length} chunks relevan berbasis kata kunci.`,
+            );
+          }
+        }
+      }
+
+      if (chunks.length === 0) {
+        this.logger.warn(
+          `[pgvector FALLBACK] Keyword search menghasilkan 0 hasil atau queryText kosong. Menggunakan chronological fallback.`,
+        );
+        chunks = await this.prisma.documentChunk.findMany({
+          where: { documentId: params.documentId },
+          take: limit,
+          orderBy: { chunkIndex: 'asc' },
+        });
+      }
 
       return chunks.map((c) => ({
         chunkId: c.id,
@@ -3117,7 +3733,13 @@ export class DocumentRepository {
 
 
 --- FILE: src\modules\document-ingestion\services\document-ingestion.service.ts ---
-import { Injectable, ConflictException, Logger, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -3135,6 +3757,7 @@ import { DocumentResponseDto } from '../dtos/document-response.dto';
 export class DocumentIngestionService {
   private readonly logger = new Logger(DocumentIngestionService.name);
   private readonly uploadDir = path.resolve(process.env.UPLOAD_DESTINATION || './uploads');
+  private readonly tempDir = path.join(this.uploadDir, 'temp');
 
   constructor(
     private readonly parserFactory: ParserFactory,
@@ -3148,15 +3771,93 @@ export class DocumentIngestionService {
     if (!fs.existsSync(this.uploadDir)) {
       fs.mkdirSync(this.uploadDir, { recursive: true });
     }
+    if (!fs.existsSync(this.tempDir)) {
+      fs.mkdirSync(this.tempDir, { recursive: true });
+    }
   }
 
   async processDocumentUpload(
     file: Express.Multer.File,
     dto: UploadDocumentDto,
   ): Promise<DocumentResponseDto> {
+    return this.ingestDocumentCore(file.buffer, file.originalname, file.mimetype, dto);
+  }
+
+  async processTemporaryUpload(file: Express.Multer.File): Promise<{
+    tempFileId: string;
+    fileName: string;
+    mimeType: string;
+    fileSizeBytes: string;
+    tempPath: string;
+  }> {
+    const tempFileId = crypto.randomUUID();
+    const encodedMime = Buffer.from(file.mimetype).toString('hex');
+
+    const tempFileName = `${tempFileId}__${encodedMime}__${file.originalname}`;
+    const tempFilePath = path.join(this.tempDir, tempFileName);
+
+    fs.writeFileSync(tempFilePath, file.buffer);
+    this.logger.log(`[Temp Saved] Berkas transien berhasil disimpan di disk: ${tempFileName}`);
+
+    return {
+      tempFileId,
+      fileName: file.originalname,
+      mimeType: file.mimetype,
+      fileSizeBytes: file.size.toString(),
+      tempPath: tempFilePath,
+    };
+  }
+
+  async convertTempToPermanent(
+    tempFileId: string,
+    dto: UploadDocumentDto,
+  ): Promise<DocumentResponseDto> {
+    this.logger.log(`[Ingestion Bypass] Memulai konversi berkas transien ID '${tempFileId}'...`);
+
+    const files = fs.readdirSync(this.tempDir);
+    const targetFile = files.find((f) => f.startsWith(tempFileId));
+
+    if (!targetFile) {
+      throw new NotFoundException(
+        `Berkas sementara dengan ID '${tempFileId}' telah kedaluwarsa atau tidak ditemukan di server.`,
+      );
+    }
+
+    const tempFilePath = path.join(this.tempDir, targetFile);
+
+    const parts = targetFile.split('__');
+    if (parts.length < 3) {
+      throw new BadRequestException('Nama berkas transien mengalami kerusakan format metadata.');
+    }
+
+    const mimeType = Buffer.from(parts[1], 'hex').toString('utf-8');
+    const originalName = parts.slice(2).join('__');
+
+    const fileBuffer = fs.readFileSync(tempFilePath);
+    const result = await this.ingestDocumentCore(fileBuffer, originalName, mimeType, dto);
+
+    try {
+      fs.unlinkSync(tempFilePath);
+      this.logger.log(`[Cleanup Pass] Berkas transien '${targetFile}' berhasil dihapus.`);
+    } catch (cleanupErr) {
+
+      const errorMessage = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
+
+      this.logger.warn(`Gagal menghapus berkas transien: ${errorMessage}`);
+    }
+
+    return result;
+  }
+
+  private async ingestDocumentCore(
+    buffer: Buffer,
+    originalname: string,
+    mimetype: string,
+    dto: UploadDocumentDto,
+  ): Promise<DocumentResponseDto> {
     const startTime = Date.now();
 
-    const checksumHash = crypto.createHash('sha256').update(file.buffer).digest('hex');
+    const checksumHash = crypto.createHash('sha256').update(buffer).digest('hex');
 
     const existingDoc = await this.repository.findByChecksum(checksumHash);
     if (existingDoc) {
@@ -3167,13 +3868,13 @@ export class DocumentIngestionService {
       });
     }
 
-    const fileExtension = path.extname(file.originalname);
+    const fileExtension = path.extname(originalname);
     const fileNameOnDisk = `${checksumHash}${fileExtension}`;
     const filePathOnDisk = path.join(this.uploadDir, fileNameOnDisk);
-    fs.writeFileSync(filePathOnDisk, file.buffer);
+    fs.writeFileSync(filePathOnDisk, buffer);
 
-    const parser = this.parserFactory.getParser(file.mimetype);
-    const extracted = await parser.parse(file.buffer);
+    const parser = this.parserFactory.getParser(mimetype);
+    const extracted = await parser.parse(buffer);
 
     const sanitizedText = this.sanitizerPipeline.sanitize(extracted.rawText);
 
@@ -3202,9 +3903,9 @@ export class DocumentIngestionService {
     const savedDoc = await this.repository.createDocumentWithTransaction({
       title: dto.title,
       fileUrl: filePathOnDisk,
-      mimeType: file.mimetype,
+      mimeType: mimetype,
       checksumHash,
-      fileSizeBytes: BigInt(file.size),
+      fileSizeBytes: BigInt(buffer.length),
       pageCount: extracted.pageCount,
       totalTokenCount,
       category: dto.category || 'General Report',
@@ -3223,7 +3924,7 @@ export class DocumentIngestionService {
       status: savedDoc.status,
       createdAt: savedDoc.createdAt,
       metadata: {
-        fileSizeBytes: file.size.toString(),
+        fileSizeBytes: buffer.length.toString(),
         pageCount: extracted.pageCount,
         totalTokenCount,
         category: dto.category || 'General Report',
@@ -3247,13 +3948,13 @@ export class DocumentIngestionService {
       createdAt: doc.createdAt,
       metadata: doc.metadata
         ? {
-            fileSizeBytes: doc.metadata.fileSizeBytes.toString(),
-            pageCount: doc.metadata.pageCount,
-            totalTokenCount: doc.metadata.totalTokenCount,
-            category: doc.metadata.category,
-            uploadedBy: doc.metadata.uploadedBy,
-            docType: doc.metadata.docType,
-          }
+          fileSizeBytes: doc.metadata.fileSizeBytes.toString(),
+          pageCount: doc.metadata.pageCount,
+          totalTokenCount: doc.metadata.totalTokenCount,
+          category: doc.metadata.category,
+          uploadedBy: doc.metadata.uploadedBy,
+          docType: doc.metadata.docType,
+        }
         : undefined,
       chunkCount: doc._count?.chunks ?? 0,
       extractedLocationsCount: 0,
@@ -3284,22 +3985,22 @@ export class DocumentIngestionService {
       createdAt: doc.createdAt,
       metadata: doc.metadata
         ? {
-            fileSizeBytes: doc.metadata.fileSizeBytes.toString(),
-            pageCount: doc.metadata.pageCount,
-            totalTokenCount: doc.metadata.totalTokenCount,
-            category: doc.metadata.category,
-            uploadedBy: doc.metadata.uploadedBy,
-            docType: doc.metadata.docType,
-          }
+          fileSizeBytes: doc.metadata.fileSizeBytes.toString(),
+          pageCount: doc.metadata.pageCount,
+          totalTokenCount: doc.metadata.totalTokenCount,
+          category: doc.metadata.category,
+          uploadedBy: doc.metadata.uploadedBy,
+          docType: doc.metadata.docType,
+        }
         : undefined,
       chunkCount: doc.chunks ? doc.chunks.length : 0,
       extractedLocationsCount: locationCount,
       chunks: doc.chunks
         ? doc.chunks.map((c) => ({
-            chunkIndex: c.chunkIndex,
-            rawText: c.rawText,
-            tokenCount: c.tokenCount,
-          }))
+          chunkIndex: c.chunkIndex,
+          rawText: c.rawText,
+          tokenCount: c.tokenCount,
+        }))
         : [],
     };
   }
@@ -3327,7 +4028,6 @@ export class DocumentIngestionService {
     };
   }
 }
-
 
 --- FILE: src\modules\document-ingestion\services\geospatial-parser.service.ts ---
 import { Injectable, Logger } from '@nestjs/common';
@@ -3781,6 +4481,8 @@ import { IntentRouterService } from './services/intent-router.service';
 import { AssistantController } from './controllers/assistant.controller';
 import { PromptInjectionSanitizer } from './utils/prompt-injection-sanitizer.util';
 import { ArticleGeneratorService } from './services/article-generator.service';
+import { DiscussionBridgeService } from './services/discussion-bridge.service';
+import { TranscriptDistiller } from './utils/transcript-distiller.util';
 
 @Module({
   imports: [DocumentIngestionModule, AiAgentModule],
@@ -3790,6 +4492,8 @@ import { ArticleGeneratorService } from './services/article-generator.service';
     ChatMemoryService,
     PromptInjectionSanitizer,
     ArticleGeneratorService,
+    DiscussionBridgeService,
+    TranscriptDistiller,
     QaIntentHandler,
     ArticleIntentHandler,
     IntentRouterService,
@@ -3799,12 +4503,14 @@ import { ArticleGeneratorService } from './services/article-generator.service';
     ChatMemoryService,
     PromptInjectionSanitizer,
     ArticleGeneratorService,
+    DiscussionBridgeService,
+    TranscriptDistiller,
     QaIntentHandler,
     ArticleIntentHandler,
     IntentRouterService,
   ],
 })
-export class InteractiveAssistantModule {}
+export class InteractiveAssistantModule { }
 
 --- FILE: src\modules\interactive-assistant\constants\article-prompts.constant.ts ---
 export type ArticleTone = 'KRITIS' | 'SOLUTIF' | 'AKADEMIS';
@@ -3837,11 +4543,64 @@ import {
   HttpCode,
   HttpStatus,
   ParseUUIDPipe,
+  UseInterceptors,
+  UploadedFile,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { IntentRouterService } from '../services/intent-router.service';
 import { ChatMemoryService } from '../services/chat-memory.service';
 import { ArticleGeneratorService } from '../services/article-generator.service';
-import { InteractRequestDto } from '../dtos/interact-request.dto';
+import { DiscussionBridgeService } from '../services/discussion-bridge.service';
+import { DocumentIngestionService } from '../../document-ingestion/services/document-ingestion.service';
+import { ChatAttachmentSignatureValidationPipe } from '../../document-ingestion/pipes/chat-attachment-validation.pipe';
+import { ArticleLength, SessionType } from '@prisma/client';
+
+import { IsString, IsNotEmpty, IsUUID, MinLength, IsOptional, IsArray, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
+
+export class AttachmentItemDto {
+  @IsUUID('4', { message: 'fileId harus berupa format UUID v4 yang valid' })
+  @IsNotEmpty({ message: 'fileId tidak boleh kosong' })
+  fileId!: string;
+
+  @IsOptional()
+  @IsString()
+  classification?: 'BASELINE' | 'REALIZATION' | 'GENERAL_REFERENCE';
+}
+
+export class ExtendedInteractRequestDto {
+  @IsUUID('4', { message: 'sessionId harus berupa format UUID v4 yang valid' })
+  @IsNotEmpty({ message: 'sessionId tidak boleh kosong' })
+  sessionId!: string;
+
+  @IsString()
+  @IsNotEmpty({ message: 'Pesan atau perintah tidak boleh kosong' })
+  @MinLength(2, { message: 'Pesan minimal 2 karakter' })
+  query!: string;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => AttachmentItemDto)
+  attachments?: AttachmentItemDto[];
+
+  @IsOptional()
+  @IsString()
+  currentDraft?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  documentIds?: string[];
+
+  @IsOptional()
+  @IsString()
+  tone?: string;
+
+  @IsOptional()
+  @IsString()
+  targetLength?: string;
+}
 
 @Controller('assistant')
 export class AssistantController {
@@ -3849,6 +4608,8 @@ export class AssistantController {
     private readonly routerService: IntentRouterService,
     private readonly memoryService: ChatMemoryService,
     private readonly articleGeneratorService: ArticleGeneratorService,
+    private readonly discussionBridgeService: DiscussionBridgeService,
+    private readonly ingestionService: DocumentIngestionService,
   ) { }
 
   @Post('session')
@@ -3857,19 +4618,53 @@ export class AssistantController {
     @Body('documentId') documentId?: string,
     @Body('documentIds') documentIds?: string[],
     @Body('title') title?: string,
+    @Body('sessionType') sessionType?: SessionType,
   ) {
     const targetIds = documentIds && documentIds.length > 0 ? documentIds : (documentId ? [documentId] : []);
-    const session = await this.memoryService.createSession(targetIds, title);
+    const type = sessionType || SessionType.QA_CHAT;
+    const session = await this.memoryService.createSession(targetIds, title, type);
     return {
       success: true,
       data: session,
     };
   }
 
+  @Post('sessions/:id/attachments')
+  @HttpCode(HttpStatus.CREATED)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: {
+        fileSize: 20 * 1024 * 1024,
+      },
+    }),
+  )
+  async uploadSessionAttachment(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @UploadedFile(new ChatAttachmentSignatureValidationPipe()) file: Express.Multer.File,
+  ) {
+
+    await this.memoryService.getQaSessionDetails(id);
+
+    const result = await this.ingestionService.processTemporaryUpload(file);
+    return {
+      success: true,
+      data: {
+        ...result,
+        sessionId: id,
+      },
+    };
+  }
+
   @Post('interact')
   @HttpCode(HttpStatus.OK)
-  async interact(@Body() dto: InteractRequestDto) {
-    const result = await this.routerService.dispatch(dto.sessionId, dto.query);
+  async interact(@Body() dto: ExtendedInteractRequestDto) {
+    if (dto.documentIds) {
+      await this.memoryService.syncSessionDocuments(dto.sessionId, dto.documentIds);
+    }
+    if (dto.tone || dto.targetLength) {
+      await this.memoryService.updateSessionMetadata(dto.sessionId, dto.tone, dto.targetLength);
+    }
+    const result = await this.routerService.dispatch(dto.sessionId, dto.query, dto.attachments, dto.currentDraft);
     return {
       success: true,
       data: result,
@@ -3917,6 +4712,25 @@ export class AssistantController {
     },
   ) {
     const result = await this.articleGeneratorService.generateArticle(body);
+    return {
+      success: true,
+      data: result,
+    };
+  }
+
+  @Post('article/transition')
+  @HttpCode(HttpStatus.CREATED)
+  async transitionQaToArticle(
+    @Body()
+    body: {
+      sessionId: string;
+      articleTitle: string;
+      targetLength?: ArticleLength;
+      tone?: string;
+      userInstruction?: string;
+    },
+  ) {
+    const result = await this.discussionBridgeService.transitionQaToArticle(body);
     return {
       success: true,
       data: result,
@@ -3988,7 +4802,6 @@ export class AssistantController {
 
   @Get('article/sessions/:id/export-data')
   async getArticleExportData(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
-
     const data = await this.articleGeneratorService.getArticleSessionById(id);
     return {
       success: true,
@@ -3996,8 +4809,8 @@ export class AssistantController {
         title: data.articleTitle,
         content: data.fullArticleText,
         tone: data.tone,
-        generatedAt: data.updatedAt
-      }
+        generatedAt: data.updatedAt,
+      },
     };
   }
 }
@@ -4026,19 +4839,21 @@ import {
 import { ChatMemoryService } from '../services/chat-memory.service';
 import { ArticleGeneratorService } from '../services/article-generator.service';
 import { PromptInjectionSanitizer } from '../utils/prompt-injection-sanitizer.util';
+import { QaIntentHandler } from './qa-intent.handler';
 
 @Injectable()
 export class ArticleIntentHandler implements IIntentHandler {
   private readonly logger = new Logger(ArticleIntentHandler.name);
 
   private readonly articleTriggersRegex =
-    /(?:buatkan|tulis|susun|generate|draft)\s*(?:artikel|opini|berita|press release|rilis media|publikasi|ringkasan eksekutif)/i;
+    /(?:buatkan|tulis|susun|generate|draft|sintesis)\s*(?:artikel|opini|berita|press release|rilis media|publikasi|ringkasan eksekutif|draf)/i;
 
   constructor(
     private readonly sanitizer: PromptInjectionSanitizer,
     private readonly chatMemory: ChatMemoryService,
     private readonly articleGenerator: ArticleGeneratorService,
-  ) {}
+    private readonly qaHandler: QaIntentHandler,
+  ) { }
 
   getIntentType(): IntentType {
     return 'ARTICLE_GENERATION';
@@ -4051,35 +4866,17 @@ export class ArticleIntentHandler implements IIntentHandler {
 
   async execute(payload: IntentExecutionPayload): Promise<any> {
     this.logger.log(
-      `[ArticleIntentHandler] Memproses Perintah Pembuatan Artikel CoT untuk Sesi ID: ${payload.sessionId}...`,
+      `[ArticleIntentHandler] Mendelegasikan alur penulisan komposit ke Q&A Multimodal Handler untuk menjamin rendering Dual-Pane...`,
     );
 
-    const sanitizedInstruction = this.sanitizer.sanitize(payload.query);
-
-    await this.chatMemory.recordUserMessage(payload.sessionId, sanitizedInstruction);
-
-    const articleResult = await this.articleGenerator.generateArticle({
-      documentIds: [payload.documentId],
-      articleTitle: 'Draf Artikel Kebijakan',
-      userInstruction: sanitizedInstruction,
-      tone: 'kritis',
-    });
-
-    await this.chatMemory.recordAssistantMessage(
-      payload.sessionId,
-      JSON.stringify(articleResult),
-    );
-
-    return {
-      intent: this.getIntentType(),
-      sessionId: payload.sessionId,
-      data: articleResult,
-    };
+    return this.qaHandler.execute(payload);
   }
 }
 
 --- FILE: src\modules\interactive-assistant\handlers\qa-intent.handler.ts ---
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import * as fs from 'fs';
+import * as path from 'path';
 import {
   IIntentHandler,
   IntentType,
@@ -4087,18 +4884,19 @@ import {
 } from '../interfaces/intent-handler.interface';
 import { ChatMemoryService } from '../services/chat-memory.service';
 import { ContextAssemblyService } from '../../ai-agent/services/context-assembly.service';
-import { VendorLlmAdapter } from '../../ai-agent/providers/vendor-llm.adapter';
+import { VendorLlmAdapter, MultimodalChatMessage } from '../../ai-agent/providers/vendor-llm.adapter';
 import { PromptInjectionSanitizer } from '../utils/prompt-injection-sanitizer.util';
-import { LlmChatMessage } from '../../ai-agent/utils/prompt-assembly.builder';
+import { DocumentIngestionService } from '../../document-ingestion/services/document-ingestion.service';
+import { ChatRepository } from '../repositories/chat.repository';
 
-const QA_CONVERSATIONAL_SCHEMA = {
+const DUAL_PANE_COOPERATIVE_SCHEMA = {
   type: 'object',
   required: ['answer'],
   properties: {
     answer: {
       type: 'string',
       description:
-        'The main conversational answer in Bahasa Indonesia. Format strictly using beautiful, rich Markdown (using headers ##, bold texts, bullet lists, and comparison tables if comparing data). Always embed structured citation anchors in the format [docId:chunkIndex] (e.g. [doc-001:2]) adjacent to any claims, metrics, or factual statements derived from the context chunks.',
+        'The conversational feedback/thought process in Bahasa Indonesia explaining what changes you made, what data you analyzed, or answering the user. Format strictly using beautiful, rich Markdown (using headers ##, bold texts, bullet lists, and comparison tables if comparing data). Always embed structured citation anchors in the format [docId:chunkIndex] (e.g. [doc-001:2]) adjacent to any claims, metrics, or factual statements derived from the context chunks.',
     },
     suggestions: {
       type: 'array',
@@ -4106,18 +4904,35 @@ const QA_CONVERSATIONAL_SCHEMA = {
       description:
         'Generate exactly 3 highly relevant, contextual follow-up questions or discussion options to guide the user in continuing the conversation.',
     },
+    updatedArticle: {
+      type: 'object',
+      properties: {
+        title: {
+          type: 'string',
+          description: 'The updated or newly generated article title.',
+        },
+        draftMarkdown: {
+          type: 'string',
+          description: 'The fully updated or newly generated article text formatted in Markdown. If the user only asked a question without editing or creating the article, return the unmodified currentDraft or leave this blank.',
+        },
+      },
+    },
   },
 };
 
 @Injectable()
 export class QaIntentHandler implements IIntentHandler {
   private readonly logger = new Logger(QaIntentHandler.name);
+  private readonly uploadDir = path.resolve(process.env.UPLOAD_DESTINATION || './uploads');
+  private readonly tempDir = path.join(this.uploadDir, 'temp');
 
   constructor(
     private readonly sanitizer: PromptInjectionSanitizer,
     private readonly chatMemory: ChatMemoryService,
     private readonly contextAssembly: ContextAssemblyService,
     private readonly llmAdapter: VendorLlmAdapter,
+    private readonly ingestionService: DocumentIngestionService,
+    private readonly chatRepository: ChatRepository,
   ) { }
 
   getIntentType(): IntentType {
@@ -4130,7 +4945,7 @@ export class QaIntentHandler implements IIntentHandler {
 
   async execute(payload: IntentExecutionPayload): Promise<any> {
     this.logger.log(
-      `[QaIntentHandler] Memproses Q&A Analitik untuk Sesi ID: ${payload.sessionId}...`,
+      `[QaIntentHandler] Memproses kolaborasi tanya-jawab untuk Sesi ID: ${payload.sessionId}...`,
     );
 
     const sanitizedQuery = this.sanitizer.sanitize(payload.query);
@@ -4139,30 +4954,101 @@ export class QaIntentHandler implements IIntentHandler {
 
     const memory = await this.chatMemory.getActiveSlidingWindowMemory(payload.sessionId);
 
-    const historyMessages: LlmChatMessage[] = memory.activeMessages.map((m) => ({
+    const documentIds = [...(memory.documentIds || [])];
+    const images: Array<{ mimeType: string; base64Data: string }> = [];
+
+    if (payload.attachments && payload.attachments.length > 0) {
+      for (const att of payload.attachments) {
+        if (att.classification) {
+
+          try {
+            this.logger.log(`[Bypass Ingest] Menjalankan bypass pendaftaran dokumen untuk ID berkas sementara: ${att.fileId}`);
+
+            const categoryMap = {
+              BASELINE: 'Perencanaan & Baseline Target',
+              REALIZATION: 'Laporan Realisasi Capaian',
+              GENERAL_REFERENCE: 'Referensi Umum & Kliping',
+            } as const;
+
+            const classificationKey = att.classification as keyof typeof categoryMap;
+            const targetCategory = categoryMap[classificationKey] || 'Referensi Umum & Kliping';
+
+            const ingestedDoc = await this.ingestionService.convertTempToPermanent(att.fileId, {
+              title: `Dokumen Tambahan Chat (${att.classification})`,
+              category: targetCategory,
+              docType: att.classification,
+            });
+
+            documentIds.push(ingestedDoc.id);
+
+            await this.chatRepository.linkDocumentSource(payload.sessionId, ingestedDoc.id);
+          } catch (ingestErr: any) {
+            this.logger.error(`[Bypass Ingest Failed] Gagal mendaftarkan dokumen sementara ke repositori: ${ingestErr.message}`);
+          }
+        } else {
+
+          try {
+            const files = fs.readdirSync(this.tempDir);
+            const targetFile = files.find((f) => f.startsWith(att.fileId));
+
+            if (targetFile) {
+              const filePath = path.join(this.tempDir, targetFile);
+              const fileBuffer = fs.readFileSync(filePath);
+
+              const parts = targetFile.split('__');
+              const mimeType = parts.length > 1
+                ? Buffer.from(parts[1], 'hex').toString('utf-8')
+                : 'image/png';
+
+              images.push({
+                mimeType,
+                base64Data: fileBuffer.toString('base64'),
+              });
+            }
+          } catch (imageErr: any) {
+            this.logger.error(`[Screenshot Resolution Failed] Gagal memuat data biner gambar: ${imageErr.message}`);
+          }
+        }
+      }
+    }
+
+    const historyMessages: MultimodalChatMessage[] = memory.activeMessages.map((m) => ({
       role: m.role === 'USER' ? 'user' : 'assistant',
       content: m.content,
     }));
 
     const promptPayload = await this.contextAssembly.assemblePromptPayload({
-      documentId: memory.documentId,
-      documentIds: memory.documentIds,
+      documentIds,
+      images,
       userQuery: sanitizedQuery,
+      currentDraft: payload.currentDraft,
+      tone: memory.tone || 'solutif',
+      targetLength: memory.targetLength || 'MEDIUM',
     });
 
     promptPayload.messages.splice(2, 0, ...historyMessages);
-
     if (memory.runningSummary) {
       promptPayload.messages.splice(1, 0, {
         role: 'system',
-        content: `[RINGKASAN EPISODIK OBROLAN SEBELUMNYA]\nBerikut adalah ringkasan jalan percakapan sebelumnya untuk menjaga ingatan jangka panjang Anda: ${memory.runningSummary}`,
+        content: `[RINGKASAN EPISODIK OBROLAN SEBELUMNYA]\nBerikut adalah ringkasan jalannya obrolan sebelumnya untuk memicu ingatan jangka panjang Anda: ${memory.runningSummary}`,
       });
     }
 
-    const analysisResult = await this.llmAdapter.generateStructuredAnalysis<{
-      answer: string;
-      suggestions?: string[];
-    }>(promptPayload.messages, QA_CONVERSATIONAL_SCHEMA, 0.4);
+    const analysisResult = await this.llmAdapter.generateStructuredAnalysis<any>(
+      promptPayload.messages,
+      DUAL_PANE_COOPERATIVE_SCHEMA,
+      0.5,
+    );
+
+    if (analysisResult.updatedArticle && analysisResult.updatedArticle.draftMarkdown) {
+      const updatedDraft = analysisResult.updatedArticle.draftMarkdown;
+      const updatedTitle = analysisResult.updatedArticle.title || memory.articleTitle || memory.title;
+
+      await this.chatRepository.updateActiveDraft(payload.sessionId, updatedDraft);
+      await this.chatRepository.updateArticleMetadata(payload.sessionId, updatedTitle);
+
+      this.logger.log(`[State Sync] Draf naskah dan judul artikel aktif berhasil disinkronkan ke PostgreSQL.`);
+    }
 
     const assistantResponseContent = JSON.stringify(analysisResult);
     await this.chatMemory.recordAssistantMessage(payload.sessionId, assistantResponseContent);
@@ -4183,7 +5069,7 @@ export class QaIntentHandler implements IIntentHandler {
     return {
       intent: this.getIntentType(),
       sessionId: payload.sessionId,
-      documentId: memory.documentId,
+      documentIds,
       data: analysisResult,
       memoryInfo: {
         activeTokens: memory.totalMemoryTokens,
@@ -4197,56 +5083,46 @@ export class QaIntentHandler implements IIntentHandler {
     memory: any,
     latestAnswer: string,
   ): Promise<void> {
+    const previousSummary = memory.runningSummary || 'Belum ada riwayat pembicaraan.';
+    const activeMessagesStr = memory.activeMessages
+      .map((m: any) => `${m.role === 'USER' ? 'User' : 'Assistant'}: ${m.content}`)
+      .join('\n');
 
-    Promise.resolve()
-      .then(async () => {
-        const previousSummary =
-          memory.runningSummary || 'Belum ada riwayat pembicaraan sebelumnya.';
-        const activeMessagesStr = memory.activeMessages
-          .map((m: any) => `${m.role === 'USER' ? 'User' : 'Assistant'}: ${m.content}`)
-          .join('\n');
-
-        const compactionPrompt: LlmChatMessage[] = [
-          {
-            role: 'system',
-            content: `Anda adalah asisten pencatat memori kognitif BRIDA Mimika.
+    const compactionPrompt: MultimodalChatMessage[] = [
+      {
+        role: 'system',
+        content: `Anda adalah asisten pencatat memori kognitif BRIDA Mimika.
 Tugas Anda: Perbarui [RINGKASAN EPISODIK OBROLAN] secara padat dan kronologis (maksimal 200 kata).
-Gabungkan [RINGKASAN SEBELUMNYA] dengan [OBROLAN BARU] untuk menghasilkan ringkasan naratif baru yang komprehensif.
-Hindari kalimat pembuka (intro), langsung tuliskan ringkasan faktualnya.`,
-          },
-          {
-            role: 'user',
-            content: `RINGKASAN SEBELUMNYA:\n${previousSummary}\n\nOBROLAN BARU:\n${activeMessagesStr}\nAssistant: ${latestAnswer}`,
-          },
-        ];
+Gabungkan ringkasan sebelumnya dengan obrolan baru tanpa pengantar apa pun.`,
+      },
+      {
+        role: 'user',
+        content: `RINGKASAN SEBELUMNYA:\n${previousSummary}\n\nOBROLAN BARU:\n${activeMessagesStr}\nAssistant: ${latestAnswer}`,
+      },
+    ];
 
-        const compactionSchema = {
-          type: 'object',
-          required: ['summary'],
-          properties: {
-            summary: {
-              type: 'string',
-              description: 'Ringkasan baru hasil konsolidasi riwayat obrolan.',
-            },
-          },
-        };
+    const compactionSchema = {
+      type: 'object',
+      required: ['summary'],
+      properties: {
+        summary: { type: 'string', description: 'Ringkasan naratif gabungan baru.' },
+      },
+    };
 
+    setImmediate(async () => {
+      try {
         const result = await this.llmAdapter.generateStructuredAnalysis<{
           summary: string;
         }>(compactionPrompt, compactionSchema, 0.0);
 
-        if (result?.summary) {
+        if (result && result.summary) {
           await this.chatMemory.updateRunningSummary(sessionId, result.summary);
-          this.logger.log(
-            `[Compaction Guard] Berhasil memperbarui Running Summary untuk Sesi ID: ${sessionId}`,
-          );
+          this.logger.log(`[Compaction Guard] Berhasil memperbarui Running Summary.`);
         }
-      })
-      .catch((err) => {
-        this.logger.error(
-          `[Compaction Guard Error] Gagal memproses pemadatan memori di latar belakang: ${err.message}`,
-        );
-      });
+      } catch (err: any) {
+        this.logger.error(`[Compaction Guard Error] Gagal memadatkan memori: ${err.message}`);
+      }
+    });
   }
 }
 
@@ -4261,11 +5137,20 @@ export interface ActiveChatMessage {
 
 export interface SlidingWindowMemoryPayload {
   sessionId: string;
-  documentId: string;
+  documentId: string | null;
   documentIds?: string[];
   activeMessages: ActiveChatMessage[];
   totalMemoryTokens: number;
   prunedMessagesCount: number;
+
+  title?: string;
+  articleTitle?: string | null;
+  tone?: string | null;
+  targetLength?: string | null;
+}
+
+export interface HierarchicalMemoryPayload extends SlidingWindowMemoryPayload {
+  runningSummary?: string | null;
 }
 
 --- FILE: src\modules\interactive-assistant\interfaces\intent-handler.interface.ts ---
@@ -4273,8 +5158,15 @@ export type IntentType = 'ANALYTICAL_QA' | 'ARTICLE_GENERATION';
 
 export interface IntentExecutionPayload {
   sessionId: string;
-  documentId: string;
+  documentId?: string;
   query: string;
+
+  attachments?: Array<{
+    fileId: string;
+    classification?: 'BASELINE' | 'REALIZATION' | 'GENERAL_REFERENCE';
+  }>;
+
+  currentDraft?: string;
 }
 
 export interface IIntentHandler {
@@ -4289,13 +5181,20 @@ export interface IIntentHandler {
 --- FILE: src\modules\interactive-assistant\repositories\chat.repository.ts ---
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../../common/prisma/prisma.service';
-import { ChatSession, ChatMessage, MessageRole, SessionType, ArticleLength } from '@prisma/client';
+import { ChatSession, ChatMessage, MessageRole, SessionType, ArticleLength, InteractionType } from '@prisma/client';
 
-export interface AddMessageInput {
+export interface AddMessageWithAttachmentsInput {
   sessionId: string;
   role: MessageRole;
   content: string;
   tokenCount: number;
+  interactionType?: InteractionType;
+  attachments?: Array<{
+    fileUrl: string;
+    fileName: string;
+    mimeType: string;
+    fileSizeBytes: bigint;
+  }>;
 }
 
 export interface CreateArticleSessionInput {
@@ -4304,13 +5203,14 @@ export interface CreateArticleSessionInput {
   targetLength?: ArticleLength;
   tone?: string;
   initialPrompt?: string;
+  parentSessionId?: string;
 }
 
 @Injectable()
 export class ChatRepository {
   private readonly logger = new Logger(ChatRepository.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
   async createSession(documentIds: string[], title?: string): Promise<ChatSession> {
     const primaryDocId = documentIds.length > 0 ? documentIds[0] : null;
@@ -4329,7 +5229,13 @@ export class ChatRepository {
   }
 
   async createArticleSession(input: CreateArticleSessionInput): Promise<any> {
-    const { documentIds, articleTitle, targetLength = ArticleLength.MEDIUM, tone = 'solutif' } = input;
+    const {
+      documentIds,
+      articleTitle,
+      targetLength = ArticleLength.MEDIUM,
+      tone = 'solutif',
+      parentSessionId
+    } = input;
 
     return this.prisma.chatSession.create({
       data: {
@@ -4338,6 +5244,7 @@ export class ChatRepository {
         articleTitle,
         targetLength,
         tone,
+        parentSessionId: parentSessionId || null,
         documentId: documentIds.length > 0 ? documentIds[0] : null,
         sources: {
           create: documentIds.map((docId) => ({
@@ -4353,6 +5260,9 @@ export class ChatRepository {
         },
         messages: {
           orderBy: { createdAt: 'asc' },
+          include: {
+            attachments: true,
+          },
         },
       },
     });
@@ -4365,11 +5275,18 @@ export class ChatRepository {
         document: true,
         sources: {
           include: {
-            document: true,
+            document: {
+              include: {
+                metadata: true,
+              },
+            },
           },
         },
         messages: {
           orderBy: { createdAt: 'asc' },
+          include: {
+            attachments: true,
+          },
         },
       },
     });
@@ -4396,6 +5313,9 @@ export class ChatRepository {
         },
         messages: {
           orderBy: { createdAt: 'asc' },
+          include: {
+            attachments: true,
+          },
         },
       },
     });
@@ -4416,27 +5336,96 @@ export class ChatRepository {
         },
         messages: {
           orderBy: { createdAt: 'asc' },
+          include: {
+            attachments: true,
+          },
         },
       },
     });
   }
 
-  async addMessage(input: AddMessageInput): Promise<ChatMessage> {
+  async addMessage(input: AddMessageWithAttachmentsInput): Promise<ChatMessage> {
+    const { sessionId, role, content, tokenCount, interactionType = InteractionType.MANUAL_INPUT, attachments = [] } = input;
+
     const message = await this.prisma.chatMessage.create({
       data: {
-        sessionId: input.sessionId,
-        role: input.role,
-        content: input.content,
-        tokenCount: input.tokenCount,
+        sessionId,
+        role,
+        content,
+        tokenCount,
+        interactionType,
+        attachments: {
+          create: attachments.map((att) => ({
+            fileUrl: att.fileUrl,
+            fileName: att.fileName,
+            mimeType: att.mimeType,
+            fileSizeBytes: att.fileSizeBytes,
+          })),
+        },
+      },
+      include: {
+        attachments: true,
       },
     });
 
     await this.prisma.chatSession.update({
-      where: { id: input.sessionId },
+      where: { id: sessionId },
       data: { updatedAt: new Date() },
     });
 
     return message;
+  }
+
+  async linkDocumentSource(sessionId: string, documentId: string): Promise<any> {
+    return this.prisma.chatSessionSourceRef.upsert({
+      where: {
+        sessionId_documentId: {
+          sessionId,
+          documentId,
+        },
+      },
+      update: {},
+      create: {
+        sessionId,
+        documentId,
+      },
+    });
+  }
+
+  async syncSessionDocuments(sessionId: string, documentIds: string[]): Promise<void> {
+    const primaryDocId = documentIds.length > 0 ? documentIds[0] : null;
+
+    await this.prisma.chatSession.update({
+      where: { id: sessionId },
+      data: {
+        documentId: primaryDocId,
+      },
+    });
+
+    await this.prisma.chatSessionSourceRef.deleteMany({
+      where: { sessionId },
+    });
+
+    if (documentIds.length > 0) {
+      await this.prisma.chatSessionSourceRef.createMany({
+        data: documentIds.map((docId) => ({
+          sessionId,
+          documentId: docId,
+        })),
+      });
+    }
+
+    this.logger.log(`[Sync Session Sources] Sesi ID: ${sessionId} -> Berhasil disinkronkan ke ${documentIds.length} dokumen.`);
+  }
+
+  async updateActiveDraft(sessionId: string, currentDraft: string): Promise<ChatSession> {
+    return this.prisma.chatSession.update({
+      where: { id: sessionId },
+      data: {
+        currentDraft,
+        updatedAt: new Date(),
+      },
+    });
   }
 
   async deleteSession(sessionId: string): Promise<ChatSession> {
@@ -4451,7 +5440,7 @@ export class ChatRepository {
       data: {
         runningSummary: summary,
         updatedAt: new Date(),
-      } as any,
+      },
     });
   }
 
@@ -4460,6 +5449,19 @@ export class ChatRepository {
       where: { sessionId },
       orderBy: { createdAt: 'desc' },
       take: fetchLimit,
+      include: {
+        attachments: true,
+      },
+    });
+  }
+
+  async getAllMessagesChronological(sessionId: string): Promise<ChatMessage[]> {
+    return this.prisma.chatMessage.findMany({
+      where: { sessionId },
+      orderBy: { createdAt: 'asc' },
+      include: {
+        attachments: true,
+      },
     });
   }
 
@@ -4470,8 +5472,22 @@ export class ChatRepository {
         articleTitle,
         title: articleTitle,
         updatedAt: new Date(),
-      } as any,
+      },
     });
+  }
+
+  async updateSessionMetadata(sessionId: string, tone?: string, targetLength?: string): Promise<void> {
+    const data: any = {};
+    if (tone) data.tone = tone;
+    if (targetLength) data.targetLength = targetLength;
+
+    if (Object.keys(data).length > 0) {
+      await this.prisma.chatSession.update({
+        where: { id: sessionId },
+        data,
+      });
+      this.logger.log(`[Update Session Metadata] Sesi ID: ${sessionId} -> Tone: ${tone}, Length: ${targetLength}`);
+    }
   }
 }
 
@@ -4540,6 +5556,15 @@ export interface GenerateArticleOptions {
   tone?: string;
   userInstruction?: string;
   sessionId?: string;
+  synthesizedManifest?: {
+    tesisUtama: string;
+    argumenKunci: Array<{
+      fakta: string;
+      sitasiAsli: string;
+    }>;
+    kesimpulanRingkas?: string;
+  };
+  parentSessionId?: string;
 }
 
 @Injectable()
@@ -4556,11 +5581,17 @@ export class ArticleGeneratorService {
   ) { }
 
   async generateArticle(options: GenerateArticleOptions): Promise<any> {
-    const { documentIds, articleTitle, targetLength = ArticleLength.MEDIUM, tone = 'solutif', userInstruction } = options;
+    const {
+      documentIds,
+      articleTitle,
+      targetLength = ArticleLength.MEDIUM,
+      tone = 'solutif',
+      userInstruction,
+      synthesizedManifest,
+      parentSessionId
+    } = options;
 
-    if (!documentIds || documentIds.length === 0) {
-      throw new BadRequestException('Minimal satu dokumen acuan harus dipilih untuk membuat artikel.');
-    }
+    const validDocIds = documentIds || [];
     if (!articleTitle || !articleTitle.trim()) {
       throw new BadRequestException('Judul artikel tidak boleh kosong.');
     }
@@ -4571,18 +5602,19 @@ export class ArticleGeneratorService {
 
     if (!session) {
       session = await this.chatRepository.createArticleSession({
-        documentIds,
+        documentIds: validDocIds,
         articleTitle,
         targetLength: targetLength as ArticleLength,
         tone,
         initialPrompt: userInstruction,
+        parentSessionId,
       });
     }
 
     const docTexts: string[] = [];
     const sourceDocs: any[] = [];
 
-    for (const docId of documentIds) {
+    for (const docId of validDocIds) {
       const doc = await this.documentRepository.findById(docId);
       if (doc) {
         sourceDocs.push(doc);
@@ -4600,21 +5632,47 @@ export class ArticleGeneratorService {
       lengthGuidance = 'Target Panjang Teks: Minimal 1500 kata (Mendalam, Analisis Kebijakan Komprehensif)';
     }
 
+    let manifestPromptSection = '';
+    if (synthesizedManifest) {
+      const argumenList = Array.isArray(synthesizedManifest.argumenKunci)
+        ? synthesizedManifest.argumenKunci
+          .map((arg, idx) => `- Poin ${idx + 1}: "${arg.fakta}" (WAJIB lampirkan sitasi asli: ${arg.sitasiAsli})`)
+          .join('\n')
+        : 'Tidak ada argumen spesifik.';
+
+      manifestPromptSection = `
+=== STRUKTUR KONSENSUS HASIL DISKUSI SEBELUMNYA (SSM) ===
+Anda WAJIB menyusun alur narasi artikel ini mengikuti kerangka konseptual diskusi yang telah disepakati sebagai berikut:
+- Tesis Utama Artikel: "${synthesizedManifest.tesisUtama}"
+- Argumen Utama & Bukti Faktual:
+${argumenList}
+
+ATURAN RE-PROPAGASI SITASI MUTLAK:
+Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyematkan kembali token sitasi aslinya secara presisi (misal: [docId:chunkIndex]) bersebelahan dengan klaim data tersebut agar orisinalitas riset BRIDA dapat ditelusuri.
+`;
+    }
+
     const promptUserInstruction = userInstruction
       ? `Instruksi Khusus Tambahan: ${userInstruction}`
-      : 'Buatkan draf artikel publikasi yang menarik, solutif, dan berbasis data dari dokumen acuan.';
+      : 'Buatkan draf artikel publikasi yang menarik, solutif, dan berbasis data/ide yang kuat.';
 
     const systemPrompt = `Anda adalah Penulis Artikel Utama & Analis Kebijakan BRIDA Kabupaten Mimika.
-Tugas Anda: Susun artikel publikasi berbasis data aktual dari DOKUMEN ACUAN yang diberikan.
+${validDocIds.length > 0
+  ? 'Tugas Anda: Susun artikel publikasi berbasis data aktual dari DOKUMEN ACUAN yang diberikan.'
+  : 'Tugas Anda: Susun artikel publikasi berdasarkan instruksi dan pengetahuan internal Anda (Mode Kreasi Bebas).'
+}
 
 PANDUAN PENULISAN:
 - Judul Artikel: "${articleTitle}"
 - Gaya Bahasa (Tone): ${tone.toUpperCase()}
 - ${lengthGuidance}
 - Gunakan struktur narasi jurnalistik publik yang kuat (Judul, Subjudul, Analisis Faktual, Solusi Rekomendasi).
+${manifestPromptSection}
 `;
 
-    const userPromptMessage = `Judul Artikel yang Diinginkan: "${articleTitle}"\n${promptUserInstruction}\n\nDOKUMEN ACUAN:\n${assembledDocsContext}`;
+    const userPromptMessage = validDocIds.length > 0
+      ? `Judul Artikel yang Diinginkan: "${articleTitle}"\n${promptUserInstruction}\n\nDOKUMEN ACUAN:\n${assembledDocsContext}`
+      : `Judul Artikel yang Diinginkan: "${articleTitle}"\n${promptUserInstruction}`;
 
     const compiledPrompts = [systemPrompt, userPromptMessage];
     this.tokenEstimator.enforceBudgetCircuitBreaker(compiledPrompts, this.MAX_DRAFTING_TOKEN_BUDGET);
@@ -4654,6 +5712,7 @@ PANDUAN PENULISAN:
 
     return {
       success: true,
+      id: session.id,
       sessionId: session.id,
       articleTitle,
       tone,
@@ -4714,6 +5773,7 @@ PANDUAN PENULISAN:
 
     return {
       success: true,
+      id: session.id,
       sessionId: session.id,
       articleTitle: trimmedTitle,
       tone: updatedSession.tone,
@@ -4776,6 +5836,7 @@ Perbarui / revisi draf artikel berdasarkan instruksi revisi terbaru dari penggun
 
     return {
       success: true,
+      id: session.id,
       sessionId: session.id,
       articleTitle: session.articleTitle || session.title,
       tone: session.tone,
@@ -4810,6 +5871,24 @@ Perbarui / revisi draf artikel berdasarkan instruksi revisi terbaru dari penggun
 
     const lastAssistantMsg = [...session.messages].reverse().find((m: any) => m.role === MessageRole.ASSISTANT);
 
+    let fullArticleText = '';
+    if (lastAssistantMsg) {
+      try {
+        const parsed = JSON.parse(lastAssistantMsg.content);
+        if (parsed && typeof parsed === 'object') {
+          if (parsed.updatedArticle && parsed.updatedArticle.draftMarkdown) {
+            fullArticleText = parsed.updatedArticle.draftMarkdown;
+          } else {
+            fullArticleText = parsed.answer || parsed.fullArticleText || lastAssistantMsg.content;
+          }
+        } else {
+          fullArticleText = lastAssistantMsg.content;
+        }
+      } catch {
+        fullArticleText = lastAssistantMsg.content;
+      }
+    }
+
     return {
       id: session.id,
       title: session.title,
@@ -4820,7 +5899,7 @@ Perbarui / revisi draf artikel berdasarkan instruksi revisi terbaru dari penggun
       updatedAt: session.updatedAt,
       sources: sanitizeSources(session.sources),
       messages: session.messages,
-      fullArticleText: lastAssistantMsg ? lastAssistantMsg.content : '',
+      fullArticleText,
     };
   }
 
@@ -4898,12 +5977,8 @@ Dalam konteks tata kelola pemerintahan yang responsif, sintesis data menunjukkan
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ChatRepository } from '../repositories/chat.repository';
 import { TokenEstimatorUtil } from '../../ai-agent/utils/token-estimator.util';
-import { ActiveChatMessage, SlidingWindowMemoryPayload } from '../interfaces/chat-memory.interface';
-import { MessageRole } from '@prisma/client';
-
-export interface HierarchicalMemoryPayload extends SlidingWindowMemoryPayload {
-  runningSummary?: string | null;
-}
+import { ActiveChatMessage, SlidingWindowMemoryPayload, HierarchicalMemoryPayload } from '../interfaces/chat-memory.interface';
+import { MessageRole, SessionType } from '@prisma/client';
 
 @Injectable()
 export class ChatMemoryService {
@@ -4918,7 +5993,13 @@ export class ChatMemoryService {
     private readonly tokenEstimator: TokenEstimatorUtil,
   ) { }
 
-  async createSession(documentIds: string[], title?: string) {
+  async createSession(documentIds: string[], title?: string, sessionType: SessionType = SessionType.QA_CHAT) {
+    if (sessionType === SessionType.ARTICLE_GENERATOR) {
+      return this.chatRepository.createArticleSession({
+        documentIds,
+        articleTitle: title || 'Draf Artikel Baru',
+      });
+    }
     return this.chatRepository.createSession(documentIds, title);
   }
 
@@ -4940,6 +6021,14 @@ export class ChatMemoryService {
       content,
       tokenCount,
     });
+  }
+
+  async syncSessionDocuments(sessionId: string, documentIds: string[]): Promise<void> {
+    return this.chatRepository.syncSessionDocuments(sessionId, documentIds);
+  }
+
+  async updateSessionMetadata(sessionId: string, tone?: string, targetLength?: string): Promise<void> {
+    return this.chatRepository.updateSessionMetadata(sessionId, tone, targetLength);
   }
 
   async getActiveSlidingWindowMemory(sessionId: string): Promise<HierarchicalMemoryPayload> {
@@ -4977,9 +6066,7 @@ export class ChatMemoryService {
     selectedMessages.reverse();
 
     this.logger.log(
-      `[Hierarchical Memory Window] Sesi ID: ${sessionId} -> Dipilih ${selectedMessages.length
-      } pesan aktif (${accumulatedTokens} tokens, Terkompresi/Dipangkas: ${prunedCount} pesan lama). Status Summary: ${session.runningSummary ? 'Tersedia' : 'Kosong'
-      }`,
+      `[Hierarchical Memory Window] Sesi ID: ${sessionId} -> Dipilih ${selectedMessages.length} pesan aktif (${accumulatedTokens} tokens). Status Summary: ${session.runningSummary ? 'Tersedia' : 'Kosong'}`,
     );
 
     const documentIds = Array.from(
@@ -4998,6 +6085,11 @@ export class ChatMemoryService {
       totalMemoryTokens: accumulatedTokens,
       prunedMessagesCount: prunedCount,
       runningSummary: session.runningSummary || null,
+
+      title: session.title,
+      articleTitle: session.articleTitle,
+      tone: session.tone,
+      targetLength: session.targetLength,
     };
   }
 
@@ -5064,6 +6156,93 @@ export class ChatMemoryService {
   }
 }
 
+--- FILE: src\modules\interactive-assistant\services\discussion-bridge.service.ts ---
+import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import { ChatRepository } from '../repositories/chat.repository';
+import { TranscriptDistiller } from '../utils/transcript-distiller.util';
+import { ArticleGeneratorService } from './article-generator.service';
+import { ArticleLength, SessionType } from '@prisma/client';
+
+export interface TransitionQaRequestDto {
+    sessionId: string;
+    articleTitle: string;
+    targetLength?: ArticleLength;
+    tone?: string;
+    userInstruction?: string;
+}
+
+@Injectable()
+export class DiscussionBridgeService {
+    private readonly logger = new Logger(DiscussionBridgeService.name);
+
+    constructor(
+        private readonly chatRepository: ChatRepository,
+        private readonly distiller: TranscriptDistiller,
+        private readonly articleGenerator: ArticleGeneratorService,
+    ) { }
+
+    async transitionQaToArticle(dto: TransitionQaRequestDto): Promise<any> {
+        const { sessionId, articleTitle, targetLength = ArticleLength.MEDIUM, tone = 'solutif', userInstruction } = dto;
+
+        this.logger.log(
+            `[DiscussionBridgeService] Memulai inisiasi transisi sesi diskusi '${sessionId}' ke naskah artikel...`,
+        );
+
+        const sourceSession = await this.chatRepository.findSessionById(sessionId);
+        if (!sourceSession) {
+            throw new NotFoundException(`Sesi diskusi asal dengan ID '${sessionId}' tidak ditemukan.`);
+        }
+
+        if (sourceSession.sessionType !== SessionType.QA_CHAT) {
+            throw new BadRequestException(
+                `Transisi hanya dapat dipicu dari sesi obrolan bertipe '${SessionType.QA_CHAT}'. Sesi aktif saat ini bertipe '${sourceSession.sessionType}'.`,
+            );
+        }
+
+        const messages = await this.chatRepository.getAllMessagesChronological(sessionId);
+        if (!messages || messages.length === 0) {
+            throw new BadRequestException(
+                'Sesi obrolan diskusi Anda masih kosong. Silakan lakukan tanya-jawab dengan AI terlebih dahulu sebelum merakit naskah artikel.',
+            );
+        }
+
+        const synthesizedManifest = await this.distiller.distill(messages);
+
+        const documentIds: string[] = sourceSession.sources?.map((s: any) => s.documentId) || [];
+
+        if (sourceSession.documentId && !documentIds.includes(sourceSession.documentId)) {
+            documentIds.push(sourceSession.documentId);
+        }
+
+        const uniqueDocIds = Array.from(new Set(documentIds.filter(Boolean) as string[]));
+        if (uniqueDocIds.length === 0) {
+            throw new BadRequestException(
+                'Sesi diskusi asal tidak memiliki dokumen laporan acuan terdaftar yang dapat dijadikan rujukan penulisan.',
+            );
+        }
+
+        this.logger.log(
+            `[DiscussionBridgeService] Distilasi sukses. Meneruskan manifest ke pembuat draf dengan ${uniqueDocIds.length} dokumen rujukan.`,
+        );
+
+        const articleResult = await this.articleGenerator.generateArticle({
+            documentIds: uniqueDocIds,
+            articleTitle,
+            targetLength,
+            tone,
+            userInstruction,
+            synthesizedManifest,
+            parentSessionId: sessionId,
+        });
+
+        this.logger.log(
+            `[DiscussionBridgeService] Sukses melahirkan sesi draf artikel baru ID '${articleResult.sessionId}' dari sesi QA '${sessionId}'.`,
+        );
+
+        return articleResult;
+    }
+}
+
 --- FILE: src\modules\interactive-assistant\services\intent-router.service.ts ---
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { IIntentHandler, IntentExecutionPayload } from '../interfaces/intent-handler.interface';
@@ -5086,7 +6265,12 @@ export class IntentRouterService {
     this.handlers = [this.articleHandler, this.qaHandler];
   }
 
-  async dispatch(sessionId: string, query: string): Promise<any> {
+  async dispatch(
+    sessionId: string,
+    query: string,
+    attachments?: Array<{ fileId: string; classification?: 'BASELINE' | 'REALIZATION' | 'GENERAL_REFERENCE' }>,
+    currentDraft?: string,
+  ): Promise<any> {
     if (!query || query.trim().length === 0) {
       throw new BadRequestException('Pesan atau kueri pengguna tidak boleh kosong.');
     }
@@ -5097,10 +6281,13 @@ export class IntentRouterService {
     }
 
     const trimmedQuery = query.trim();
+
     const payload: IntentExecutionPayload = {
       sessionId: session.id,
-      documentId: session.documentId,
+      documentId: session.documentId || undefined,
       query: trimmedQuery,
+      attachments,
+      currentDraft,
     };
 
     let defaultHandler: IIntentHandler = this.qaHandler;
@@ -5211,6 +6398,130 @@ export class PromptInjectionSanitizer {
 
     return cleanQuery;
   }
+}
+
+--- FILE: src\modules\interactive-assistant\utils\transcript-distiller.util.ts ---
+import { Injectable, Logger } from '@nestjs/common';
+import { VendorLlmAdapter } from '../../ai-agent/providers/vendor-llm.adapter';
+import { ChatMessage } from '@prisma/client';
+
+export interface StructuredSynthesisManifest {
+    tesisUtama: string;
+    argumenKunci: Array<{
+        fakta: string;
+        sitasiAsli: string;
+    }>;
+    kesimpulanRingkas?: string;
+}
+
+export const SSM_OUTPUT_SCHEMA = {
+    $schema: 'http://json-schema.org/draft-07/schema#',
+    title: 'StructuredSynthesisManifest',
+    type: 'object',
+    required: ['tesisUtama', 'argumenKunci'],
+    properties: {
+        tesisUtama: {
+            type: 'string',
+            description: 'Gagasan utama, tesis, atau konsensus akhir yang disepakati dari seluruh alur obrolan.',
+        },
+        argumenKunci: {
+            type: 'array',
+            description: 'Daftar tepat 3-4 argumen, bukti faktual, atau data kunci yang terverifikasi selama obrolan.',
+            items: {
+                type: 'object',
+                required: ['fakta', 'sitasiAsli'],
+                properties: {
+                    fakta: {
+                        type: 'string',
+                        description: 'Penjelasan klaim data atau argumen faktual penting yang dibahas.',
+                    },
+                    sitasiAsli: {
+                        type: 'string',
+                        description: 'Token sitasi orisinal dalam format [doc-XYZ:chunkIndex] yang tercantum di dalam teks obrolan. WAJIB kosongkan jika tidak ada.',
+                    },
+                },
+            },
+        },
+        kesimpulanRingkas: {
+            type: 'string',
+            description: 'Ringkasan rangkuman hasil akhir diskusi dalam 1-2 kalimat.',
+        },
+    },
+};
+
+@Injectable()
+export class TranscriptDistiller {
+    private readonly logger = new Logger(TranscriptDistiller.name);
+
+    constructor(private readonly llmAdapter: VendorLlmAdapter) { }
+
+    async distill(messages: ChatMessage[]): Promise<StructuredSynthesisManifest> {
+        this.logger.log(
+            `[TranscriptDistiller] Memulai ekstraksi kognitif terhadap ${messages.length} pesan obrolan...`,
+        );
+
+        const dialogueScript = messages
+            .map((msg) => {
+                const actor = msg.role === 'USER' ? 'Staf BRIDA (User)' : 'Asisten AI BRIDA (Assistant)';
+
+                let cleanContent = msg.content;
+                try {
+                    const parsed = JSON.parse(msg.content);
+                    if (parsed && parsed.answer) {
+                        cleanContent = parsed.answer;
+                    }
+                } catch {
+
+                }
+
+                return `[${actor}]:\n${cleanContent}`;
+            })
+            .join('\n\n--------------------\n\n');
+
+        const systemPrompt = `Anda adalah Asisten Analis Kognitif Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika.
+Tugas Anda: Ekstrak dan padatkan transkrip percakapan tanya-jawab antara Staf BRIDA dan AI menjadi dokumen antara berupa JSON terstruktur (Structured Synthesis Manifest).
+
+PANDUAN EKSTRAKSI:
+- Tentukan Tesis Utama ("tesisUtama") yang mencerminkan inti konsensus diskusi.
+- Ekstrak tepat 3-4 bukti faktual atau argumen kritis ("argumenKunci").
+- Untuk setiap argumen, Anda WAJIB menyalin ulang "sitasiAsli" dalam format token asli [doc-XYZ:chunkIndex] yang tertera di dalam skrip percakapan. DILARANG KERAS mengarang, mengubah, atau memotong token sitasi tersebut.
+- Saring hanya fakta-fakta yang disepakati bersama. Abaikan pertanyaan tentatif yang tidak terjawab.`;
+
+        const userPrompt = `=== TRANSKRIP PERCAKAPAN LENGKAP ===\n${dialogueScript}\n\nEkstrak seluruh konsensus di atas menjadi Structured Synthesis Manifest JSON yang valid sesuai dengan skema keluaran.`;
+
+        try {
+            const ssmResult = await this.llmAdapter.generateStructuredAnalysis<StructuredSynthesisManifest>(
+                [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userPrompt },
+                ],
+                SSM_OUTPUT_SCHEMA,
+                0.0,
+            );
+
+            this.logger.log(
+                `[TranscriptDistiller] Berhasil men-distilasi transkrip obrolan menjadi manifest tesis: "${ssmResult.tesisUtama.slice(0, 50)}..."`,
+            );
+
+            return ssmResult;
+        } catch (err: any) {
+            this.logger.error(
+                `[TranscriptDistiller Error] Gagal mereduksi riwayat diskusi: ${err.message}`,
+                err.stack,
+            );
+
+            return {
+                tesisUtama: 'Analisis Kebijakan Daerah Terintegrasi',
+                argumenKunci: [
+                    {
+                        fakta: 'Penyelarasan target operasional dengan realisasi pembangunan fisik di lapangan.',
+                        sitasiAsli: '',
+                    },
+                ],
+                kesimpulanRingkas: 'Sintesis darurat akibat gangguan jaringan eksternal LLM.',
+            };
+        }
+    }
 }
 
 --- FILE: src\modules\reports\reports.controller.ts ---
