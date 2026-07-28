@@ -143,25 +143,29 @@ model AiAnalysisLog {
 }
 
 model ChatSession {
-  id             String                 @id @default(uuid()) @db.Uuid
-  documentId     String?                @db.Uuid
-  sessionType    SessionType            @default(QA_CHAT)
-  title          String                 @default("Sesi Analisis Kasus")
-  articleTitle   String?                @db.Text
-  targetLength   ArticleLength?         @default(MEDIUM)
-  tone           String?                @default("solutif")
-  runningSummary String?                @db.Text
-  createdAt      DateTime               @default(now())
-  updatedAt      DateTime               @updatedAt
+  id              String                 @id @default(uuid()) @db.Uuid
+  documentId      String?                @db.Uuid
+  sessionType     SessionType            @default(QA_CHAT)
+  title           String                 @default("Sesi Analisis Kasus")
+  articleTitle    String?                @db.Text
+  targetLength    ArticleLength?         @default(MEDIUM)
+  tone            String?                @default("solutif")
+  runningSummary  String?                @db.Text
+  
+  // Bidang Baru: State Synchronization Cache untuk Lembar Kerja Kanan (Pane Kanan)
+  currentDraft    String?                @db.Text 
+  
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
 
   // Hubungan Mandiri (Self-Referencing Relation) untuk Transisi Sesi
-  parentSessionId String?               @db.Uuid
-  parentSession   ChatSession?          @relation("SessionTransition", fields: [parentSessionId], references: [id], onDelete: SetNull)
-  derivedSessions ChatSession[]         @relation("SessionTransition")
+  parentSessionId String?                @db.Uuid
+  parentSession   ChatSession?           @relation("SessionTransition", fields: [parentSessionId], references: [id], onDelete: SetNull)
+  derivedSessions ChatSession[]          @relation("SessionTransition")
 
-  document       ReportDocument?        @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  messages       ChatMessage[]
-  sources        ChatSessionSourceRef[]
+  document        ReportDocument?        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  messages        ChatMessage[]
+  sources         ChatSessionSourceRef[]
 
   @@map("chat_sessions")
 }
@@ -180,19 +184,37 @@ model ChatSessionSourceRef {
 }
 
 model ChatMessage {
-  id              String          @id @default(uuid()) @db.Uuid
-  sessionId       String          @db.Uuid
+  id              String             @id @default(uuid()) @db.Uuid
+  sessionId       String             @db.Uuid
   role            MessageRole
-  content         String          @db.Text
-  tokenCount      Int             @default(0)
-  interactionType InteractionType @default(MANUAL_INPUT)
+  content         String             @db.Text
+  tokenCount      Int                @default(0)
+  interactionType InteractionType    @default(MANUAL_INPUT)
   metadata        Json?
-  createdAt       DateTime        @default(now())
+  createdAt       DateTime           @default(now())
 
-  session         ChatSession     @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session         ChatSession        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  
+  // Relasi Baru: Menghubungkan Pesan Obrolan dengan Lampiran Multimedia/File
+  attachments     MessageAttachment[]
 
   @@index([sessionId, createdAt])
   @@map("chat_messages")
+}
+
+// Model Baru: Menyimpan Metadata File/Screenshot yang Dikirim di Ruang Obrolan
+model MessageAttachment {
+  id            String      @id @default(uuid()) @db.Uuid
+  messageId     String      @db.Uuid
+  fileUrl       String      // Lokasi path fisik penyimpanan file di server lokal / S3 Bucket
+  fileName      String
+  mimeType      String
+  fileSizeBytes BigInt
+  createdAt     DateTime    @default(now())
+
+  message       ChatMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@map("message_attachments")
 }
 
 model GeneratedReport {

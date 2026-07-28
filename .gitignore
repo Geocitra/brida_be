@@ -32,3 +32,8 @@ Thumbs.db
 # Database local artifacts
 /*.db
 /*.db-journal
+
+bum.py
+new.py
+brida_be.txt
+brida_be_new.txt

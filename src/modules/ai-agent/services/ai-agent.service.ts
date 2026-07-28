@@ -68,7 +68,7 @@ export class AiAgentService {
   ): Promise<FinalAnalysisResponse> {
     // Step A: Assemble Quad-Block Prompt Payload (Context Assembly Layer - Phase 2.2)
     const promptPayload = await this.contextAssembly.assemblePromptPayload({
-      documentId: dto.documentId,
+      documentIds: [dto.documentId],
       userQuery: dto.query,
     });
 

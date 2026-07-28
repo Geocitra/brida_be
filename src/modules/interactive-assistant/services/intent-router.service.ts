@@ -20,34 +20,40 @@ export class IntentRouterService {
   }
 
   /**
-   * Melakukan dispatch kueri secara cerdas dan dinamis berdasarkan kedekatan semantik kueri
-   * serta mencermati status tipe sesi obrolan yang sedang aktif [1].
+   * Meng-upgrade tanda tangan metode (method signature) dispatch untuk mendukung multimodal attachments & draf aktif.
+   * Menyinkronkan payload asisten dari Controller ke Handler yang dituju [5].
    */
-  async dispatch(sessionId: string, query: string): Promise<any> {
+  async dispatch(
+    sessionId: string,
+    query: string,
+    attachments?: Array<{ fileId: string; classification?: 'BASELINE' | 'REALIZATION' | 'GENERAL_REFERENCE' }>,
+    currentDraft?: string,
+  ): Promise<any> {
     if (!query || query.trim().length === 0) {
       throw new BadRequestException('Pesan atau kueri pengguna tidak boleh kosong.');
     }
 
-    // 1. Ambil data ChatSession untuk mengidentifikasi tipe sesi aktif (State-Aware) [1]
     const session = await this.chatRepository.findSessionById(sessionId);
     if (!session) {
       throw new BadRequestException(`Sesi obrolan dengan ID '${sessionId}' tidak ditemukan.`);
     }
 
     const trimmedQuery = query.trim();
+
+    // Rakit payload eksekusi instruksi lengkap untuk dikirim ke intent handler
     const payload: IntentExecutionPayload = {
       sessionId: session.id,
-      documentId: session.documentId,
+      documentId: session.documentId || undefined, // Fallback undefined jika Zero-Reference Mode aktif
       query: trimmedQuery,
+      attachments,   // Injeksi ID berkas transien & screenshots baru [5]
+      currentDraft,  // Injeksi draf naskah Markdown aktif dari editor visual [5]
     };
 
-    // 2. Tentukan default handler berdasarkan state tipe sesi obrolan saat ini [1]
     let defaultHandler: IIntentHandler = this.qaHandler;
     if (session.sessionType === SessionType.ARTICLE_GENERATOR) {
       defaultHandler = this.articleHandler;
     }
 
-    // 3. Evaluasi Skor Keyakinan Polimorfis Lintas Handler (Dynamic Strategy Pattern) [1]
     let selectedHandler: IIntentHandler | null = null;
     let highestScore = 0.0;
 
@@ -60,9 +66,6 @@ export class IntentRouterService {
       }
     }
 
-    // 4. Fallback Safety Guardrail
-    // Jika tidak ada handler yang memiliki kecocokan tinggi (misal di bawah threshold 0.4),
-    // sistem akan kembali menggunakan default handler berbasis status sesi saat ini [1].
     const MINIMUM_CONFIDENCE_THRESHOLD = 0.4;
     if (!selectedHandler || highestScore < MINIMUM_CONFIDENCE_THRESHOLD) {
       this.logger.log(
