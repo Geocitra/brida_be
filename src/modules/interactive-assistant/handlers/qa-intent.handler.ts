@@ -134,55 +134,52 @@ export class QaIntentHandler implements IIntentHandler {
     memory: any,
     latestAnswer: string,
   ): Promise<void> {
-    // Jalankan asinkron tanpa memblokir thread eksekusi utama
-    Promise.resolve()
-      .then(async () => {
-        const previousSummary =
-          memory.runningSummary || 'Belum ada riwayat pembicaraan sebelumnya.';
-        const activeMessagesStr = memory.activeMessages
-          .map((m: any) => `${m.role === 'USER' ? 'User' : 'Assistant'}: ${m.content}`)
-          .join('\n');
+    const previousSummary = memory.runningSummary || 'Belum ada riwayat pembicaraan.';
+    const activeMessagesStr = memory.activeMessages
+      .map((m: any) => `${m.role === 'USER' ? 'User' : 'Assistant'}: ${m.content}`)
+      .join('\n');
 
-        const compactionPrompt: LlmChatMessage[] = [
-          {
-            role: 'system',
-            content: `Anda adalah asisten pencatat memori kognitif BRIDA Mimika. 
-Tugas Anda: Perbarui [RINGKASAN EPISODIK OBROLAN] secara padat dan kronologis (maksimal 200 kata).
-Gabungkan [RINGKASAN SEBELUMNYA] dengan [OBROLAN BARU] untuk menghasilkan ringkasan naratif baru yang komprehensif.
-Hindari kalimat pembuka (intro), langsung tuliskan ringkasan faktualnya.`,
-          },
-          {
-            role: 'user',
-            content: `RINGKASAN SEBELUMNYA:\n${previousSummary}\n\nOBROLAN BARU:\n${activeMessagesStr}\nAssistant: ${latestAnswer}`,
-          },
-        ];
+    const compactionPrompt: LlmChatMessage[] = [
+      {
+        role: 'system',
+        content: `Anda adalah asisten pencatat memori kognitif BRIDA Mimika. 
+Tugas Anda: Perbarui [RINGKASAN EPISODIK OBROLAN] secara padat dan kronologis (maksimal 200 kata). 
+Gabungkan ringkasan sebelumnya dengan obrolan baru tanpa pengantar apa pun.`,
+      },
+      {
+        role: 'user',
+        content: `RINGKASAN SEBELUMNYA:\n${previousSummary}\n\nOBROLAN BARU:\n${activeMessagesStr}\nAssistant: ${latestAnswer}`,
+      },
+    ];
 
-        const compactionSchema = {
-          type: 'object',
-          required: ['summary'],
-          properties: {
-            summary: {
-              type: 'string',
-              description: 'Ringkasan baru hasil konsolidasi riwayat obrolan.',
-            },
-          },
-        };
+    const compactionSchema = {
+      type: 'object',
+      required: ['summary'],
+      properties: {
+        summary: { type: 'string', description: 'Ringkasan naratif gabungan baru.' },
+      },
+    };
 
+    // Jalankan eksekusi aman tanpa memblokir thread eksekusi utama, namun dipantau daur hidupnya
+    setImmediate(async () => {
+      try {
+        this.logger.log(`[Compaction Guard] Memulai kompresi memori untuk sesi: ${sessionId}`);
         const result = await this.llmAdapter.generateStructuredAnalysis<{
           summary: string;
         }>(compactionPrompt, compactionSchema, 0.0);
 
-        if (result?.summary) {
+        if (result && result.summary) {
           await this.chatMemory.updateRunningSummary(sessionId, result.summary);
           this.logger.log(
-            `[Compaction Guard] Berhasil memperbarui Running Summary untuk Sesi ID: ${sessionId}`,
+            `[Compaction Guard] Berhasil mengonsolidasikan memori jangka panjang sesi: ${sessionId}`,
           );
         }
-      })
-      .catch((err) => {
+      } catch (err: any) {
         this.logger.error(
-          `[Compaction Guard Error] Gagal memproses pemadatan memori di latar belakang: ${err.message}`,
+          `[Compaction Guard Error] Gagal memadatkan memori sesi ${sessionId}: ${err.message}`,
+          err.stack,
         );
-      });
+      }
+    });
   }
 }

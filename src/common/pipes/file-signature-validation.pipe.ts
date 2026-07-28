@@ -6,6 +6,7 @@ import {
   UnsupportedMediaTypeException,
   Logger,
 } from '@nestjs/common';
+import 'multer';
 
 @Injectable()
 export class FileSignatureValidationPipe implements PipeTransform {

@@ -154,6 +154,11 @@ model ChatSession {
   createdAt      DateTime               @default(now())
   updatedAt      DateTime               @updatedAt
 
+  // Hubungan Mandiri (Self-Referencing Relation) untuk Transisi Sesi
+  parentSessionId String?               @db.Uuid
+  parentSession   ChatSession?          @relation("SessionTransition", fields: [parentSessionId], references: [id], onDelete: SetNull)
+  derivedSessions ChatSession[]         @relation("SessionTransition")
+
   document       ReportDocument?        @relation(fields: [documentId], references: [id], onDelete: Cascade)
   messages       ChatMessage[]
   sources        ChatSessionSourceRef[]
@@ -243,7 +248,7 @@ model IndicatorRealization {
   realizationValue Float          @map("realization_value")
   unit             String         @default("M")
   timeframe        String         @default("2026")
-  createdAt        DateTime       @default(now()) @map("created_at")
+  createdAt     DateTime       @default(now()) @map("created_at")
 
   document         ReportDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
 

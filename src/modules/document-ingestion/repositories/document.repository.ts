@@ -121,18 +121,77 @@ export class DocumentRepository {
       const errorStack   = err instanceof Error ? err.stack : undefined;
       this.logger.error(
         `[pgvector FALLBACK] Gagal menjalankan vector similarity search untuk Dokumen ID: ${params.documentId}. ` +
-        `Beralih ke sequential chunk retrieval (hasil NON-SEMANTIK). ` +
-        `Pastikan ekstensi pgvector aktif di PostgreSQL dan indeks vektor tidak rusak. ` +
+        `Beralih ke smart keyword-based fallback. ` +
         `Error: ${errorMessage}`,
         errorStack,
       );
 
-      // Fallback query — mengambil chunk awal secara sekuensial (BUKAN semantic search)
-      const chunks = await this.prisma.documentChunk.findMany({
-        where: { documentId: params.documentId },
-        take: limit,
-        orderBy: { chunkIndex: 'asc' },
-      });
+      let chunks: any[] = [];
+      const queryText = params.queryText;
+      if (queryText) {
+        // Kata henti umum Bahasa Indonesia untuk disaring dari pencarian kata kunci
+        const stopwords = new Set([
+          'dan', 'di', 'ke', 'dari', 'yang', 'untuk', 'dengan', 'ini', 'itu', 'adalah', 'yaitu', 'pada', 'atau', 'dalam', 'saya', 'kami', 'anda', 'mereka', 'dia'
+        ]);
+        const words = queryText
+          .toLowerCase()
+          .split(/[^a-zA-Z0-9]+/)
+          .filter((w) => w.length > 2 && !stopwords.has(w));
+
+        if (words.length > 0) {
+          // Cari chunk yang mengandung minimal salah satu kata kunci melalui database (case-insensitive)
+          const matchedDbChunks = await this.prisma.documentChunk.findMany({
+            where: {
+              documentId: params.documentId,
+              OR: words.map((word) => ({
+                rawText: {
+                  contains: word,
+                  mode: 'insensitive',
+                },
+              })),
+            },
+          });
+
+          if (matchedDbChunks.length > 0) {
+            // Hitung kemunculan kata kunci di setiap chunk untuk scoring relevansi in-memory
+            const scoredChunks = matchedDbChunks.map((chunk) => {
+              let matches = 0;
+              const textLower = chunk.rawText.toLowerCase();
+              for (const word of words) {
+                let pos = textLower.indexOf(word);
+                while (pos !== -1) {
+                  matches++;
+                  pos = textLower.indexOf(word, pos + word.length);
+                }
+              }
+              return { chunk, matches };
+            });
+
+            // Urutkan berdasarkan frekuensi pencocokan terbanyak secara descending
+            chunks = scoredChunks
+              .filter((sc) => sc.matches > 0)
+              .sort((a, b) => b.matches - a.matches)
+              .map((sc) => sc.chunk)
+              .slice(0, limit);
+
+            this.logger.log(
+              `[pgvector FALLBACK] Keyword search berhasil. Ditemukan ${chunks.length} chunks relevan berbasis kata kunci.`,
+            );
+          }
+        }
+      }
+
+      // Fallback terakhir: Mengambil chunk awal secara sekuensial jika tidak ada pencocokan kata kunci
+      if (chunks.length === 0) {
+        this.logger.warn(
+          `[pgvector FALLBACK] Keyword search menghasilkan 0 hasil atau queryText kosong. Menggunakan chronological fallback.`,
+        );
+        chunks = await this.prisma.documentChunk.findMany({
+          where: { documentId: params.documentId },
+          take: limit,
+          orderBy: { chunkIndex: 'asc' },
+        });
+      }
 
       return chunks.map((c) => ({
         chunkId: c.id,

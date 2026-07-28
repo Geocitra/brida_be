@@ -797,6 +797,7 @@ import {
   UnsupportedMediaTypeException,
   Logger,
 } from '@nestjs/common';
+import 'multer';
 
 @Injectable()
 export class FileSignatureValidationPipe implements PipeTransform {
@@ -1928,7 +1929,7 @@ export class AnalysisModule {}
 
 --- FILE: src\modules\analysis\controllers\analysis.controller.ts ---
 import { Controller, Post, Get, Body, HttpCode, HttpStatus } from '@nestjs/common';
-import { IsString, IsNumber, IsOptional } from 'class-validator';
+import { IsString, IsNumber, IsOptional, IsArray } from 'class-validator';
 import { AnalysisMathService } from '../services/analysis-math.service';
 import { AnalysisCausalService } from '../services/analysis-causal.service';
 import { PrismaService } from '../../../common/prisma/prisma.service';
@@ -1964,6 +1965,8 @@ export class CompareAnalysisDto {
   realizationDocId?: string;
 
   @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
   documentIds?: string[];
 }
 
@@ -1973,7 +1976,7 @@ export class AnalysisController {
     private readonly mathService: AnalysisMathService,
     private readonly causalService: AnalysisCausalService,
     private readonly prisma: PrismaService,
-  ) {}
+  ) { }
 
   @Get('indicators')
   async getIndicatorMatrix() {
@@ -2064,11 +2067,50 @@ export class AnalysisController {
       dto.unitSuffix || ' M',
     );
 
+    let resolvedBaselineId = dto.baselineDocId;
+    let resolvedRealizationId = dto.realizationDocId;
+
+    if (
+      (!resolvedBaselineId || !resolvedRealizationId) &&
+      dto.documentIds &&
+      dto.documentIds.length > 0
+    ) {
+
+      const docs = await this.prisma.reportDocument.findMany({
+        where: {
+          id: { in: dto.documentIds },
+        },
+        include: {
+          metadata: true,
+        },
+      });
+
+      if (!resolvedBaselineId) {
+        const foundBaseline = docs.find((d) => d.metadata?.docType === 'BASELINE');
+        if (foundBaseline) {
+          resolvedBaselineId = foundBaseline.id;
+        } else if (docs.length > 0) {
+
+          resolvedBaselineId = docs[0].id;
+        }
+      }
+
+      if (!resolvedRealizationId) {
+        const foundRealization = docs.find((d) => d.metadata?.docType === 'REALIZATION');
+        if (foundRealization) {
+          resolvedRealizationId = foundRealization.id;
+        } else if (docs.length > 0) {
+
+          resolvedRealizationId = docs[1]?.id || docs[0].id;
+        }
+      }
+    }
+
     const causalResult = await this.causalService.analyzeCausalFactors(
       dto.indicatorName,
       mathResult.deviationPercentage,
-      dto.baselineDocId,
-      dto.realizationDocId,
+      resolvedBaselineId,
+      resolvedRealizationId,
     );
 
     return {
@@ -2692,7 +2734,7 @@ export class ParserFactory {
 
 --- FILE: src\modules\document-ingestion\parsers\pdf-parser.adapter.ts ---
 import { Injectable, UnprocessableEntityException, Logger } from '@nestjs/common';
-import * as pdfParse from 'pdf-parse';
+import pdfParse from 'pdf-parse';
 import { IDocumentParser, ParsedDocumentOutput } from '../interfaces/document-parser.interface';
 
 @Injectable()
@@ -2926,6 +2968,8 @@ export class DocumentRepository {
     const threshold = params.similarityThreshold ?? 0.5;
     const vectorStr = `[${params.queryVector.join(',')}]`;
 
+    const FALLBACK_SIMILARITY_SCORE = 0.5;
+
     try {
 
       const rawResults: any[] = await this.prisma.$queryRawUnsafe(
@@ -2960,7 +3004,17 @@ export class DocumentRepository {
         tokenCount: r.tokenCount,
         similarityScore: parseFloat(r.similarityScore) || 0.85,
       }));
-    } catch {
+    } catch (err: unknown) {
+
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      const errorStack   = err instanceof Error ? err.stack : undefined;
+      this.logger.error(
+        `[pgvector FALLBACK] Gagal menjalankan vector similarity search untuk Dokumen ID: ${params.documentId}. ` +
+        `Beralih ke sequential chunk retrieval (hasil NON-SEMANTIK). ` +
+        `Pastikan ekstensi pgvector aktif di PostgreSQL dan indeks vektor tidak rusak. ` +
+        `Error: ${errorMessage}`,
+        errorStack,
+      );
 
       const chunks = await this.prisma.documentChunk.findMany({
         where: { documentId: params.documentId },
@@ -2974,7 +3028,8 @@ export class DocumentRepository {
         chunkIndex: c.chunkIndex,
         rawText: c.rawText,
         tokenCount: c.tokenCount,
-        similarityScore: 0.88,
+
+        similarityScore: FALLBACK_SIMILARITY_SCORE,
       }));
     }
   }
@@ -3060,76 +3115,6 @@ export class DocumentRepository {
   }
 }
 
-
---- FILE: src\modules\document-ingestion\services\document-chunker.service.ts ---
-import { Injectable, Logger } from '@nestjs/common';
-
-export interface GeneratedChunk {
-  chunkIndex: number;
-  rawText: string;
-  tokenCount: number;
-}
-
-@Injectable()
-export class DocumentChunkerService {
-  private readonly logger = new Logger(DocumentChunkerService.name);
-
-  private readonly targetChunkSize = 2000;
-  private readonly chunkOverlap = 200;
-
-  createChunks(rawText: string): GeneratedChunk[] {
-    if (!rawText || rawText.trim().length === 0) {
-      return [];
-    }
-
-    const paragraphs = rawText.split(/\n\s*\n/);
-    const chunks: GeneratedChunk[] = [];
-    let currentChunkText = '';
-    let chunkIndex = 0;
-
-    for (const paragraph of paragraphs) {
-      const cleanParagraph = paragraph.trim();
-      if (!cleanParagraph) continue;
-
-      if ((currentChunkText + '\n\n' + cleanParagraph).length > this.targetChunkSize) {
-        if (currentChunkText.length > 0) {
-          chunks.push({
-            chunkIndex: chunkIndex++,
-            rawText: currentChunkText.trim(),
-            tokenCount: this.estimateTokenCount(currentChunkText),
-          });
-
-          const words = currentChunkText.split(' ');
-          const overlapWords = words.slice(-Math.min(words.length, 30)).join(' ');
-          currentChunkText = overlapWords + '\n\n' + cleanParagraph;
-        } else {
-
-          currentChunkText = cleanParagraph;
-        }
-      } else {
-        currentChunkText = currentChunkText
-          ? `${currentChunkText}\n\n${cleanParagraph}`
-          : cleanParagraph;
-      }
-    }
-
-    if (currentChunkText.trim().length > 0) {
-      chunks.push({
-        chunkIndex: chunkIndex++,
-        rawText: currentChunkText.trim(),
-        tokenCount: this.estimateTokenCount(currentChunkText),
-      });
-    }
-
-    this.logger.log(`Berhasil membuat ${chunks.length} chunks dari total ${rawText.length} karakter.`);
-    return chunks;
-  }
-
-  estimateTokenCount(text: string): number {
-
-    return Math.max(1, Math.ceil(text.length / 4));
-  }
-}
 
 --- FILE: src\modules\document-ingestion\services\document-ingestion.service.ts ---
 import { Injectable, ConflictException, Logger, NotFoundException } from '@nestjs/common';
@@ -3998,6 +3983,21 @@ export class AssistantController {
     return {
       success: true,
       message: `Sesi artikel ID '${id}' berhasil dihapus.`,
+    };
+  }
+
+  @Get('article/sessions/:id/export-data')
+  async getArticleExportData(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
+
+    const data = await this.articleGeneratorService.getArticleSessionById(id);
+    return {
+      success: true,
+      data: {
+        title: data.articleTitle,
+        content: data.fullArticleText,
+        tone: data.tone,
+        generatedAt: data.updatedAt
+      }
     };
   }
 }

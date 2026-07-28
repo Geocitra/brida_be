@@ -15,13 +15,14 @@ export interface CreateArticleSessionInput {
   targetLength?: ArticleLength;
   tone?: string;
   initialPrompt?: string;
+  parentSessionId?: string; // Menambahkan relasi ke sesi QA asal
 }
 
 @Injectable()
 export class ChatRepository {
   private readonly logger = new Logger(ChatRepository.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService) { }
 
   async createSession(documentIds: string[], title?: string): Promise<ChatSession> {
     const primaryDocId = documentIds.length > 0 ? documentIds[0] : null;
@@ -40,7 +41,13 @@ export class ChatRepository {
   }
 
   async createArticleSession(input: CreateArticleSessionInput): Promise<any> {
-    const { documentIds, articleTitle, targetLength = ArticleLength.MEDIUM, tone = 'solutif' } = input;
+    const {
+      documentIds,
+      articleTitle,
+      targetLength = ArticleLength.MEDIUM,
+      tone = 'solutif',
+      parentSessionId
+    } = input;
 
     return this.prisma.chatSession.create({
       data: {
@@ -49,6 +56,7 @@ export class ChatRepository {
         articleTitle,
         targetLength,
         tone,
+        parentSessionId: parentSessionId || null, // Merekam referensi sesi QA asal
         documentId: documentIds.length > 0 ? documentIds[0] : null,
         sources: {
           create: documentIds.map((docId) => ({
@@ -163,18 +171,29 @@ export class ChatRepository {
       data: {
         runningSummary: summary,
         updatedAt: new Date(),
-      } as any,
+      },
     });
   }
 
   /**
-   * Fetches latest N messages ordered newest first for sliding window truncation
+   * Mengambil pesan terbaru terbatas (statis) untuk operasi sliding window memory
    */
   async getLatestMessages(sessionId: string, fetchLimit: number = 30): Promise<ChatMessage[]> {
     return this.prisma.chatMessage.findMany({
       where: { sessionId },
       orderBy: { createdAt: 'desc' },
       take: fetchLimit,
+    });
+  }
+
+  /**
+   * Mengambil seluruh pesan chat secara kronologis (dari terlama ke terbaru)
+   * tanpa batas sliding window untuk proses pembentukan transkrip diskusi utuh.
+   */
+  async getAllMessagesChronological(sessionId: string): Promise<ChatMessage[]> {
+    return this.prisma.chatMessage.findMany({
+      where: { sessionId },
+      orderBy: { createdAt: 'asc' },
     });
   }
 
@@ -189,7 +208,7 @@ export class ChatRepository {
         articleTitle,
         title: articleTitle,
         updatedAt: new Date(),
-      } as any,
+      },
     });
   }
 }

@@ -42,6 +42,7 @@ export class VectorRetrievalService {
       queryVector,
       limit: topK,
       similarityThreshold,
+      queryText,
     });
 
     this.logger.log(

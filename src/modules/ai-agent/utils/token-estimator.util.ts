@@ -22,12 +22,20 @@ export class TokenEstimatorUtil {
   private readonly COMPACTION_TRIGGER_THRESHOLD_PCT = 0.75;
 
   /**
-   * Estimasi cepat jumlah token untuk teks korporat dalam Bahasa Indonesia/Inggris.
-   * Rata-rata 4 karakter setara dengan 1 token.
+   * Estimator adaptif untuk Bahasa Indonesia (Indonesian-Language Token Weight).
+   * Rata-rata 1 kata Bahasa Indonesia setara dengan 1.3 - 1.6 token di tokenizer BPE Gemini.
    */
   estimateTokenCount(text: string): number {
     if (!text) return 0;
-    return Math.max(1, Math.ceil(text.length / 4));
+
+    const words = text.trim().split(/\s+/).length;
+    const charCount = text.length;
+
+    // Heuristik hibrida: Ambil batas atas antara pendekatan karakter-byte dan jumlah kata
+    const wordBasedEstimation = Math.ceil(words * 1.5);
+    const charBasedEstimation = Math.ceil(charCount / 2.8); // Lebih akurat daripada pembagian 4
+
+    return Math.max(1, Math.max(wordBasedEstimation, charBasedEstimation));
   }
 
   /**

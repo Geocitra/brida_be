@@ -18,6 +18,15 @@ export interface GenerateArticleOptions {
   tone?: string;
   userInstruction?: string;
   sessionId?: string;
+  synthesizedManifest?: {
+    tesisUtama: string;
+    argumenKunci: Array<{
+      fakta: string;
+      sitasiAsli: string;
+    }>;
+    kesimpulanRingkas?: string;
+  }; // Parameter Baru untuk menampung SSM dari Pass-1
+  parentSessionId?: string; // Parameter Baru penampung ID sesi QA asal
 }
 
 @Injectable()
@@ -35,10 +44,19 @@ export class ArticleGeneratorService {
   ) { }
 
   /**
-   * Mensintesis draf naskah artikel baru berdasarkan multi-dokumen rujukan.
+   * Mensintesis draf naskah artikel baru berdasarkan multi-dokumen rujukan,
+   * dengan dukungan integrasi SSM (Structured Synthesis Manifest) hasil transisi diskusi.
    */
   async generateArticle(options: GenerateArticleOptions): Promise<any> {
-    const { documentIds, articleTitle, targetLength = ArticleLength.MEDIUM, tone = 'solutif', userInstruction } = options;
+    const {
+      documentIds,
+      articleTitle,
+      targetLength = ArticleLength.MEDIUM,
+      tone = 'solutif',
+      userInstruction,
+      synthesizedManifest,
+      parentSessionId
+    } = options;
 
     if (!documentIds || documentIds.length === 0) {
       throw new BadRequestException('Minimal satu dokumen acuan harus dipilih untuk membuat artikel.');
@@ -59,6 +77,7 @@ export class ArticleGeneratorService {
         targetLength: targetLength as ArticleLength,
         tone,
         initialPrompt: userInstruction,
+        parentSessionId, // Hubungkan ke Sesi QA Asal
       });
     }
 
@@ -85,6 +104,27 @@ export class ArticleGeneratorService {
       lengthGuidance = 'Target Panjang Teks: Minimal 1500 kata (Mendalam, Analisis Kebijakan Komprehensif)';
     }
 
+    // Bangun seksi prompt berbasis manifest diskusi (SSM) jika ada [Two-Pass Pipeline]
+    let manifestPromptSection = '';
+    if (synthesizedManifest) {
+      const argumenList = Array.isArray(synthesizedManifest.argumenKunci)
+        ? synthesizedManifest.argumenKunci
+          .map((arg, idx) => `- Poin ${idx + 1}: "${arg.fakta}" (WAJIB lampirkan sitasi asli: ${arg.sitasiAsli})`)
+          .join('\n')
+        : 'Tidak ada argumen spesifik.';
+
+      manifestPromptSection = `
+=== STRUKTUR KONSENSUS HASIL DISKUSI SEBELUMNYA (SSM) ===
+Anda WAJIB menyusun alur narasi artikel ini mengikuti kerangka konseptual diskusi yang telah disepakati sebagai berikut:
+- Tesis Utama Artikel: "${synthesizedManifest.tesisUtama}"
+- Argumen Utama & Bukti Faktual:
+${argumenList}
+
+ATURAN RE-PROPAGASI SITASI MUTLAK:
+Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyematkan kembali token sitasi aslinya secara presisi (misal: [docId:chunkIndex]) bersebelahan dengan klaim data tersebut agar orisinalitas riset BRIDA dapat ditelusuri.
+`;
+    }
+
     const promptUserInstruction = userInstruction
       ? `Instruksi Khusus Tambahan: ${userInstruction}`
       : 'Buatkan draf artikel publikasi yang menarik, solutif, dan berbasis data dari dokumen acuan.';
@@ -97,12 +137,12 @@ PANDUAN PENULISAN:
 - Gaya Bahasa (Tone): ${tone.toUpperCase()}
 - ${lengthGuidance}
 - Gunakan struktur narasi jurnalistik publik yang kuat (Judul, Subjudul, Analisis Faktual, Solusi Rekomendasi).
+${manifestPromptSection}
 `;
 
     const userPromptMessage = `Judul Artikel yang Diinginkan: "${articleTitle}"\n${promptUserInstruction}\n\nDOKUMEN ACUAN:\n${assembledDocsContext}`;
 
     // --- INTEGRASI TOKEN BUDGET CIRCUIT BREAKER (DEFENSIVE PROGRAMMING) [5, 7] ---
-    // Evaluasi total muatan pesan (system prompt + user context) sebelum diteruskan ke Gemini
     const compiledPrompts = [systemPrompt, userPromptMessage];
     this.tokenEstimator.enforceBudgetCircuitBreaker(compiledPrompts, this.MAX_DRAFTING_TOKEN_BUDGET);
 
@@ -144,6 +184,7 @@ PANDUAN PENULISAN:
 
     return {
       success: true,
+      id: session.id,
       sessionId: session.id,
       articleTitle,
       tone,
@@ -211,6 +252,7 @@ PANDUAN PENULISAN:
 
     return {
       success: true,
+      id: session.id,
       sessionId: session.id,
       articleTitle: trimmedTitle,
       tone: updatedSession.tone,
@@ -245,7 +287,6 @@ PANDUAN PENULISAN:
 Perbarui / revisi draf artikel berdasarkan instruksi revisi terbaru dari pengguna. Pertahankan gaya bahasa ${session.tone || 'SOLUTIF'}.`;
 
     // --- INTEGRASI TOKEN BUDGET CIRCUIT BREAKER PADA PROSES INTERAKSI REVISI [5, 7] ---
-    // Audit akumulasi riwayat chat sebelum dikirim ulang ke LLM
     const rawConversationTexts = conversationMessages.map((m: any) => m.content).concat([systemPrompt, userInstruction]);
     this.tokenEstimator.enforceBudgetCircuitBreaker(rawConversationTexts, this.MAX_DRAFTING_TOKEN_BUDGET);
 
@@ -278,6 +319,7 @@ Perbarui / revisi draf artikel berdasarkan instruksi revisi terbaru dari penggun
 
     return {
       success: true,
+      id: session.id,
       sessionId: session.id,
       articleTitle: session.articleTitle || session.title,
       tone: session.tone,
