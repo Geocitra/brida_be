@@ -42,7 +42,8 @@ export class TextExtractorService {
 
   private async extractPdf(buffer: Buffer): Promise<ExtractedDocumentContent> {
     try {
-      const data = await pdfParse(buffer);
+      const parse = (pdfParse as any).default || pdfParse;
+      const data = await parse(buffer);
       const text = data.text ? data.text.trim() : '';
 
       if (!text || text.length === 0) {

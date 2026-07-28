@@ -32,10 +32,12 @@ export class ExternalEmbeddingAdapter implements IEmbeddingProvider {
 
   private async callRealGeminiEmbeddingApi(apiKey: string, texts: string[]): Promise<number[][]> {
     const primaryModel = this.configService.get<string>('GEMINI_EMBEDDING_MODEL') || 'text-embedding-004';
-    const fallbackModel = 'embedding-001';
+    // gemini-embedding-exp-03-07 is the current stable fallback as of 2025
+    const fallbackModel = 'gemini-embedding-exp-03-07';
 
     const embedSingle = async (text: string, model: string): Promise<number[]> => {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:embedContent?key=${apiKey}`;
+      // Use v1 endpoint (not v1beta) — text-embedding-004 is only available on v1
+      const url = `https://generativelanguage.googleapis.com/v1/models/${model}:embedContent?key=${apiKey}`;
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

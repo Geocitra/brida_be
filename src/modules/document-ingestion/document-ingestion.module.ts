@@ -49,4 +49,4 @@ import { TextSanitizerPipeline } from './utils/sanitizers/text-sanitizer.pipelin
     EmbeddingBatchProcessor,
   ],
 })
-export class DocumentIngestionModule {}
+export class DocumentIngestionModule { }
