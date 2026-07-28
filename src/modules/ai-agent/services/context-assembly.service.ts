@@ -2,16 +2,51 @@ import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { DocumentRepository } from '../../document-ingestion/repositories/document.repository';
 import { VectorRetrievalService } from './vector-retrieval.service';
 import { TokenEstimatorUtil } from '../utils/token-estimator.util';
-import { PromptAssemblyBuilder, QuadBlockPromptPayload } from '../utils/prompt-assembly.builder';
-import { DYNAMIC_CONTEXT_TOKEN_THRESHOLD } from '../constants/system-prompts.constant';
+import { MultimodalChatMessage } from '../providers/vendor-llm.adapter';
+import { DYNAMIC_CONTEXT_TOKEN_THRESHOLD, BRIDA_SYSTEM_PERSONA, BRIDA_GUARDRAIL_POSTFIX } from '../constants/system-prompts.constant';
 
-export interface AssemblePromptOptions {
-  documentId?: string;
-  documentIds?: string[];
-  userQuery: string;
+export interface MultimodalAssembleOptions {
+  documentIds?: string[];         // ID dokumen repositori (permanen & hasil bypass chat)
+  images?: Array<{                // Screenshot hasil paste clipboard (Ctrl+V)
+    mimeType: string;
+    base64Data: string;
+  }>;
+  userQuery: string;              // Teks instruksi + draf kasar 2-3 paragraf pengguna
+  currentDraft?: string;          // Draf naskah Markdown aktif saat ini (Pane Kanan)
+  tone?: string;                  // Opsi target pembaca: SOLUTIF | KRITIS | AKADEMIS | POPULER
+  targetLength?: string;          // Target panjang tulisan: SHORT | MEDIUM | LONG
   topK?: number;
   similarityThreshold?: number;
 }
+
+export interface MultimodalPromptPayload {
+  messages: MultimodalChatMessage[];
+  estimatedTokens: number;
+}
+
+// Map Penargetan Gaya Bahasa & Audiens Resmi BRIDA Mimika
+const TONE_AUDIENCE_STEERING_MAP: Record<string, { target: string; focus: string; style: string }> = {
+  solutif: {
+    target: 'Bupati Kabupaten Mimika',
+    focus: 'Rekomendasi tindakan taktis, dampak makro-fiskal daerah, penyusunan rancangan regulasi taktis, serta perumusan langkah konkret cepat (Quick Wins).',
+    style: 'Eksekutif, berorientasi solusi, berwibawa, lugas, padat, dan mencerminkan kepemimpinan daerah.',
+  },
+  kritis: {
+    target: 'Kepala Organisasi Perangkat Daerah (OPD) Mimika',
+    focus: 'Audit kepatuhan tata kelola, evaluasi deviasi operasional sektoral dinas, transparansi pertanggungjawaban anggaran, dan identifikasi sumbatan teknis (bottlenecks).',
+    style: 'Tajam, analitis, ketat, menuntut akuntabilitas teknis sektoral, serta berorientasi evaluatif-korektif.',
+  },
+  akademis: {
+    target: 'Rekan Jurnalis Media Massa, Akademisi Perguruan Tinggi, dan Pengurus LSM (Lembaga Swadaya Masyarakat)',
+    focus: 'Metodologi evaluasi kebijakan, analisis kausalitas data berbasis bukti faktual (*evidence-based*), komparasi indikator standar nasional, dan landasan teori kebijakan publik.',
+    style: 'Rasional, metodologis, objektif, berimbang (*cover-both-sides*), serta menggunakan istilah tata kelola standar ilmiah.',
+  },
+  populer: {
+    target: 'Masyarakat Umum Kabupaten Mimika',
+    focus: 'Dampak nyata langsung dari kebijakan terhadap kehidupan warga, penyederhanaan istilah birokrasi, keterbukaan alokasi dana publik, dan kegunaan fasilitas pembangunan.',
+    style: 'Sederhana, naratif, mengalir, komunikatif, ramah pembaca (*highly readable*), serta menggunakan analogi kehidupan sehari-hari.',
+  },
+};
 
 @Injectable()
 export class ContextAssemblyService {
@@ -21,58 +56,138 @@ export class ContextAssemblyService {
     private readonly repository: DocumentRepository,
     private readonly vectorRetrieval: VectorRetrievalService,
     private readonly tokenEstimator: TokenEstimatorUtil,
-    private readonly promptBuilder: PromptAssemblyBuilder,
   ) { }
 
-  async assemblePromptPayload(options: AssemblePromptOptions): Promise<QuadBlockPromptPayload> {
-    const { documentId, documentIds = [], userQuery, topK = 10, similarityThreshold = 0.5 } = options;
+  /**
+   * Mengumpulkan seluruh modalitas data dan menyusun Prompt Komposit Multimodal terpadu
+   */
+  async assemblePromptPayload(options: MultimodalAssembleOptions): Promise<MultimodalPromptPayload> {
+    const {
+      documentIds = [],
+      images = [],
+      userQuery,
+      currentDraft,
+      tone = 'solutif',
+      targetLength = 'MEDIUM',
+      topK = 10,
+      similarityThreshold = 0.5,
+    } = options;
 
-    const targetDocIds = documentIds.length > 0 ? documentIds : (documentId ? [documentId] : []);
-    const docs = await Promise.all(targetDocIds.map(id => this.repository.findById(id)));
-    const validDocs = docs.filter((d): d is NonNullable<typeof d> => d !== null && d !== undefined);
-
-    if (validDocs.length === 0) {
-      throw new NotFoundException(`Dokumen acuan untuk kueri tidak ditemukan.`);
-    }
-
-    const totalTokens = validDocs.reduce((acc, doc) => acc + (doc.metadata?.totalTokenCount || 0), 0);
     let contextPayloadText = '';
+    const activeTone = tone.toLowerCase();
 
-    // Liskov Substitution: Kedua strategi mengembalikan data bertipe Promise<string> yang identik
-    if (totalTokens < DYNAMIC_CONTEXT_TOKEN_THRESHOLD) {
-      contextPayloadText = await this.executeFullDocumentStuffingStrategy(validDocs, totalTokens);
+    // 1. Jalur Jalankan Dokumen Acuan (RAG vs Stuffing) jika ada referensi yang dipilih
+    if (documentIds.length > 0) {
+      const docs = await Promise.all(documentIds.map((id) => this.repository.findById(id)));
+      const validDocs = docs.filter((d): d is NonNullable<typeof d> => d !== null && d !== undefined);
+
+      if (validDocs.length > 0) {
+        const totalTokens = validDocs.reduce((acc, doc) => acc + (doc.metadata?.totalTokenCount || 0), 0);
+
+        if (totalTokens < DYNAMIC_CONTEXT_TOKEN_THRESHOLD) {
+          contextPayloadText = await this.executeFullDocumentStuffingStrategy(validDocs, totalTokens);
+        } else {
+          contextPayloadText = await this.executeDynamicRagStrategy(
+            validDocs,
+            totalTokens,
+            userQuery,
+            topK,
+            similarityThreshold,
+          );
+        }
+      }
     } else {
-      contextPayloadText = await this.executeDynamicRagStrategy(
-        validDocs,
-        totalTokens,
-        userQuery,
-        topK,
-        similarityThreshold,
-      );
+      this.logger.log('[Zero-Reference Mode] Tidak ada dokumen acuan terdaftar. AI berfokus pada draf & ketikan pengguna.');
+      contextPayloadText = 'Sistem berjalan dalam mode mandiri. Gunakan draf ketikan pengguna dan pengetahuan internal Anda untuk menulis naskah.';
     }
 
-    // 3. Rakit Prompt Composite Quad-Block
-    const payload = this.promptBuilder
-      .reset()
-      .setContextPayload(contextPayloadText)
-      .setUserQuery(userQuery)
-      .build();
+    // Tentukan panduan panjang tulisan berdasarkan parameter Target Length
+    let lengthGuidance = 'Target Panjang Teks: Minimal 1000 kata (Sedang, komprehensif)';
+    if (targetLength === 'SHORT') {
+      lengthGuidance = 'Target Panjang Teks: Minimal 700 kata (Ringkas & Padat)';
+    } else if (targetLength === 'LONG') {
+      lengthGuidance = 'Target Panjang Teks: Minimal 1500 kata (Mendalam & Komprehensif)';
+    }
 
-    const estimatedTotalTokens = this.tokenEstimator.estimateArrayTokenCount(
-      payload.messages.map((m) => m.content),
-    );
+    // 2. Rakit Steering System Persona berdasarkan gaya bahasa target pembaca
+    const steering = TONE_AUDIENCE_STEERING_MAP[activeTone] || TONE_AUDIENCE_STEERING_MAP['solutif'];
+    const customSystemPersona = `
+${BRIDA_SYSTEM_PERSONA}
+
+ATURAN TARGET AUDIENS GAYA BAHASA (TONE STEERING):
+- Artikel ini ditujukan kepada: **${steering.target}**
+- Fokus utama penulisan: ${steering.focus}
+- Gaya penyampaian bahasa: ${steering.style}
+
+ATURAN PANJANG NASKAH:
+- ${lengthGuidance}
+- Anda WAJIB mengembangkan pembahasan, analisis, rekomendasi, dan data pendukung agar memenuhi target panjang naskah di atas. Jangan mengembalikan respons singkat jika target adalah LONG/MEDIUM.
+
+ATURAN COLLABORATIVE CO-WRITING:
+- Jika pengguna memasukkan draf tulisan pribadinya di dalam prompt, prioritas utama Anda adalah memoles, menyempurnakan struktur kalimat, memparafrase, atau melanjutkan draf tersebut secara mulus (*seamless*).
+- Pertahankan ide orisinal dan fakta yang ditulis oleh pengguna, tingkatkan kualitas bahasanya agar sesuai dengan target audiens di atas.
+`;
+
+    // 3. Susun Komponen User Message Parts (Multimodal Payload)
+    const userParts: any[] = [];
+
+    // Part A: Teks instruksi pengguna + Draf Kasar buatan mereka
+    let userTextContent = `[INSTRUKSI / DRAF INPUT PENGGUNA]\n${userQuery}`;
+
+    // Jika ada draf aktif di Pane Kanan, sertakan agar AI tahu versi naskah terkininya
+    if (currentDraft && currentDraft.trim().length > 0) {
+      userTextContent += `\n\n[DRAF ARTIKEL AKTIF SAAT INI (PANE KANAN)]\n${currentDraft}`;
+    }
+    userParts.push({ text: userTextContent });
+
+    // Part B: Data Gambar Biner (Pasted Screenshot dari Clipboard) jika ada
+    if (images.length > 0) {
+      this.logger.log(`[Multimodal Ingest] Memasukkan ${images.length} data biner visual (screenshot) ke prompt user parts.`);
+      images.forEach((img) => {
+        userParts.push({
+          inlineData: {
+            mimeType: img.mimeType,
+            data: img.base64Data,
+          },
+        });
+      });
+    }
+
+    // 4. Susun Struktur Pesan Multimodal Terpadu
+    const messages: MultimodalChatMessage[] = [
+      {
+        role: 'system',
+        content: customSystemPersona.trim()
+      },
+      {
+        role: 'system',
+        content: `[DOKUMEN TERLAMPIR - RUANG KONTEKS STATIS]\n${contextPayloadText}`
+      },
+      {
+        role: 'user',
+        content: '', // Konten teks dipindah ke parts
+        parts: userParts,
+      },
+      {
+        role: 'user',
+        content: BRIDA_GUARDRAIL_POSTFIX
+      },
+    ];
+
+    // 5. Evaluasi Anggaran Token Input sebelum Pengiriman (Circuit Breaker Guardrail)
+    const rawTextsForEstimation = messages.map((m) => m.content).concat([userTextContent]);
+    const estimatedTokens = this.tokenEstimator.estimateArrayTokenCount(rawTextsForEstimation);
 
     this.logger.log(
-      `[ContextAssemblyService] Payload 4-Blok berhasil dirakit (Est. Total Payload Tokens: ${estimatedTotalTokens}).`,
+      `[ContextAssemblyBroker] Sukses merakit Composite Multimodal Prompt (Estimasi Input: ${estimatedTokens} tokens).`,
     );
 
-    return payload;
+    return {
+      messages,
+      estimatedTokens,
+    };
   }
 
-  /**
-   * Strategi A: Memuat seluruh isi dokumen ke dalam prompt payload.
-   * Digunakan apabila ukuran kumulatif dokumen masih berada di bawah ambang batas aman token (< 80,000).
-   */
   private async executeFullDocumentStuffingStrategy(
     validDocs: any[],
     totalTokens: number,
@@ -91,10 +206,6 @@ export class ContextAssemblyService {
     return allChunksText.join('\n\n');
   }
 
-  /**
-   * Strategi B: Melakukan RAG Dinamis lintas dokumen acuan.
-   * Menerapkan logika Dynamic Semantic Swapping untuk menyaring sampah konteks [4].
-   */
   private async executeDynamicRagStrategy(
     validDocs: any[],
     totalTokens: number,
@@ -106,7 +217,6 @@ export class ContextAssemblyService {
       `[Hybrid Strategy B - Dynamic RAG] Total tokens (${totalTokens}) >= ${DYNAMIC_CONTEXT_TOKEN_THRESHOLD}. Mengevaluasi kedekatan semantik kueri...`,
     );
 
-    // 1. Eksekusi pencarian relevansi semantik lintas seluruh dokumen aktif secara paralel
     const retrievalTasks = validDocs.map((doc) =>
       this.vectorRetrieval.searchRelevantChunks({
         documentId: doc.id,
@@ -124,8 +234,6 @@ export class ContextAssemblyService {
     const allResultsList = await Promise.all(retrievalTasks);
     const combinedFlatResults = allResultsList.flat();
 
-    // 2. Logika Dynamic Semantic Swapping & Pruning [4]
-    // Chunks dengan skor di bawah threshold dibuang (Swapped Out)
     const highlyRelevantResults = combinedFlatResults
       .filter((chunk) => chunk.similarityScore >= similarityThreshold)
       .sort((a, b) => b.similarityScore - a.similarityScore)

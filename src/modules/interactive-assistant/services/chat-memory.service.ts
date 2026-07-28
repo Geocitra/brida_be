@@ -1,15 +1,8 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { ChatRepository } from '../repositories/chat.repository';
 import { TokenEstimatorUtil } from '../../ai-agent/utils/token-estimator.util';
-import { ActiveChatMessage, SlidingWindowMemoryPayload } from '../interfaces/chat-memory.interface';
-import { MessageRole } from '@prisma/client';
-
-/**
- * Interface payload hibrida yang mendukung Hierarchical Memory
- */
-export interface HierarchicalMemoryPayload extends SlidingWindowMemoryPayload {
-  runningSummary?: string | null;
-}
+import { ActiveChatMessage, SlidingWindowMemoryPayload, HierarchicalMemoryPayload } from '../interfaces/chat-memory.interface'; 
+import { MessageRole, SessionType } from '@prisma/client';
 
 @Injectable()
 export class ChatMemoryService {
@@ -27,7 +20,13 @@ export class ChatMemoryService {
     private readonly tokenEstimator: TokenEstimatorUtil,
   ) { }
 
-  async createSession(documentIds: string[], title?: string) {
+  async createSession(documentIds: string[], title?: string, sessionType: SessionType = SessionType.QA_CHAT) {
+    if (sessionType === SessionType.ARTICLE_GENERATOR) {
+      return this.chatRepository.createArticleSession({
+        documentIds,
+        articleTitle: title || 'Draf Artikel Baru',
+      });
+    }
     return this.chatRepository.createSession(documentIds, title);
   }
 
@@ -49,6 +48,14 @@ export class ChatMemoryService {
       content,
       tokenCount,
     });
+  }
+
+  async syncSessionDocuments(sessionId: string, documentIds: string[]): Promise<void> {
+    return this.chatRepository.syncSessionDocuments(sessionId, documentIds);
+  }
+
+  async updateSessionMetadata(sessionId: string, tone?: string, targetLength?: string): Promise<void> {
+    return this.chatRepository.updateSessionMetadata(sessionId, tone, targetLength);
   }
 
   /**
@@ -93,9 +100,7 @@ export class ChatMemoryService {
     selectedMessages.reverse();
 
     this.logger.log(
-      `[Hierarchical Memory Window] Sesi ID: ${sessionId} -> Dipilih ${selectedMessages.length
-      } pesan aktif (${accumulatedTokens} tokens, Terkompresi/Dipangkas: ${prunedCount} pesan lama). Status Summary: ${session.runningSummary ? 'Tersedia' : 'Kosong'
-      }`,
+      `[Hierarchical Memory Window] Sesi ID: ${sessionId} -> Dipilih ${selectedMessages.length} pesan aktif (${accumulatedTokens} tokens). Status Summary: ${session.runningSummary ? 'Tersedia' : 'Kosong'}`,
     );
 
     const documentIds = Array.from(
@@ -106,6 +111,7 @@ export class ChatMemoryService {
       )
     ).filter(Boolean) as string[];
 
+    // Perbarui objek pengembalian di bawah ini agar menyertakan data state konfigurasi artikel
     return {
       sessionId: session.id,
       documentId: session.documentId,
@@ -113,7 +119,13 @@ export class ChatMemoryService {
       activeMessages: selectedMessages,
       totalMemoryTokens: accumulatedTokens,
       prunedMessagesCount: prunedCount,
-      runningSummary: session.runningSummary || null, // Integrasi runningSummary hasil schema update [1, 2]
+      runningSummary: session.runningSummary || null,
+
+      // Pemetaan bidang baru (Mapping State Sesi Kolaboratif)
+      title: session.title,
+      articleTitle: session.articleTitle,
+      tone: session.tone,
+      targetLength: session.targetLength,
     };
   }
 

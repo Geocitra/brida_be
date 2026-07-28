@@ -58,9 +58,8 @@ export class ArticleGeneratorService {
       parentSessionId
     } = options;
 
-    if (!documentIds || documentIds.length === 0) {
-      throw new BadRequestException('Minimal satu dokumen acuan harus dipilih untuk membuat artikel.');
-    }
+    // documentIds can be empty (Zero-Reference Mode)
+    const validDocIds = documentIds || [];
     if (!articleTitle || !articleTitle.trim()) {
       throw new BadRequestException('Judul artikel tidak boleh kosong.');
     }
@@ -72,7 +71,7 @@ export class ArticleGeneratorService {
 
     if (!session) {
       session = await this.chatRepository.createArticleSession({
-        documentIds,
+        documentIds: validDocIds,
         articleTitle,
         targetLength: targetLength as ArticleLength,
         tone,
@@ -85,7 +84,7 @@ export class ArticleGeneratorService {
     const docTexts: string[] = [];
     const sourceDocs: any[] = [];
 
-    for (const docId of documentIds) {
+    for (const docId of validDocIds) {
       const doc = await this.documentRepository.findById(docId);
       if (doc) {
         sourceDocs.push(doc);
@@ -127,10 +126,13 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
 
     const promptUserInstruction = userInstruction
       ? `Instruksi Khusus Tambahan: ${userInstruction}`
-      : 'Buatkan draf artikel publikasi yang menarik, solutif, dan berbasis data dari dokumen acuan.';
+      : 'Buatkan draf artikel publikasi yang menarik, solutif, dan berbasis data/ide yang kuat.';
 
     const systemPrompt = `Anda adalah Penulis Artikel Utama & Analis Kebijakan BRIDA Kabupaten Mimika.
-Tugas Anda: Susun artikel publikasi berbasis data aktual dari DOKUMEN ACUAN yang diberikan.
+${validDocIds.length > 0
+  ? 'Tugas Anda: Susun artikel publikasi berbasis data aktual dari DOKUMEN ACUAN yang diberikan.'
+  : 'Tugas Anda: Susun artikel publikasi berdasarkan instruksi dan pengetahuan internal Anda (Mode Kreasi Bebas).'
+}
 
 PANDUAN PENULISAN:
 - Judul Artikel: "${articleTitle}"
@@ -140,7 +142,9 @@ PANDUAN PENULISAN:
 ${manifestPromptSection}
 `;
 
-    const userPromptMessage = `Judul Artikel yang Diinginkan: "${articleTitle}"\n${promptUserInstruction}\n\nDOKUMEN ACUAN:\n${assembledDocsContext}`;
+    const userPromptMessage = validDocIds.length > 0
+      ? `Judul Artikel yang Diinginkan: "${articleTitle}"\n${promptUserInstruction}\n\nDOKUMEN ACUAN:\n${assembledDocsContext}`
+      : `Judul Artikel yang Diinginkan: "${articleTitle}"\n${promptUserInstruction}`;
 
     // --- INTEGRASI TOKEN BUDGET CIRCUIT BREAKER (DEFENSIVE PROGRAMMING) [5, 7] ---
     const compiledPrompts = [systemPrompt, userPromptMessage];
@@ -354,6 +358,24 @@ Perbarui / revisi draf artikel berdasarkan instruksi revisi terbaru dari penggun
 
     const lastAssistantMsg = [...session.messages].reverse().find((m: any) => m.role === MessageRole.ASSISTANT);
 
+    let fullArticleText = '';
+    if (lastAssistantMsg) {
+      try {
+        const parsed = JSON.parse(lastAssistantMsg.content);
+        if (parsed && typeof parsed === 'object') {
+          if (parsed.updatedArticle && parsed.updatedArticle.draftMarkdown) {
+            fullArticleText = parsed.updatedArticle.draftMarkdown;
+          } else {
+            fullArticleText = parsed.answer || parsed.fullArticleText || lastAssistantMsg.content;
+          }
+        } else {
+          fullArticleText = lastAssistantMsg.content;
+        }
+      } catch {
+        fullArticleText = lastAssistantMsg.content;
+      }
+    }
+
     return {
       id: session.id,
       title: session.title,
@@ -364,7 +386,7 @@ Perbarui / revisi draf artikel berdasarkan instruksi revisi terbaru dari penggun
       updatedAt: session.updatedAt,
       sources: sanitizeSources(session.sources),
       messages: session.messages,
-      fullArticleText: lastAssistantMsg ? lastAssistantMsg.content : '',
+      fullArticleText,
     };
   }
 

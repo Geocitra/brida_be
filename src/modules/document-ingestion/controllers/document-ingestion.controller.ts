@@ -20,17 +20,22 @@ import { DocumentIngestionService } from '../services/document-ingestion.service
 import { UploadDocumentDto } from '../dtos/upload-document.dto';
 import { DocumentResponseDto } from '../dtos/document-response.dto';
 import { FileSignatureValidationPipe } from '../../../common/pipes/file-signature-validation.pipe';
+import { ChatAttachmentSignatureValidationPipe } from '../pipes/chat-attachment-validation.pipe';
 
 @Controller('documents')
 export class DocumentIngestionController {
-  constructor(private readonly ingestionService: DocumentIngestionService) {}
+  constructor(private readonly ingestionService: DocumentIngestionService) { }
 
+  /**
+   * Jalur 1: Unggah Dokumen Acuan Permanen (Repository Level)
+   * Menyimpan dokumen acuan utama daerah ke dalam sistem secara permanen untuk di-vektorisasi (RAG).
+   */
   @Post('upload')
   @HttpCode(HttpStatus.CREATED)
   @UseInterceptors(
     FileInterceptor('file', {
       limits: {
-        fileSize: 20 * 1024 * 1024, // Fail-fast Multer level 20MB max size
+        fileSize: 20 * 1024 * 1024, // Batas aman Multer level 20MB
       },
     }),
   )
@@ -39,6 +44,39 @@ export class DocumentIngestionController {
     @Body() dto: UploadDocumentDto,
   ): Promise<{ success: boolean; data: DocumentResponseDto }> {
     const result = await this.ingestionService.processDocumentUpload(file, dto);
+    return {
+      success: true,
+      data: result,
+    };
+  }
+
+  /**
+   * Jalur Baru: Unggah Berkas Transien Sesi (Session/Chat Level)
+   * Mendukung penempelan gambar screenshot (Ctrl+V) dan unggah file sementara di tengah obrolan chat.
+   * File divalidasi dengan ChatAttachmentSignatureValidationPipe yang mendukung dokumen & gambar.
+   */
+  @Post('temp-upload')
+  @HttpCode(HttpStatus.CREATED)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: {
+        fileSize: 20 * 1024 * 1024, // Batas aman 20MB per berkas
+      },
+    }),
+  )
+  async uploadTemporaryFile(
+    @UploadedFile(new ChatAttachmentSignatureValidationPipe()) file: Express.Multer.File,
+  ): Promise<{
+    success: boolean;
+    data: {
+      tempFileId: string;
+      fileName: string;
+      mimeType: string;
+      fileSizeBytes: string;
+      tempPath: string;
+    };
+  }> {
+    const result = await this.ingestionService.processTemporaryUpload(file);
     return {
       success: true,
       data: result,
@@ -90,5 +128,3 @@ export class DocumentIngestionController {
     };
   }
 }
-
-
