@@ -16,7 +16,7 @@ export class ReportsService {
     private readonly llmAdapter: VendorLlmAdapter,
     private readonly mathService: AnalysisMathService,
     private readonly causalService: AnalysisCausalService,
-  ) {}
+  ) { }
 
   /**
    * Generates hash string based on sorted array of document IDs.
@@ -118,16 +118,19 @@ export class ReportsService {
     const systemPrompt = `Anda adalah Asisten Analisis Kebijakan Utama untuk Bupati Mimika & Kepala BRIDA.
 Tugas Anda: Sintesiskan seluruh informasi faktual dari DOKUMEN ACUAN yang diberikan menjadi Laporan Eksekutif Resmi Nota Dinas Bupati.
 
-PANDUAN STRUKTUR & BIAYA OUTPUT JSON ESEKUTIF PRESISI:
-1. "title": Judul laporan resmi eksekutif (Maksimal 15 kata).
-2. "executiveSummary": Ringkasan eksekutif padat, faktual, dan solutif (Maksimal 200 - 250 kata).
-3. "urgency": "TINGGI" | "SEDANG" | "RENDAH".
-4. "recipient": "Bupati Mimika".
-5. "sender": "Kepala Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika".
-6. "period": Periode data (e.g. "Triwulan I - IV 2024 / Realtime Analysis").
-7. "deviations": TEPAT 3 objek deviasi paling kritis [{ "title": string, "baseline": string, "realization": string, "deviationText": string, "severityColor": string, "causes": string }] (di mana "causes" maksimal 2 kalimat).
-8. "nationalPolicyImpact": Object { "policyName": string, "simulationResults": string[] } (maksimal 2 poin ringkas).
-9. "actionPriorities": TEPAT 3 poin instruksi / Action Items prioritas utama (masing-masing 1 kalimat).
+PANDUAN OUTPUT JSON ESEKUTIF PRESISI:
+1. Kembalikan HANYA objek JSON valid sesuai skema.
+2. "title": Judul laporan resmi eksekutif (maksimal 15 kata).
+3. "executiveSummary": Ringkasan eksekutif padat, faktual, dan solutif. Nilai ini WAJIB berupa teks Markdown yang rapi, bukan plain text atau JSON mentah. Gunakan format seperti ##, **teks tebal**, bullet list, dan singkatan ringkas. Jangan gunakan blok kode atau literal JSON.
+4. "urgency": "TINGGI" | "SEDANG" | "RENDAH".
+5. "recipient": "Bupati Mimika".
+6. "sender": "Kepala Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika".
+7. "period": Periode data (contoh: "Triwulan I - IV 2024 / Realtime Analysis").
+8. "deviations": TEPAT 3 objek deviasi paling kritis. Setiap objek wajib punya field "title", "baseline", "realization", "deviationText", "severityColor", dan "causes". Nilai "causes" dan "deviationText" WAJIB berupa paragraf atau bullet Markdown singkat yang rapi.
+9. "nationalPolicyImpact": Object { "policyName": string, "simulationResults": string[] }. Nilai array WAJIB berupa poin Markdown singkat, bukan JSON mentah.
+10. "actionPriorities": TEPAT 3 poin instruksi / Action Items prioritas utama. Setiap elemen WAJIB berupa kalimat atau bullet Markdown yang rapi.
+11. JANGAN menampilkan token sitasi mentah seperti [uuid:1], [docId:chunkIndex], atau pola [abc][def] di dalam isi field string. Jika ingin menyebut sumber, gunakan frasa alami seperti "berdasarkan dokumen acuan" tanpa tanda kurung siku.
+12. Hindari output seperti {"executiveSummary":"..."} di dalam string. Hindari raw JSON atau markdown fence pada isi field string.
 `;
 
     const userPrompt = `Dokumen Acuan (${documentsWithText.length} dokumen):\n${documentsAssembled(documentsWithText)}\n\nKonteks Detail Full-Text:\n${assembledContext}`;
@@ -186,8 +189,8 @@ PANDUAN STRUKTUR & BIAYA OUTPUT JSON ESEKUTIF PRESISI:
                 math.urgencyStatus === 'KRITIS'
                   ? 'text-red-700 font-bold'
                   : math.urgencyStatus === 'WASPADA'
-                  ? 'text-amber-700 font-bold'
-                  : 'text-emerald-700 font-bold',
+                    ? 'text-amber-700 font-bold'
+                    : 'text-emerald-700 font-bold',
               causes,
             };
           }
@@ -312,26 +315,86 @@ const REPORT_OUTPUT_SCHEMA = {
 };
 
 function normalizeReportPayload(raw: any, docs: any[]): any {
+  const fallbackExecutiveSummary = `## Ringkasan Eksekutif\n\nSintesis terintegrasi berdasarkan ${docs.length} dokumen acuan menunjukkan bahwa target indikator makro daerah memerlukan percepatan dan koordinasi lintas instansi.`;
+
   return {
-    title: raw.title || `Nota Dinas Hasil Analisis Multidokumen (${docs.length} Dokumen Acuan)`,
-    urgency: raw.urgency || 'TINGGI',
-    recipient: raw.recipient || 'Bupati Mimika',
-    sender: raw.sender || 'Kepala Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika',
-    period: raw.period || 'Hasil Analisis Terintegrasi 2024',
+    title: normalizeMarkdownField(raw?.title, `Nota Dinas Hasil Analisis Multidokumen (${docs.length} Dokumen Acuan)`),
+    urgency: normalizeMarkdownField(raw?.urgency, 'TINGGI'),
+    recipient: normalizeMarkdownField(raw?.recipient, 'Bupati Mimika'),
+    sender: normalizeMarkdownField(raw?.sender, 'Kepala Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika'),
+    period: normalizeMarkdownField(raw?.period, 'Hasil Analisis Terintegrasi 2024'),
     date: new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }),
-    executiveSummary:
-      raw.executiveSummary ||
-      `Sintesis terintegrasi berdasarkan ${docs.length} dokumen acuan menunjukkan bahwa target indikator makro daerah memerlukan percepatan dan koordinasi lintas instansi.`,
-    deviations: Array.isArray(raw.deviations) ? raw.deviations : [],
-    nationalPolicyImpact: raw.nationalPolicyImpact || {
-      policyName: 'Kebijakan Strategi Nasional Peningkatan Pelayanan Publik & Riset Daerah',
-      simulationResults: [
+    executiveSummary: normalizeMarkdownField(raw?.executiveSummary, fallbackExecutiveSummary),
+    deviations: Array.isArray(raw?.deviations)
+      ? raw.deviations.map((dev: any) => ({
+        title: normalizeMarkdownField(dev?.title, 'Indikator Prioritas'),
+        baseline: normalizeMarkdownField(dev?.baseline, '-'),
+        realization: normalizeMarkdownField(dev?.realization, '-'),
+        deviationText: normalizeMarkdownField(dev?.deviationText, 'Tinjau kembali data realisasi.'),
+        severityColor: normalizeMarkdownField(dev?.severityColor, 'text-red-700 font-bold'),
+        causes: normalizeMarkdownField(dev?.causes, 'Penyebab utama belum teridentifikasi.'),
+      }))
+      : [],
+    nationalPolicyImpact: {
+      policyName: normalizeMarkdownField(raw?.nationalPolicyImpact?.policyName, 'Kebijakan Strategi Nasional Peningkatan Pelayanan Publik & Riset Daerah'),
+      simulationResults: normalizeMarkdownList(raw?.nationalPolicyImpact?.simulationResults, [
         'Proyeksi peningkatan skor efisiensi riset daerah.',
         'Perlu tindak lanjut supervisi berkala pada proyek fisik berisiko deviasi.',
-      ],
+      ]),
     },
-    actionPriorities: Array.isArray(raw.actionPriorities) ? raw.actionPriorities : [],
+    actionPriorities: normalizeMarkdownList(raw?.actionPriorities, []),
   };
+}
+
+function normalizeMarkdownField(value: unknown, fallback: string): string {
+  if (typeof value === 'string') {
+    let content = value.trim();
+    if (!content) return fallback;
+
+    content = content.replace(/^```(?:json|markdown|md)?\s*/i, '').replace(/\s*```$/i, '');
+
+    if ((content.startsWith('{') || content.startsWith('[')) && content.includes(':')) {
+      try {
+        const parsed = JSON.parse(content);
+        if (typeof parsed === 'string') return normalizeMarkdownField(parsed, fallback);
+        if (parsed && typeof parsed === 'object') {
+          const candidate =
+            (parsed as any).markdown ||
+            (parsed as any).content ||
+            (parsed as any).text ||
+            (parsed as any).summary ||
+            (parsed as any).executiveSummary;
+          if (typeof candidate === 'string' && candidate.trim()) return normalizeMarkdownField(candidate, fallback);
+        }
+      } catch {
+        // keep raw content if parsing fails
+      }
+    }
+
+    return stripCitationTokens(content);
+  }
+
+  return stripCitationTokens(fallback);
+}
+
+function stripCitationTokens(value: string): string {
+  if (!value) return value;
+
+  return value
+    .replace(/\[(?:[a-f0-9-]{8,}|doc(?:[-_a-z0-9]+)?):\d+\]/gi, '')
+    .replace(/\[(?:[a-f0-9-]{8,}|doc(?:[-_a-z0-9]+)?):\d+\]\[(?:[a-f0-9-]{8,}|doc(?:[-_a-z0-9]+)?):\d+\]/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function normalizeMarkdownList(value: unknown, fallback: string[]): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => normalizeMarkdownField(item, ''))
+      .filter((item) => item && item.trim().length > 0);
+  }
+
+  return fallback;
 }
 
 function sanitizeDocument(doc: any): any {
@@ -340,11 +403,11 @@ function sanitizeDocument(doc: any): any {
     ...doc,
     metadata: doc.metadata
       ? {
-          ...doc.metadata,
-          fileSizeBytes: doc.metadata.fileSizeBytes
-            ? String(doc.metadata.fileSizeBytes)
-            : '0',
-        }
+        ...doc.metadata,
+        fileSizeBytes: doc.metadata.fileSizeBytes
+          ? String(doc.metadata.fileSizeBytes)
+          : '0',
+      }
       : null,
   };
 }
