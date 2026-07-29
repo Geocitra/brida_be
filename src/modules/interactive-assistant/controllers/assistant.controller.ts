@@ -67,6 +67,11 @@ export class ExtendedInteractRequestDto {
   @IsOptional()
   @IsString()
   targetLength?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  districts?: string[];
 }
 
 @Controller('assistant')
@@ -139,7 +144,13 @@ export class AssistantController {
     if (dto.tone || dto.targetLength) {
       await this.memoryService.updateSessionMetadata(dto.sessionId, dto.tone, dto.targetLength);
     }
-    const result = await this.routerService.dispatch(dto.sessionId, dto.query, dto.attachments, dto.currentDraft);
+    const result = await this.routerService.dispatch(
+      dto.sessionId,
+      dto.query,
+      dto.attachments,
+      dto.currentDraft,
+      dto.districts,
+    );
     return {
       success: true,
       data: result,

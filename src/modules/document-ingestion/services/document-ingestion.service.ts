@@ -176,17 +176,19 @@ export class DocumentIngestionService {
       this.embeddingProvider,
     );
 
-    // 7. Ekstraksi Lokasi Geospasial PostGIS dari teks chunk
+    // 7. Ekstraksi Lokasi Geospasial PostGIS & Deteksi Distrik dari teks chunk
     let totalTokenCount = 0;
     let totalLocationsCount = 0;
     const chunkItems = chunksWithEmbeddings.map((item) => {
       totalTokenCount += item.chunkData.tokenCount;
       const locations = this.geospatialParser.extractGeospatialLocations(item.chunkData.rawText);
+      const detectedDistricts = this.geospatialParser.detectDistricts(item.chunkData.rawText);
       totalLocationsCount += locations.length;
       return {
         chunkData: item.chunkData,
         embedding: item.embedding,
         locations,
+        detectedDistricts,
       };
     });
 
@@ -318,6 +320,35 @@ export class DocumentIngestionService {
       filePath: doc.fileUrl,
       mimeType: doc.mimeType,
       fileName: `${doc.title}${path.extname(doc.fileUrl)}`,
+    };
+  }
+
+  async retroactiveTagging(): Promise<{ updatedChunksCount: number; updatedDocumentsCount: number }> {
+    this.logger.log('[Retroactive Tagging] Memulai proses sinkronisasi riwayat dokumen...');
+    
+    const chunks = await this.repository.findChunksWithEmptyDistricts();
+    
+    if (chunks.length === 0) {
+      this.logger.log('[Retroactive Tagging] Semua dokumen sudah tersinkronisasi. 0 chunk diproses.');
+      return { updatedChunksCount: 0, updatedDocumentsCount: 0 };
+    }
+
+    const docIds = new Set<string>();
+    let updatedChunksCount = 0;
+
+    for (const chunk of chunks) {
+      const detected = this.geospatialParser.detectDistricts(chunk.rawText);
+      if (detected.length > 0) {
+        await this.repository.updateChunkDistricts(chunk.id, detected);
+        docIds.add(chunk.documentId);
+        updatedChunksCount++;
+      }
+    }
+
+    this.logger.log(`[Retroactive Tagging] Sinkronisasi selesai. Berhasil memperbarui ${updatedChunksCount} chunk di ${docIds.size} dokumen.`);
+    return {
+      updatedChunksCount,
+      updatedDocumentsCount: docIds.size,
     };
   }
 }

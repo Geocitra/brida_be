@@ -127,4 +127,14 @@ export class DocumentIngestionController {
       message: 'Dokumen berhasil dihapus.',
     };
   }
+
+  @Post('retroactive-tagging')
+  @HttpCode(HttpStatus.OK)
+  async retroactiveTagging(): Promise<{ success: boolean; data: { updatedChunksCount: number; updatedDocumentsCount: number } }> {
+    const result = await this.ingestionService.retroactiveTagging();
+    return {
+      success: true,
+      data: result,
+    };
+  }
 }

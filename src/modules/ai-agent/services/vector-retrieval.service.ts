@@ -8,6 +8,7 @@ export interface RetrievalSearchOptions {
   queryText: string;
   topK?: number;
   similarityThreshold?: number;
+  districts?: string[];
 }
 
 @Injectable()
@@ -43,6 +44,7 @@ export class VectorRetrievalService {
       limit: topK,
       similarityThreshold,
       queryText,
+      districts: options.districts,
     });
 
     this.logger.log(
