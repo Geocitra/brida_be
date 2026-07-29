@@ -11,6 +11,7 @@ export interface ChunkWithVectorInput {
   embedding: number[];
   locations: ExtractedGeospatialData[];
   detectedDistricts?: string[];
+  districtDensity?: Record<string, number>;
 }
 
 export interface CreateDocumentTransactionInput {
@@ -274,6 +275,7 @@ export class DocumentRepository {
             tokenCount: item.chunkData.tokenCount,
             embedding: vectorStr,
             detected_districts: item.detectedDistricts || [],
+            district_density: item.districtDensity || {},
           },
         });
 
@@ -339,6 +341,72 @@ export class DocumentRepository {
         detected_districts: districts,
       },
     });
+  }
+
+  async findChunksForRetroactiveSync() {
+    return this.prisma.documentChunk.findMany({
+      where: {
+        OR: [
+          {
+            detected_districts: {
+              equals: [],
+            },
+          },
+          {
+            district_density: {
+              equals: {},
+            },
+          },
+          {
+            district_density: {
+              equals: Prisma.DbNull,
+            },
+          },
+        ],
+      },
+    });
+  }
+
+  async updateChunkSpatialMetadata(chunkId: string, districts: string[], density: Record<string, number>) {
+    return this.prisma.documentChunk.update({
+      where: { id: chunkId },
+      data: {
+        detected_districts: districts,
+        district_density: density,
+      },
+    });
+  }
+
+  async getDocumentDistrictDensity(documentId: string): Promise<Record<string, number>> {
+    try {
+      const rawResult: Array<{ district: string; total_mentions: number }> = await this.prisma.$queryRawUnsafe(
+        `
+        SELECT 
+          key AS "district", 
+          SUM(value::int)::int AS "total_mentions"
+        FROM 
+          document_chunks,
+          json_each_text(COALESCE(district_density, '{}'::json))
+        WHERE 
+          "documentId" = $1::uuid
+        GROUP BY 
+          key
+        ORDER BY 
+          "total_mentions" DESC;
+        `,
+        documentId,
+      );
+
+      const densityMap: Record<string, number> = {};
+      rawResult.forEach((row) => {
+        densityMap[row.district] = row.total_mentions;
+      });
+
+      return densityMap;
+    } catch (err: any) {
+      this.logger.error(`[Density Aggregation Error] Gagal menghitung kerapatan dokumen ${documentId}: ${err.message}`);
+      return {};
+    }
   }
 }
 

@@ -176,19 +176,20 @@ export class DocumentIngestionService {
       this.embeddingProvider,
     );
 
-    // 7. Ekstraksi Lokasi Geospasial PostGIS & Deteksi Distrik dari teks chunk
+    // 7. Ekstraksi Lokasi Geospasial PostGIS & Deteksi Kerapatan Distrik dari teks chunk
     let totalTokenCount = 0;
     let totalLocationsCount = 0;
     const chunkItems = chunksWithEmbeddings.map((item) => {
       totalTokenCount += item.chunkData.tokenCount;
       const locations = this.geospatialParser.extractGeospatialLocations(item.chunkData.rawText);
-      const detectedDistricts = this.geospatialParser.detectDistricts(item.chunkData.rawText);
+      const spatialAnalysis = this.geospatialParser.calculateDistrictDensity(item.chunkData.rawText);
       totalLocationsCount += locations.length;
       return {
         chunkData: item.chunkData,
         embedding: item.embedding,
         locations,
-        detectedDistricts,
+        detectedDistricts: spatialAnalysis.detected,
+        districtDensity: spatialAnalysis.density,
       };
     });
 
@@ -326,7 +327,7 @@ export class DocumentIngestionService {
   async retroactiveTagging(): Promise<{ updatedChunksCount: number; updatedDocumentsCount: number }> {
     this.logger.log('[Retroactive Tagging] Memulai proses sinkronisasi riwayat dokumen...');
     
-    const chunks = await this.repository.findChunksWithEmptyDistricts();
+    const chunks = await this.repository.findChunksForRetroactiveSync();
     
     if (chunks.length === 0) {
       this.logger.log('[Retroactive Tagging] Semua dokumen sudah tersinkronisasi. 0 chunk diproses.');
@@ -337,9 +338,9 @@ export class DocumentIngestionService {
     let updatedChunksCount = 0;
 
     for (const chunk of chunks) {
-      const detected = this.geospatialParser.detectDistricts(chunk.rawText);
-      if (detected.length > 0) {
-        await this.repository.updateChunkDistricts(chunk.id, detected);
+      const spatialAnalysis = this.geospatialParser.calculateDistrictDensity(chunk.rawText);
+      if (spatialAnalysis.detected.length > 0) {
+        await this.repository.updateChunkSpatialMetadata(chunk.id, spatialAnalysis.detected, spatialAnalysis.density);
         docIds.add(chunk.documentId);
         updatedChunksCount++;
       }

@@ -11,6 +11,14 @@ export interface TokenAuditReport {
   requiresCompaction: boolean;
 }
 
+// Tambahkan Interface Options untuk mengamankan parameter
+export interface BudgetCircuitBreakerOptions {
+  texts: string[];
+  imagesCount?: number;
+  imageDimensions?: Array<{ width: number; height: number }>;
+  maxBudgetTokens?: number;
+}
+
 @Injectable()
 export class TokenEstimatorUtil {
   private readonly logger = new Logger(TokenEstimatorUtil.name);
@@ -144,25 +152,25 @@ export class TokenEstimatorUtil {
   }
 
   /**
-   * Mekanisme Circuit Breaker Proaktif Multimodal [5, 7].
-   * Melemparkan PayloadTooLargeException jika muatan token teks + gambar melampaui batas aman absolut,
-   * mencegah server mengalami kegagalan akibat Context Overflow dari API Gemini [5, 7].
+   * Menggunakan pola Parameter Object untuk mencegah bug parameter sejenis yang tertukar posisinya.
    */
-  enforceBudgetCircuitBreaker(
-    texts: string[],
-    imagesCount: number = 0,
-    imageDimensions?: Array<{ width: number; height: number }>,
-    maxBudgetTokens: number = this.DEFAULT_BUDGET_TOKENS,
-  ): void {
+  enforceBudgetCircuitBreaker(options: BudgetCircuitBreakerOptions): void {
+    const {
+      texts,
+      imagesCount = 0,
+      imageDimensions,
+      maxBudgetTokens = this.DEFAULT_BUDGET_TOKENS,
+    } = options;
+
     const report = this.auditTokenBudget(texts, imagesCount, imageDimensions, maxBudgetTokens);
 
     if (!report.isSafe) {
       this.logger.error(
-        `[Circuit Breaker Triggered] Estimasi token multimodal (${report.estimatedTokens}) melampaui batas aman anggaran (${report.maxBudgetTokens}). Alur eksekusi LLM dihentikan demi integritas sistem [5, 7].`,
+        `[Circuit Breaker Triggered] Estimasi token multimodal (${report.estimatedTokens}) melampaui batas aman anggaran (${report.maxBudgetTokens}). Alur eksekusi LLM dihentikan demi integritas sistem.`,
       );
 
       throw new PayloadTooLargeException(
-        `Muatan data kolaborasi (${report.estimatedTokens} estimated tokens, termasuk ${imagesCount} gambar) melampaui batas aman pemrosesan sistem BRIDA (${report.maxBudgetTokens} tokens). Silakan perkecil ukuran teks atau kurangi gambar screenshot [5, 7].`,
+        `Muatan data kolaborasi (${report.estimatedTokens} estimated tokens, termasuk ${imagesCount} gambar) melampaui batas aman pemrosesan sistem BRIDA (${report.maxBudgetTokens} tokens). Silakan perkecil ukuran teks atau kurangi gambar screenshot.`,
       );
     }
   }

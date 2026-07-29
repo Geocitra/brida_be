@@ -12,8 +12,22 @@ export interface MathDeviationResult {
   urgencyStatus: 'NORMAL' | 'WASPADA' | 'KRITIS';
 }
 
+export interface TokenBudgetResult {
+  totalTokens: number;
+  estimatedCostIdr: number;
+  maxMonthlyPaguIdr: number;
+  quotaPercentage: number;
+  paguStatus: 'SAFE' | 'ALERT' | 'WARNING';
+}
+
 @Injectable()
 export class AnalysisMathService {
+  // Tarif Biaya Komputasi Terpusat: IDR 0.26 per Token (Gabungan Input & Output)
+  private readonly TOKEN_PRICE_IDR = 0.26;
+
+  // Batas Pagu Anggaran AI Bulanan Kepala BRIDA: Rp500.000,-
+  private readonly MAX_MONTHLY_PAGU_IDR = 500000;
+
   /**
    * Deterministic Math Calculation for Target vs Realization Deviation
    * 0 Token LLM cost - 100% precision with zero hallucination.
@@ -49,6 +63,37 @@ export class AnalysisMathService {
       deviationValue,
       deviationPercentage,
       urgencyStatus,
+    };
+  }
+
+  /**
+   * Mengkalkulasi konversi token komputasi AI menjadi representasi anggaran finansial Rupiah (IDR).
+   * Bertindak sebagai Pakar Informasi (Information Expert) atas parameter dan aturan anggaran.
+   * 
+   * @param totalTokens Jumlah akumulasi token (input + output) dari aktivitas AI
+   */
+  calculateTokenBudget(totalTokens: number): TokenBudgetResult {
+    const estimatedCostIdr = Math.round(totalTokens * this.TOKEN_PRICE_IDR);
+
+    // Hitung persentase pemakaian terhadap pagu bulanan (dibatasi maksimum 100%)
+    const quotaPercentage = parseFloat(
+      Math.min(100, (estimatedCostIdr / this.MAX_MONTHLY_PAGU_IDR) * 100).toFixed(1)
+    );
+
+    // Penentuan ambang batas kepatuhan anggaran (Pagu Status Guard)
+    let paguStatus: 'SAFE' | 'ALERT' | 'WARNING' = 'SAFE';
+    if (quotaPercentage >= 80) {
+      paguStatus = 'WARNING'; // Status Kritis / Melebihi 80% pagu
+    } else if (quotaPercentage >= 60) {
+      paguStatus = 'ALERT';   // Status Waspada / Melebihi 60% pagu
+    }
+
+    return {
+      totalTokens,
+      estimatedCostIdr,
+      maxMonthlyPaguIdr: this.MAX_MONTHLY_PAGU_IDR,
+      quotaPercentage,
+      paguStatus,
     };
   }
 }

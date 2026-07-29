@@ -203,6 +203,7 @@ model DocumentChunk {
   tokenCount         Int
   embedding          String?              @db.Text
   detected_districts String[]             @default([])
+  district_density   Json?                @default("{}")
   createdAt          DateTime             @default(now())
 
   document           ReportDocument       @relation(fields: [documentId], references: [id], onDelete: Cascade)
@@ -711,6 +712,13 @@ CREATE TABLE "message_attachments" (
 
 -- AddForeignKey
 ALTER TABLE "message_attachments" ADD CONSTRAINT "message_attachments_messageId_fkey" FOREIGN KEY ("messageId") REFERENCES "chat_messages"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
+--- FILE: prisma\migrations\20260729024958_idk\migration.sql ---
+-- AlterTable
+ALTER TABLE "document_chunks" ADD COLUMN     "detected_districts" TEXT[] DEFAULT ARRAY[]::TEXT[];
+
+-- CreateIndex
+CREATE INDEX "document_chunks_detected_districts_idx" ON "document_chunks" USING GIN ("detected_districts");
 
 --- FILE: src\app.module.ts ---
 import { Module } from '@nestjs/common';
@@ -1767,26 +1775,30 @@ export interface MultimodalPromptPayload {
   estimatedTokens: number;
 }
 
-const TONE_AUDIENCE_STEERING_MAP: Record<string, { target: string; focus: string; style: string }> = {
+const TONE_AUDIENCE_STEERING_MAP: Record<string, { target: string; focus: string; style: string; vocabulary: string }> = {
   solutif: {
     target: 'Bupati Kabupaten Mimika',
     focus: 'Rekomendasi tindakan taktis, dampak makro-fiskal daerah, penyusunan rancangan regulasi taktis, serta perumusan langkah konkret cepat (Quick Wins).',
     style: 'Eksekutif, berorientasi solusi, berwibawa, lugas, padat, dan mencerminkan kepemimpinan daerah.',
+    vocabulary: 'langkah konkret, percepatan pembangunan, aksi cepat (quick wins), implementasi kebijakan, efisiensi fiskal, dampak langsung.',
   },
   kritis: {
     target: 'Kepala Organisasi Perangkat Daerah (OPD) Mimika',
     focus: 'Audit kepatuhan tata kelola, evaluasi deviasi operasional sektoral dinas, transparansi pertanggungjawaban anggaran, dan identifikasi sumbatan teknis (bottlenecks).',
     style: 'Tajam, analitis, ketat, menuntut akuntabilitas teknis sektoral, serta berorientasi evaluatif-korektif.',
+    vocabulary: 'deviasi anggaran, sumbatan teknis (bottlenecks), kelemahan tata kelola, ketimpangan alokasi, audit kepatuhan, pemborosan sumber daya.',
   },
   akademis: {
     target: 'Rekan Jurnalis Media Massa, Akademisi Perguruan Tinggi, dan Pengurus LSM (Lembaga Swadaya Masyarakat)',
     focus: 'Metodologi evaluasi kebijakan, analisis kausalitas data berbasis bukti faktual (*evidence-based*), komparasi indikator standar nasional, dan landasan teori kebijakan publik.',
     style: 'Rasional, metodologis, objektif, berimbang (*cover-both-sides*), serta menggunakan istilah tata kelola standar ilmiah.',
+    vocabulary: 'analisis kausalitas, bukti faktual (evidence-based), metodologi evaluasi, korelasi indikator standar, signifikansi statistik, postulat.',
   },
   populer: {
     target: 'Masyarakat Umum Kabupaten Mimika',
     focus: 'Dampak nyata langsung dari kebijakan terhadap kehidupan warga, penyederhanaan istilah birokrasi, keterbukaan alokasi dana publik, dan kegunaan fasilitas pembangunan.',
     style: 'Sederhana, naratif, mengalir, komunikatif, ramah pembaca (*highly readable*), serta menggunakan analogi kehidupan sehari-hari.',
+    vocabulary: 'manfaat nyata, kehidupan sehari-hari, transparansi publik, kemudahan layanan, uang rakyat, kesejahteraan keluarga.',
   },
 };
 
@@ -1840,11 +1852,24 @@ export class ContextAssemblyService {
       contextPayloadText = 'Sistem berjalan dalam mode mandiri. Gunakan draf ketikan pengguna dan pengetahuan internal Anda untuk menulis naskah.';
     }
 
-    let lengthGuidance = 'Target Panjang Teks: Minimal 1000 kata (Sedang, komprehensif)';
-    if (targetLength === 'SHORT') {
-      lengthGuidance = 'Target Panjang Teks: Minimal 700 kata (Ringkas & Padat)';
+    let lengthGuidance = `
+Target Panjang Teks: SHORT (~700 kata) - Ringkas & Padat.
+- Struktur Penulisan: Terbagi secara tegas dalam 2-3 bab/bagian utama yang langsung menyoroti inti permasalahan.
+- Kepadatan Paragraf: Setiap paragraf berbobot padat, dengan batasan maksimal 4-5 kalimat per paragraf.
+- Efisiensi Kata: Gunakan kalimat aktif dan hindari penjelasan bertele-tele.
+    `;
+    if (targetLength === 'MEDIUM') {
+      lengthGuidance = `
+Target Panjang Teks: MEDIUM (~1000 kata) - Sedang & Komprehensif.
+- Struktur Penulisan: Terbagi secara sistematis dalam 3-4 bab/bagian utama (contoh: Latar Belakang/Pendahuluan, Analisis Fakta Spasial, dan Rekomendasi Kebijakan).
+- Kepadatan Paragraf: Setiap paragraf menguraikan satu ide pokok dengan penjelasan pendukung yang relevan (sekitar 5-7 kalimat per paragraf).
+      `;
     } else if (targetLength === 'LONG') {
-      lengthGuidance = 'Target Panjang Teks: Minimal 1500 kata (Mendalam & Komprehensif)';
+      lengthGuidance = `
+Target Panjang Teks: LONG (~1500 kata) - Mendalam, Mendetail, & Analitis Formal.
+- Struktur Penulisan: Terbagi secara terstruktur penuh dalam 4-5 bab/bagian utama (contoh: Latar Belakang Kebijakan, Gambaran Umum Spasial Wilayah, Analisis Komparatif Indikator Pembangunan, Matriks Hambatan Sektoral, dan Rekomendasi Program Strategis). Sediakan pula sub-bagian (sub-headings) untuk masing-masing topik.
+- Kepadatan Paragraf: Pembahasan mendalam dengan rincian data sektoral, matriks program, dan rujukan historis kebijakan (sekitar 6-8 kalimat per paragraf).
+      `;
     }
 
     const steering = TONE_AUDIENCE_STEERING_MAP[activeTone] || TONE_AUDIENCE_STEERING_MAP['solutif'];
@@ -1855,9 +1880,10 @@ ATURAN TARGET AUDIENS GAYA BAHASA (TONE STEERING):
 - Artikel ini ditujukan kepada: **${steering.target}**
 - Fokus utama penulisan: ${steering.focus}
 - Gaya penyampaian bahasa: ${steering.style}
+- **Kosa Kata Fungsional Wajib (Vocabulary Steer):** Anda wajib menyisipkan istilah-istilah taktis berikut secara natural dalam naskah: *${steering.vocabulary}*
 
-ATURAN PANJANG NASKAH:
-- ${lengthGuidance}
+ATURAN PANJANG NASKAH & BLUEPRINT DENSITAS STRUKTURAL:
+${lengthGuidance}
 - Anda WAJIB mengembangkan pembahasan, analisis, rekomendasi, dan data pendukung agar memenuhi target panjang naskah di atas. Jangan mengembalikan respons singkat jika target adalah LONG/MEDIUM.
 
 ATURAN COLLABORATIVE CO-WRITING:
@@ -1998,6 +2024,30 @@ ATURAN COLLABORATIVE CO-WRITING:
     }
 
     return 'Konteks dokumen rujukan yang relevan dengan topik pertanyaan tidak ditemukan.';
+  }
+
+  async assembleSpatialDensityManifest(documentIds: string[]): Promise<string> {
+    const manifestParts: string[] = [];
+
+    for (const id of documentIds) {
+      const doc = await this.repository.findById(id);
+      if (doc) {
+
+        const density = await this.repository.getDocumentDistrictDensity(id);
+
+        const densityLines = Object.entries(density)
+          .map(([district, count]) => `- Distrik ${district}: Disebut sebanyak ${count} kali dalam dokumen`)
+          .join('\n');
+
+        manifestParts.push(
+          `=== PROFIL KERAPATAN SPASIAL DOKUMEN: ${doc.title} ===\n` +
+          `Laporan mencatat intensitas pembahasan distrik sebagai berikut:\n` +
+          `${densityLines || 'Tidak ada spesifikasi penyebutan nama distrik secara eksplisit.'}`
+        );
+      }
+    }
+
+    return manifestParts.join('\n\n');
   }
 }
 
@@ -2241,6 +2291,13 @@ export interface TokenAuditReport {
   requiresCompaction: boolean;
 }
 
+export interface BudgetCircuitBreakerOptions {
+  texts: string[];
+  imagesCount?: number;
+  imageDimensions?: Array<{ width: number; height: number }>;
+  maxBudgetTokens?: number;
+}
+
 @Injectable()
 export class TokenEstimatorUtil {
   private readonly logger = new Logger(TokenEstimatorUtil.name);
@@ -2344,21 +2401,23 @@ export class TokenEstimatorUtil {
     };
   }
 
-  enforceBudgetCircuitBreaker(
-    texts: string[],
-    imagesCount: number = 0,
-    imageDimensions?: Array<{ width: number; height: number }>,
-    maxBudgetTokens: number = this.DEFAULT_BUDGET_TOKENS,
-  ): void {
+  enforceBudgetCircuitBreaker(options: BudgetCircuitBreakerOptions): void {
+    const {
+      texts,
+      imagesCount = 0,
+      imageDimensions,
+      maxBudgetTokens = this.DEFAULT_BUDGET_TOKENS,
+    } = options;
+
     const report = this.auditTokenBudget(texts, imagesCount, imageDimensions, maxBudgetTokens);
 
     if (!report.isSafe) {
       this.logger.error(
-        `[Circuit Breaker Triggered] Estimasi token multimodal (${report.estimatedTokens}) melampaui batas aman anggaran (${report.maxBudgetTokens}). Alur eksekusi LLM dihentikan demi integritas sistem [5, 7].`,
+        `[Circuit Breaker Triggered] Estimasi token multimodal (${report.estimatedTokens}) melampaui batas aman anggaran (${report.maxBudgetTokens}). Alur eksekusi LLM dihentikan demi integritas sistem.`,
       );
 
       throw new PayloadTooLargeException(
-        `Muatan data kolaborasi (${report.estimatedTokens} estimated tokens, termasuk ${imagesCount} gambar) melampaui batas aman pemrosesan sistem BRIDA (${report.maxBudgetTokens} tokens). Silakan perkecil ukuran teks atau kurangi gambar screenshot [5, 7].`,
+        `Muatan data kolaborasi (${report.estimatedTokens} estimated tokens, termasuk ${imagesCount} gambar) melampaui batas aman pemrosesan sistem BRIDA (${report.maxBudgetTokens} tokens). Silakan perkecil ukuran teks atau kurangi gambar screenshot.`,
       );
     }
   }
@@ -3499,6 +3558,7 @@ export interface ChunkWithVectorInput {
   embedding: number[];
   locations: ExtractedGeospatialData[];
   detectedDistricts?: string[];
+  districtDensity?: Record<string, number>;
 }
 
 export interface CreateDocumentTransactionInput {
@@ -3749,6 +3809,7 @@ export class DocumentRepository {
             tokenCount: item.chunkData.tokenCount,
             embedding: vectorStr,
             detected_districts: item.detectedDistricts || [],
+            district_density: item.districtDensity || {},
           },
         });
 
@@ -3812,6 +3873,72 @@ export class DocumentRepository {
         detected_districts: districts,
       },
     });
+  }
+
+  async findChunksForRetroactiveSync() {
+    return this.prisma.documentChunk.findMany({
+      where: {
+        OR: [
+          {
+            detected_districts: {
+              equals: [],
+            },
+          },
+          {
+            district_density: {
+              equals: {},
+            },
+          },
+          {
+            district_density: {
+              equals: Prisma.DbNull,
+            },
+          },
+        ],
+      },
+    });
+  }
+
+  async updateChunkSpatialMetadata(chunkId: string, districts: string[], density: Record<string, number>) {
+    return this.prisma.documentChunk.update({
+      where: { id: chunkId },
+      data: {
+        detected_districts: districts,
+        district_density: density,
+      },
+    });
+  }
+
+  async getDocumentDistrictDensity(documentId: string): Promise<Record<string, number>> {
+    try {
+      const rawResult: Array<{ district: string; total_mentions: number }> = await this.prisma.$queryRawUnsafe(
+        `
+        SELECT
+          key AS "district",
+          SUM(value::int)::int AS "total_mentions"
+        FROM
+          document_chunks,
+          json_each_text(COALESCE(district_density, '{}'::json))
+        WHERE
+          "documentId" = $1::uuid
+        GROUP BY
+          key
+        ORDER BY
+          "total_mentions" DESC;
+        `,
+        documentId,
+      );
+
+      const densityMap: Record<string, number> = {};
+      rawResult.forEach((row) => {
+        densityMap[row.district] = row.total_mentions;
+      });
+
+      return densityMap;
+    } catch (err: any) {
+      this.logger.error(`[Density Aggregation Error] Gagal menghitung kerapatan dokumen ${documentId}: ${err.message}`);
+      return {};
+    }
   }
 }
 
@@ -3974,13 +4101,14 @@ export class DocumentIngestionService {
     const chunkItems = chunksWithEmbeddings.map((item) => {
       totalTokenCount += item.chunkData.tokenCount;
       const locations = this.geospatialParser.extractGeospatialLocations(item.chunkData.rawText);
-      const detectedDistricts = this.geospatialParser.detectDistricts(item.chunkData.rawText);
+      const spatialAnalysis = this.geospatialParser.calculateDistrictDensity(item.chunkData.rawText);
       totalLocationsCount += locations.length;
       return {
         chunkData: item.chunkData,
         embedding: item.embedding,
         locations,
-        detectedDistricts,
+        detectedDistricts: spatialAnalysis.detected,
+        districtDensity: spatialAnalysis.density,
       };
     });
 
@@ -4117,7 +4245,7 @@ export class DocumentIngestionService {
   async retroactiveTagging(): Promise<{ updatedChunksCount: number; updatedDocumentsCount: number }> {
     this.logger.log('[Retroactive Tagging] Memulai proses sinkronisasi riwayat dokumen...');
 
-    const chunks = await this.repository.findChunksWithEmptyDistricts();
+    const chunks = await this.repository.findChunksForRetroactiveSync();
 
     if (chunks.length === 0) {
       this.logger.log('[Retroactive Tagging] Semua dokumen sudah tersinkronisasi. 0 chunk diproses.');
@@ -4128,9 +4256,9 @@ export class DocumentIngestionService {
     let updatedChunksCount = 0;
 
     for (const chunk of chunks) {
-      const detected = this.geospatialParser.detectDistricts(chunk.rawText);
-      if (detected.length > 0) {
-        await this.repository.updateChunkDistricts(chunk.id, detected);
+      const spatialAnalysis = this.geospatialParser.calculateDistrictDensity(chunk.rawText);
+      if (spatialAnalysis.detected.length > 0) {
+        await this.repository.updateChunkSpatialMetadata(chunk.id, spatialAnalysis.detected, spatialAnalysis.density);
         docIds.add(chunk.documentId);
         updatedChunksCount++;
       }
@@ -4207,26 +4335,36 @@ export class GeospatialParserService {
     return results;
   }
 
-  detectDistricts(text: string): string[] {
-    if (!text) return [];
+  calculateDistrictDensity(text: string): { detected: string[]; density: Record<string, number> } {
+    if (!text) {
+      return { detected: [], density: {} };
+    }
 
-    const detected: string[] = [];
-    const lowerText = text.toLowerCase();
+    const detectedSet = new Set<string>();
+    const densityMap: Record<string, number> = {};
 
     for (const district of this.MIMIKA_DISTRICTS) {
-
       const escapedPattern = district
         .replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')
         .replace(/\s+/g, '\\s+');
 
-      const regex = new RegExp(`\\b${escapedPattern}\\b`, 'i');
+      const regex = new RegExp(`\\b${escapedPattern}\\b`, 'gi');
+      const matches = text.match(regex);
 
-      if (regex.test(lowerText)) {
-        detected.push(district);
+      if (matches && matches.length > 0) {
+        detectedSet.add(district);
+        densityMap[district] = matches.length;
       }
     }
 
-    return detected;
+    return {
+      detected: Array.from(detectedSet),
+      density: densityMap,
+    };
+  }
+
+  detectDistricts(text: string): string[] {
+    return this.calculateDistrictDensity(text).detected;
   }
 }
 
@@ -5854,7 +5992,11 @@ ATURAN FORMATTING MUTLAK (COMMONMARK COMPLIANCE - ZERO RANDOM HTML):
       : `Judul Artikel yang Diinginkan: "${articleTitle}"\n${promptUserInstruction}`;
 
     const compiledPrompts = [systemPrompt, userPromptMessage];
-    this.tokenEstimator.enforceBudgetCircuitBreaker(compiledPrompts, this.MAX_DRAFTING_TOKEN_BUDGET);
+    this.tokenEstimator.enforceBudgetCircuitBreaker({
+      texts: compiledPrompts,
+      imagesCount: 0,
+      maxBudgetTokens: this.MAX_DRAFTING_TOKEN_BUDGET,
+    });
 
     await this.chatRepository.addMessage({
       sessionId: session.id,
@@ -5992,7 +6134,11 @@ ATURAN FORMATTING MUTLAK (COMMONMARK COMPLIANCE - ZERO RANDOM HTML):
 `;
 
     const rawConversationTexts = conversationMessages.map((m: any) => m.content).concat([systemPrompt, userInstruction]);
-    this.tokenEstimator.enforceBudgetCircuitBreaker(rawConversationTexts, this.MAX_DRAFTING_TOKEN_BUDGET);
+    this.tokenEstimator.enforceBudgetCircuitBreaker({
+      texts: rawConversationTexts,
+      imagesCount: 0,
+      maxBudgetTokens: this.MAX_DRAFTING_TOKEN_BUDGET,
+    });
 
     let revisedArticleText = '';
     try {

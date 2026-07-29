@@ -64,24 +64,39 @@ export class GeospatialParserService {
     return results;
   }
 
-  detectDistricts(text: string): string[] {
-    if (!text) return [];
+  /**
+   * Menghitung kemunculan unik dan kerapatan (frekuensi) penyebutan distrik
+   */
+  calculateDistrictDensity(text: string): { detected: string[]; density: Record<string, number> } {
+    if (!text) {
+      return { detected: [], density: {} };
+    }
 
-    const detected: string[] = [];
+    const detectedSet = new Set<string>();
+    const densityMap: Record<string, number> = {};
 
     for (const district of this.MIMIKA_DISTRICTS) {
-      // Ubah spasi menjadi \s+ agar fleksibel terhadap spasi ganda/baris baru dari hasil parser PDF
       const escapedPattern = district
         .replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')
         .replace(/\s+/g, '\\s+');
 
-      const regex = new RegExp(`\\b${escapedPattern}\\b`, 'i');
+      // Menggunakan bendera 'g' (global) untuk menghitung seluruh kecocokan
+      const regex = new RegExp(`\\b${escapedPattern}\\b`, 'gi');
+      const matches = text.match(regex);
 
-      if (regex.test(text)) {
-        detected.push(district);
+      if (matches && matches.length > 0) {
+        detectedSet.add(district);
+        densityMap[district] = matches.length; // Merekam jumlah seberapa sering distrik disebut
       }
     }
 
-    return detected;
+    return {
+      detected: Array.from(detectedSet),
+      density: densityMap,
+    };
+  }
+
+  detectDistricts(text: string): string[] {
+    return this.calculateDistrictDensity(text).detected;
   }
 }

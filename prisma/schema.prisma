@@ -91,6 +91,7 @@ model DocumentChunk {
   tokenCount         Int
   embedding          String?              @db.Text
   detected_districts String[]             @default([])
+  district_density   Json?                @default("{}")
   createdAt          DateTime             @default(now())
 
   document           ReportDocument       @relation(fields: [documentId], references: [id], onDelete: Cascade)

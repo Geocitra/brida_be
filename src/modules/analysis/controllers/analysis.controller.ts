@@ -1,8 +1,9 @@
-import { Controller, Post, Get, Body, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Get, Body, HttpCode, HttpStatus, Logger } from '@nestjs/common';
 import { IsString, IsNumber, IsOptional, IsArray } from 'class-validator';
 import { AnalysisMathService } from '../services/analysis-math.service';
 import { AnalysisCausalService } from '../services/analysis-causal.service';
 import { PrismaService } from '../../../common/prisma/prisma.service';
+import { SessionType } from '@prisma/client';
 
 export class CompareAnalysisDto {
   @IsString()
@@ -42,11 +43,171 @@ export class CompareAnalysisDto {
 
 @Controller('analysis')
 export class AnalysisController {
+  private readonly logger = new Logger(AnalysisController.name);
+
   constructor(
     private readonly mathService: AnalysisMathService,
     private readonly causalService: AnalysisCausalService,
     private readonly prisma: PrismaService,
   ) { }
+
+  /**
+   * GET /analysis/dashboard-meta
+   * Mengagregasi data token komputasi AI daerah secara terpusat (NotebookLM Paradigm)
+   * serta menyajikan riwayat aktivitas terbaru yang minim kopling.
+   */
+  @Get('dashboard-meta')
+  async getDashboardMetadata() {
+    try {
+      this.logger.log('[AnalysisController] Mengagregasi metadata statistik dashboard eksekutif...');
+
+      // 1. Eksekusi Kueri Spasial & Transaksional secara Paralel (Lightning Fast I/O < 100ms)
+      const [
+        aiLogsSum,
+        reportsSum,
+        recentChatsRaw,
+        recentArticlesRaw
+      ] = await Promise.all([
+        this.prisma.aiAnalysisLog.aggregate({
+          _sum: { tokenCount: true }
+        }),
+        this.prisma.generatedReport.aggregate({
+          _sum: { tokenCount: true }
+        }),
+        this.prisma.chatSession.findMany({
+          where: { sessionType: SessionType.QA_CHAT },
+          orderBy: { updatedAt: 'desc' },
+          take: 5,
+          include: {
+            document: { select: { id: true, title: true } },
+            sources: {
+              include: {
+                document: { select: { id: true, title: true } }
+              }
+            },
+            messages: {
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+              select: { content: true }
+            }
+          }
+        }),
+        this.prisma.chatSession.findMany({
+          where: { sessionType: SessionType.ARTICLE_GENERATOR },
+          orderBy: { updatedAt: 'desc' },
+          take: 5,
+          include: {
+            document: { select: { id: true, title: true } },
+            sources: {
+              include: {
+                document: { select: { id: true, title: true } }
+              }
+            },
+            messages: {
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+              select: { content: true }
+            }
+          }
+        })
+      ]);
+
+      // 2. Penghitungan Anggaran Token Sesuai Aturan Sistem (Information Expert)
+      const aiTokens = aiLogsSum._sum?.tokenCount || 0;
+      const reportTokens = reportsSum._sum?.tokenCount || 0;
+      const totalTokens = aiTokens + reportTokens;
+
+      // Tarif Biaya Komputasi Terpusat: IDR 0.26 per Token
+      const TOKEN_PRICE_IDR = 0.26;
+      const MAX_MONTHLY_PAGU_IDR = 500000;
+      const estimatedCostIdr = Math.round(totalTokens * TOKEN_PRICE_IDR);
+      const quotaPercentage = parseFloat(
+        Math.min(100, (estimatedCostIdr / MAX_MONTHLY_PAGU_IDR) * 100).toFixed(1)
+      );
+
+      // 3. Mapping Riwayat Obrolan Aktif (AI Chat)
+      const recentChats = recentChatsRaw.map((session) => {
+        const lastMsgRaw = session.messages[0]?.content || '';
+        let lastMessageText = 'Belum ada pesan.';
+
+        if (lastMsgRaw) {
+          try {
+            const parsed = JSON.parse(lastMsgRaw);
+            if (parsed && typeof parsed === 'object') {
+              lastMessageText = parsed.answer || parsed.fullArticleText || lastMsgRaw;
+            }
+          } catch {
+            lastMessageText = lastMsgRaw;
+          }
+        }
+
+        const sourceTitles = session.sources.map((s) => s.document.title);
+        if (session.document && !sourceTitles.includes(session.document.title)) {
+          sourceTitles.unshift(session.document.title);
+        }
+
+        return {
+          id: session.id,
+          title: session.title,
+          lastMessage: lastMessageText,
+          updatedAt: session.updatedAt,
+          sourcesCount: sourceTitles.length,
+          sources: sourceTitles,
+        };
+      });
+
+      // 4. Mapping Riwayat Pembuatan Naskah Aktif (Artikel Generator)
+      const recentArticles = recentArticlesRaw.map((session) => {
+        const lastMsgRaw = session.messages[0]?.content || '';
+        let snippetText = session.currentDraft || '';
+
+        if (!snippetText && lastMsgRaw) {
+          try {
+            const parsed = JSON.parse(lastMsgRaw);
+            if (parsed && typeof parsed === 'object') {
+              snippetText = parsed.updatedArticle?.draftMarkdown || parsed.fullArticleText || lastMsgRaw;
+            }
+          } catch {
+            snippetText = lastMsgRaw;
+          }
+        }
+
+        const sourceTitles = session.sources.map((s) => s.document.title);
+        if (session.document && !sourceTitles.includes(session.document.title)) {
+          sourceTitles.unshift(session.document.title);
+        }
+
+        return {
+          id: session.id,
+          title: session.articleTitle || session.title,
+          snippet: snippetText.slice(0, 150) + (snippetText.length > 150 ? '...' : ''),
+          updatedAt: session.updatedAt,
+          sourcesCount: sourceTitles.length,
+          sources: sourceTitles,
+          tone: session.tone,
+          targetLength: session.targetLength,
+        };
+      });
+
+      return {
+        success: true,
+        data: {
+          tokenBudget: {
+            totalTokens,
+            estimatedCostIdr,
+            maxMonthlyPaguIdr: MAX_MONTHLY_PAGU_IDR,
+            quotaPercentage,
+            paguStatus: quotaPercentage >= 80 ? 'WARNING' : quotaPercentage >= 60 ? 'ALERT' : 'SAFE'
+          },
+          recentChats,
+          recentArticles
+        }
+      };
+    } catch (err: any) {
+      this.logger.error(`[Dashboard Meta Aggregation Failed]: ${err.message}`, err.stack);
+      throw err;
+    }
+  }
 
   @Get('indicators')
   async getIndicatorMatrix() {
@@ -127,7 +288,6 @@ export class AnalysisController {
   @Post('compare')
   @HttpCode(HttpStatus.OK)
   async compareDeviation(@Body() dto: CompareAnalysisDto) {
-    // 1. Zero-Hallucination Math Engine
     const mathResult = this.mathService.calculate(
       dto.targetValue,
       dto.realizationValue,
@@ -137,17 +297,14 @@ export class AnalysisController {
       dto.unitSuffix || ' M',
     );
 
-    // 2. Resolusi Peran Dokumen secara Cerdas (Fallback & Auto-Detection)
     let resolvedBaselineId = dto.baselineDocId;
     let resolvedRealizationId = dto.realizationDocId;
 
-    // Jika salah satu ID kosong, tetapi frontend mengirimkan kumpulan documentIds mentah
     if (
       (!resolvedBaselineId || !resolvedRealizationId) &&
       dto.documentIds &&
       dto.documentIds.length > 0
     ) {
-      // Ambil metadata dari PostgreSQL untuk mendeteksi 'docType' dokumen yang diteruskan
       const docs = await this.prisma.reportDocument.findMany({
         where: {
           id: { in: dto.documentIds },
@@ -157,30 +314,25 @@ export class AnalysisController {
         },
       });
 
-      // Deteksi otomatis untuk Baseline
       if (!resolvedBaselineId) {
         const foundBaseline = docs.find((d) => d.metadata?.docType === 'BASELINE');
         if (foundBaseline) {
           resolvedBaselineId = foundBaseline.id;
         } else if (docs.length > 0) {
-          // Fallback teraman: Gunakan dokumen pertama dalam antrean
           resolvedBaselineId = docs[0].id;
         }
       }
 
-      // Deteksi otomatis untuk Realisasi
       if (!resolvedRealizationId) {
         const foundRealization = docs.find((d) => d.metadata?.docType === 'REALIZATION');
         if (foundRealization) {
           resolvedRealizationId = foundRealization.id;
         } else if (docs.length > 0) {
-          // Fallback teraman: Gunakan dokumen kedua (jika ada), atau gunakan dokumen pertama
           resolvedRealizationId = docs[1]?.id || docs[0].id;
         }
       }
     }
 
-    // 3. AI Causal Inference & Recommendation Engine
     const causalResult = await this.causalService.analyzeCausalFactors(
       dto.indicatorName,
       mathResult.deviationPercentage,

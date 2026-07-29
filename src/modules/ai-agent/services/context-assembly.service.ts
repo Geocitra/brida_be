@@ -288,4 +288,32 @@ ATURAN COLLABORATIVE CO-WRITING:
 
     return 'Konteks dokumen rujukan yang relevan dengan topik pertanyaan tidak ditemukan.';
   }
+
+  /**
+   * Merakit manifest spasial ringkas berisi statistik kerapatan distrik untuk AI.
+   * Metode ini mengeliminasi kebutuhan membaca keseluruhan teks dokumen oleh LLM.
+   */
+  async assembleSpatialDensityManifest(documentIds: string[]): Promise<string> {
+    const manifestParts: string[] = [];
+
+    for (const id of documentIds) {
+      const doc = await this.repository.findById(id);
+      if (doc) {
+        // Ambil hasil agregasi database secepat kilat
+        const density = await this.repository.getDocumentDistrictDensity(id);
+        
+        const densityLines = Object.entries(density)
+          .map(([district, count]) => `- Distrik ${district}: Disebut sebanyak ${count} kali dalam dokumen`)
+          .join('\n');
+
+        manifestParts.push(
+          `=== PROFIL KERAPATAN SPASIAL DOKUMEN: ${doc.title} ===\n` +
+          `Laporan mencatat intensitas pembahasan distrik sebagai berikut:\n` +
+          `${densityLines || 'Tidak ada spesifikasi penyebutan nama distrik secara eksplisit.'}`
+        );
+      }
+    }
+
+    return manifestParts.join('\n\n');
+  }
 }

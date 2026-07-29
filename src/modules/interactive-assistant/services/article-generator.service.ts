@@ -153,7 +153,11 @@ ATURAN FORMATTING MUTLAK (COMMONMARK COMPLIANCE - ZERO RANDOM HTML):
 
     // --- INTEGRASI TOKEN BUDGET CIRCUIT BREAKER (DEFENSIVE PROGRAMMING) [5, 7] ---
     const compiledPrompts = [systemPrompt, userPromptMessage];
-    this.tokenEstimator.enforceBudgetCircuitBreaker(compiledPrompts, this.MAX_DRAFTING_TOKEN_BUDGET);
+    this.tokenEstimator.enforceBudgetCircuitBreaker({
+      texts: compiledPrompts,
+      imagesCount: 0,
+      maxBudgetTokens: this.MAX_DRAFTING_TOKEN_BUDGET,
+    });
 
     // Rekam pesan prompt pengguna ke database PostgreSQL
     await this.chatRepository.addMessage({
@@ -309,7 +313,11 @@ ATURAN FORMATTING MUTLAK (COMMONMARK COMPLIANCE - ZERO RANDOM HTML):
 
     // --- INTEGRASI TOKEN BUDGET CIRCUIT BREAKER PADA PROSES INTERAKSI REVISI [5, 7] ---
     const rawConversationTexts = conversationMessages.map((m: any) => m.content).concat([systemPrompt, userInstruction]);
-    this.tokenEstimator.enforceBudgetCircuitBreaker(rawConversationTexts, this.MAX_DRAFTING_TOKEN_BUDGET);
+    this.tokenEstimator.enforceBudgetCircuitBreaker({
+      texts: rawConversationTexts,
+      imagesCount: 0,
+      maxBudgetTokens: this.MAX_DRAFTING_TOKEN_BUDGET,
+    });
 
     let revisedArticleText = '';
     try {
