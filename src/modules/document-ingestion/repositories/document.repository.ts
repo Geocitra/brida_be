@@ -10,6 +10,7 @@ export interface ChunkWithVectorInput {
   chunkData: ChunkData;
   embedding: number[];
   locations: ExtractedGeospatialData[];
+  detectedDistricts?: string[];
 }
 
 export interface CreateDocumentTransactionInput {
@@ -69,8 +70,7 @@ export class DocumentRepository {
   /**
    * Vector Retrieval Engine: Parameterized Raw SQL query using Cosine Distance <=> in pgvector with fallback
    */
-  async findSimilarChunks(params: VectorSearchParams): Promise<RetrievalResult[]> {
-    const limit = params.limit || 10;
+  async findSimilarChunks(params: VectorSearchParams): Promise<RetrievalResult[]> {    const limit = params.limit || 10;
     const threshold = params.similarityThreshold ?? 0.5;
     const vectorStr = `[${params.queryVector.join(',')}]`;
 
@@ -80,26 +80,52 @@ export class DocumentRepository {
     const FALLBACK_SIMILARITY_SCORE = 0.5;
 
     try {
-      // Parameterized Raw SQL using 1 - (embedding <=> $1::vector) as Cosine Similarity Score
-      const rawResults: any[] = await this.prisma.$queryRawUnsafe(
-        `
-        SELECT 
-          "id" AS "chunkId",
-          "documentId",
-          "chunkIndex",
-          "rawText",
-          "tokenCount",
-          (1 - ("embedding"::vector <=> $1::vector)) AS "similarityScore"
-        FROM "document_chunks"
-        WHERE "documentId" = $2::uuid
-          AND "embedding" IS NOT NULL
-        ORDER BY "similarityScore" DESC
-        LIMIT $3;
-        `,
-        vectorStr,
-        params.documentId,
-        limit,
-      );
+      let rawResults: any[];
+      if (params.districts && params.districts.length > 0) {
+        // Parameterized Raw SQL using array overlap operator && for detected_districts
+        rawResults = await this.prisma.$queryRawUnsafe(
+          `
+          SELECT 
+            "id" AS "chunkId",
+            "documentId",
+            "chunkIndex",
+            "rawText",
+            "tokenCount",
+            (1 - ("embedding"::vector <=> $1::vector)) AS "similarityScore"
+          FROM "document_chunks"
+          WHERE "documentId" = $2::uuid
+            AND "embedding" IS NOT NULL
+            AND "detected_districts" && $4::text[]
+          ORDER BY "similarityScore" DESC
+          LIMIT $3;
+          `,
+          vectorStr,
+          params.documentId,
+          limit,
+          params.districts,
+        );
+      } else {
+        // Parameterized Raw SQL using 1 - (embedding <=> $1::vector) as Cosine Similarity Score
+        rawResults = await this.prisma.$queryRawUnsafe(
+          `
+          SELECT 
+            "id" AS "chunkId",
+            "documentId",
+            "chunkIndex",
+            "rawText",
+            "tokenCount",
+            (1 - ("embedding"::vector <=> $1::vector)) AS "similarityScore"
+          FROM "document_chunks"
+          WHERE "documentId" = $2::uuid
+            AND "embedding" IS NOT NULL
+          ORDER BY "similarityScore" DESC
+          LIMIT $3;
+          `,
+          vectorStr,
+          params.documentId,
+          limit,
+        );
+      }
 
       this.logger.log(
         `[pgvector Search] Dokumen ID: ${params.documentId} - Ditemukan ${rawResults.length} chunks (Limit ${limit}).`,
@@ -139,10 +165,15 @@ export class DocumentRepository {
           .filter((w) => w.length > 2 && !stopwords.has(w));
 
         if (words.length > 0) {
-          // Cari chunk yang mengandung minimal salah satu kata kunci melalui database (case-insensitive)
+          // Cari chunk yang mengandung minimal salah satu kata kunci melalui database (case-insensitive) dengan filter distrik
           const matchedDbChunks = await this.prisma.documentChunk.findMany({
             where: {
               documentId: params.documentId,
+              ...(params.districts && params.districts.length > 0 ? {
+                detected_districts: {
+                  hasSome: params.districts,
+                },
+              } : {}),
               OR: words.map((word) => ({
                 rawText: {
                   contains: word,
@@ -242,6 +273,7 @@ export class DocumentRepository {
             rawText: item.chunkData.rawText,
             tokenCount: item.chunkData.tokenCount,
             embedding: vectorStr,
+            detected_districts: item.detectedDistricts || [],
           },
         });
 
@@ -288,6 +320,25 @@ export class DocumentRepository {
       this.logger.error(`[Delete] Gagal menghapus dokumen ${id}:`, err);
       return false;
     }
+  }
+
+  async findChunksWithEmptyDistricts() {
+    return this.prisma.documentChunk.findMany({
+      where: {
+        detected_districts: {
+          equals: [],
+        },
+      },
+    });
+  }
+
+  async updateChunkDistricts(chunkId: string, districts: string[]) {
+    return this.prisma.documentChunk.update({
+      where: { id: chunkId },
+      data: {
+        detected_districts: districts,
+      },
+    });
   }
 }
 

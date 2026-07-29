@@ -13,6 +13,9 @@ export interface IntentExecutionPayload {
 
   // Penambahan opsional draf naskah Markdown aktif dari editor visual
   currentDraft?: string;
+
+  // Penambahan opsional filter daerah spasial
+  districts?: string[];
 }
 
 export interface IIntentHandler {

@@ -159,6 +159,7 @@ export class QaIntentHandler implements IIntentHandler {
       currentDraft: payload.currentDraft,
       tone: memory.tone || 'solutif',
       targetLength: memory.targetLength || 'MEDIUM',
+      districts: payload.districts,
     });
 
     // Sisipkan sejarah obrolan dan ringkasan episodik jangka panjang ke dalam prompt payload

@@ -61,6 +61,7 @@ volumes:
     "jsonrepair": "^3.15.0",
     "mammoth": "^1.7.0",
     "pdf-parse": "^1.1.1",
+    "pdfkit": "^0.19.1",
     "reflect-metadata": "^0.2.1",
     "rxjs": "^7.8.1",
     "uuid": "^9.0.1"
@@ -73,6 +74,7 @@ volumes:
     "@types/multer": "^1.4.11",
     "@types/node": "^20.11.16",
     "@types/pdf-parse": "^1.1.4",
+    "@types/pdfkit": "^0.17.6",
     "@types/uuid": "^9.0.8",
     "prisma": "5.10.2",
     "source-map-support": "^0.5.21",
@@ -89,6 +91,7 @@ volumes:
     "removeComments": true,
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
+    "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "target": "ES2021",
     "sourceMap": true,
@@ -193,18 +196,20 @@ model DocumentMetadata {
 }
 
 model DocumentChunk {
-  id          String               @id @default(uuid()) @db.Uuid
-  documentId  String               @db.Uuid
-  chunkIndex  Int
-  rawText     String               @db.Text
-  tokenCount  Int
-  embedding   String?              @db.Text
-  createdAt   DateTime             @default(now())
+  id                 String               @id @default(uuid()) @db.Uuid
+  documentId         String               @db.Uuid
+  chunkIndex         Int
+  rawText            String               @db.Text
+  tokenCount         Int
+  embedding          String?              @db.Text
+  detected_districts String[]             @default([])
+  createdAt          DateTime             @default(now())
 
-  document    ReportDocument       @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  locations   GeospatialLocation[]
+  document           ReportDocument       @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  locations          GeospatialLocation[]
 
   @@index([documentId, chunkIndex])
+  @@index([detected_districts], type: Gin)
   @@map("document_chunks")
 }
 
@@ -1106,6 +1111,7 @@ export interface VectorSearchParams {
   limit?: number;
   similarityThreshold?: number;
   queryText?: string;
+  districts?: string[];
 }
 
 --- FILE: src\modules\ai-agent\providers\vendor-llm.adapter.ts ---
@@ -1753,6 +1759,7 @@ export interface MultimodalAssembleOptions {
   targetLength?: string;
   topK?: number;
   similarityThreshold?: number;
+  districts?: string[];
 }
 
 export interface MultimodalPromptPayload {
@@ -1816,7 +1823,7 @@ export class ContextAssemblyService {
         const totalTokens = validDocs.reduce((acc, doc) => acc + (doc.metadata?.totalTokenCount || 0), 0);
 
         if (totalTokens < DYNAMIC_CONTEXT_TOKEN_THRESHOLD) {
-          contextPayloadText = await this.executeFullDocumentStuffingStrategy(validDocs, totalTokens);
+          contextPayloadText = await this.executeFullDocumentStuffingStrategy(validDocs, totalTokens, options.districts);
         } else {
           contextPayloadText = await this.executeDynamicRagStrategy(
             validDocs,
@@ -1824,6 +1831,7 @@ export class ContextAssemblyService {
             userQuery,
             topK,
             similarityThreshold,
+            options.districts,
           );
         }
       }
@@ -1914,6 +1922,7 @@ ATURAN COLLABORATIVE CO-WRITING:
   private async executeFullDocumentStuffingStrategy(
     validDocs: any[],
     totalTokens: number,
+    districts?: string[],
   ): Promise<string> {
     this.logger.log(
       `[Hybrid Strategy A - Stuffed] Total tokens (${totalTokens}) < ${DYNAMIC_CONTEXT_TOKEN_THRESHOLD}. Menggunakan Full-Document Stuffing untuk ${validDocs.length} dokumen.`,
@@ -1922,11 +1931,19 @@ ATURAN COLLABORATIVE CO-WRITING:
     const allChunksText: string[] = [];
     validDocs.forEach((doc) => {
       if (doc.chunks && doc.chunks.length > 0) {
-        allChunksText.push(`=== DOKUMEN: ${doc.title} ===\n` + doc.chunks.map((c: any) => c.rawText).join('\n\n'));
+        let filteredChunks = doc.chunks;
+        if (districts && districts.length > 0) {
+          filteredChunks = doc.chunks.filter((c: any) =>
+            c.detected_districts && c.detected_districts.some((d: string) => districts.includes(d))
+          );
+        }
+        if (filteredChunks.length > 0) {
+          allChunksText.push(`=== DOKUMEN: ${doc.title} ===\n` + filteredChunks.map((c: any) => c.rawText).join('\n\n'));
+        }
       }
     });
 
-    return allChunksText.join('\n\n');
+    return allChunksText.length > 0 ? allChunksText.join('\n\n') : 'Konteks dokumen rujukan yang relevan dengan topik pertanyaan tidak ditemukan untuk distrik yang dipilih.';
   }
 
   private async executeDynamicRagStrategy(
@@ -1935,6 +1952,7 @@ ATURAN COLLABORATIVE CO-WRITING:
     userQuery: string,
     topK: number,
     similarityThreshold: number,
+    districts?: string[],
   ): Promise<string> {
     this.logger.log(
       `[Hybrid Strategy B - Dynamic RAG] Total tokens (${totalTokens}) >= ${DYNAMIC_CONTEXT_TOKEN_THRESHOLD}. Mengevaluasi kedekatan semantik kueri...`,
@@ -1946,6 +1964,7 @@ ATURAN COLLABORATIVE CO-WRITING:
         queryText: userQuery,
         topK,
         similarityThreshold,
+        districts,
       }).catch((err) => {
         this.logger.warn(
           `Gagal mengambil chunks semantik untuk Dokumen ID '${doc.id}': ${err.message}`,
@@ -1993,6 +2012,7 @@ export interface RetrievalSearchOptions {
   queryText: string;
   topK?: number;
   similarityThreshold?: number;
+  districts?: string[];
 }
 
 @Injectable()
@@ -2025,6 +2045,7 @@ export class VectorRetrievalService {
       limit: topK,
       similarityThreshold,
       queryText,
+      districts: options.districts,
     });
 
     this.logger.log(
@@ -2897,7 +2918,7 @@ import { TextSanitizerPipeline } from './utils/sanitizers/text-sanitizer.pipelin
     EmbeddingBatchProcessor,
   ],
 })
-export class DocumentIngestionModule {}
+export class DocumentIngestionModule { }
 
 --- FILE: src\modules\document-ingestion\controllers\document-ingestion.controller.ts ---
 import {
@@ -3018,6 +3039,16 @@ export class DocumentIngestionController {
     return {
       success: true,
       message: 'Dokumen berhasil dihapus.',
+    };
+  }
+
+  @Post('retroactive-tagging')
+  @HttpCode(HttpStatus.OK)
+  async retroactiveTagging(): Promise<{ success: boolean; data: { updatedChunksCount: number; updatedDocumentsCount: number } }> {
+    const result = await this.ingestionService.retroactiveTagging();
+    return {
+      success: true,
+      data: result,
     };
   }
 }
@@ -3404,10 +3435,12 @@ export class ExternalEmbeddingAdapter implements IEmbeddingProvider {
 
   private async callRealGeminiEmbeddingApi(apiKey: string, texts: string[]): Promise<number[][]> {
     const primaryModel = this.configService.get<string>('GEMINI_EMBEDDING_MODEL') || 'text-embedding-004';
-    const fallbackModel = 'embedding-001';
+
+    const fallbackModel = 'gemini-embedding-exp-03-07';
 
     const embedSingle = async (text: string, model: string): Promise<number[]> => {
-      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:embedContent?key=${apiKey}`;
+
+      const url = `https://generativelanguage.googleapis.com/v1/models/${model}:embedContent?key=${apiKey}`;
       const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3465,6 +3498,7 @@ export interface ChunkWithVectorInput {
   chunkData: ChunkData;
   embedding: number[];
   locations: ExtractedGeospatialData[];
+  detectedDistricts?: string[];
 }
 
 export interface CreateDocumentTransactionInput {
@@ -3521,34 +3555,59 @@ export class DocumentRepository {
     });
   }
 
-  async findSimilarChunks(params: VectorSearchParams): Promise<RetrievalResult[]> {
-    const limit = params.limit || 10;
+  async findSimilarChunks(params: VectorSearchParams): Promise<RetrievalResult[]> {    const limit = params.limit || 10;
     const threshold = params.similarityThreshold ?? 0.5;
     const vectorStr = `[${params.queryVector.join(',')}]`;
 
     const FALLBACK_SIMILARITY_SCORE = 0.5;
 
     try {
+      let rawResults: any[];
+      if (params.districts && params.districts.length > 0) {
 
-      const rawResults: any[] = await this.prisma.$queryRawUnsafe(
-        `
-        SELECT
-          "id" AS "chunkId",
-          "documentId",
-          "chunkIndex",
-          "rawText",
-          "tokenCount",
-          (1 - ("embedding"::vector <=> $1::vector)) AS "similarityScore"
-        FROM "document_chunks"
-        WHERE "documentId" = $2::uuid
-          AND "embedding" IS NOT NULL
-        ORDER BY "similarityScore" DESC
-        LIMIT $3;
-        `,
-        vectorStr,
-        params.documentId,
-        limit,
-      );
+        rawResults = await this.prisma.$queryRawUnsafe(
+          `
+          SELECT
+            "id" AS "chunkId",
+            "documentId",
+            "chunkIndex",
+            "rawText",
+            "tokenCount",
+            (1 - ("embedding"::vector <=> $1::vector)) AS "similarityScore"
+          FROM "document_chunks"
+          WHERE "documentId" = $2::uuid
+            AND "embedding" IS NOT NULL
+            AND "detected_districts" && $4::text[]
+          ORDER BY "similarityScore" DESC
+          LIMIT $3;
+          `,
+          vectorStr,
+          params.documentId,
+          limit,
+          params.districts,
+        );
+      } else {
+
+        rawResults = await this.prisma.$queryRawUnsafe(
+          `
+          SELECT
+            "id" AS "chunkId",
+            "documentId",
+            "chunkIndex",
+            "rawText",
+            "tokenCount",
+            (1 - ("embedding"::vector <=> $1::vector)) AS "similarityScore"
+          FROM "document_chunks"
+          WHERE "documentId" = $2::uuid
+            AND "embedding" IS NOT NULL
+          ORDER BY "similarityScore" DESC
+          LIMIT $3;
+          `,
+          vectorStr,
+          params.documentId,
+          limit,
+        );
+      }
 
       this.logger.log(
         `[pgvector Search] Dokumen ID: ${params.documentId} - Ditemukan ${rawResults.length} chunks (Limit ${limit}).`,
@@ -3590,6 +3649,11 @@ export class DocumentRepository {
           const matchedDbChunks = await this.prisma.documentChunk.findMany({
             where: {
               documentId: params.documentId,
+              ...(params.districts && params.districts.length > 0 ? {
+                detected_districts: {
+                  hasSome: params.districts,
+                },
+              } : {}),
               OR: words.map((word) => ({
                 rawText: {
                   contains: word,
@@ -3684,6 +3748,7 @@ export class DocumentRepository {
             rawText: item.chunkData.rawText,
             tokenCount: item.chunkData.tokenCount,
             embedding: vectorStr,
+            detected_districts: item.detectedDistricts || [],
           },
         });
 
@@ -3728,6 +3793,25 @@ export class DocumentRepository {
       this.logger.error(`[Delete] Gagal menghapus dokumen ${id}:`, err);
       return false;
     }
+  }
+
+  async findChunksWithEmptyDistricts() {
+    return this.prisma.documentChunk.findMany({
+      where: {
+        detected_districts: {
+          equals: [],
+        },
+      },
+    });
+  }
+
+  async updateChunkDistricts(chunkId: string, districts: string[]) {
+    return this.prisma.documentChunk.update({
+      where: { id: chunkId },
+      data: {
+        detected_districts: districts,
+      },
+    });
   }
 }
 
@@ -3890,11 +3974,13 @@ export class DocumentIngestionService {
     const chunkItems = chunksWithEmbeddings.map((item) => {
       totalTokenCount += item.chunkData.tokenCount;
       const locations = this.geospatialParser.extractGeospatialLocations(item.chunkData.rawText);
+      const detectedDistricts = this.geospatialParser.detectDistricts(item.chunkData.rawText);
       totalLocationsCount += locations.length;
       return {
         chunkData: item.chunkData,
         embedding: item.embedding,
         locations,
+        detectedDistricts,
       };
     });
 
@@ -4027,6 +4113,35 @@ export class DocumentIngestionService {
       fileName: `${doc.title}${path.extname(doc.fileUrl)}`,
     };
   }
+
+  async retroactiveTagging(): Promise<{ updatedChunksCount: number; updatedDocumentsCount: number }> {
+    this.logger.log('[Retroactive Tagging] Memulai proses sinkronisasi riwayat dokumen...');
+
+    const chunks = await this.repository.findChunksWithEmptyDistricts();
+
+    if (chunks.length === 0) {
+      this.logger.log('[Retroactive Tagging] Semua dokumen sudah tersinkronisasi. 0 chunk diproses.');
+      return { updatedChunksCount: 0, updatedDocumentsCount: 0 };
+    }
+
+    const docIds = new Set<string>();
+    let updatedChunksCount = 0;
+
+    for (const chunk of chunks) {
+      const detected = this.geospatialParser.detectDistricts(chunk.rawText);
+      if (detected.length > 0) {
+        await this.repository.updateChunkDistricts(chunk.id, detected);
+        docIds.add(chunk.documentId);
+        updatedChunksCount++;
+      }
+    }
+
+    this.logger.log(`[Retroactive Tagging] Sinkronisasi selesai. Berhasil memperbarui ${updatedChunksCount} chunk di ${docIds.size} dokumen.`);
+    return {
+      updatedChunksCount,
+      updatedDocumentsCount: docIds.size,
+    };
+  }
 }
 
 --- FILE: src\modules\document-ingestion\services\geospatial-parser.service.ts ---
@@ -4042,6 +4157,27 @@ export interface ExtractedGeospatialData {
 @Injectable()
 export class GeospatialParserService {
   private readonly logger = new Logger(GeospatialParserService.name);
+
+  private readonly MIMIKA_DISTRICTS = [
+    'Mimika Baru',
+    'Kuala Kencana',
+    'Tembagapura',
+    'Wania',
+    'Iwaka',
+    'Kwamki Narama',
+    'Mimika Timur',
+    'Mimika Tengah',
+    'Mimika Barat',
+    'Agimuga',
+    'Jila',
+    'Jita',
+    'Mimika Timur Jauh',
+    'Mimika Barat Jauh',
+    'Mimika Barat Tengah',
+    'Amar',
+    'Hoya',
+    'Alama',
+  ];
 
   private readonly coordRegex =
     /(?:lat(?:itude)?|lintang)?\s*[:=]?\s*(-?\d{1,2}\.\d+)\s*,\s*(?:long(?:itude)?|bujur)?\s*[:=]?\s*(-?\d{1,3}\.\d+)/gi;
@@ -4069,6 +4205,28 @@ export class GeospatialParserService {
     }
 
     return results;
+  }
+
+  detectDistricts(text: string): string[] {
+    if (!text) return [];
+
+    const detected: string[] = [];
+    const lowerText = text.toLowerCase();
+
+    for (const district of this.MIMIKA_DISTRICTS) {
+
+      const escapedPattern = district
+        .replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&')
+        .replace(/\s+/g, '\\s+');
+
+      const regex = new RegExp(`\\b${escapedPattern}\\b`, 'i');
+
+      if (regex.test(lowerText)) {
+        detected.push(district);
+      }
+    }
+
+    return detected;
   }
 }
 
@@ -4249,7 +4407,8 @@ export class TextExtractorService {
 
   private async extractPdf(buffer: Buffer): Promise<ExtractedDocumentContent> {
     try {
-      const data = await pdfParse(buffer);
+      const parse = (pdfParse as any).default || pdfParse;
+      const data = await parse(buffer);
       const text = data.text ? data.text.trim() : '';
 
       if (!text || text.length === 0) {
@@ -4600,6 +4759,11 @@ export class ExtendedInteractRequestDto {
   @IsOptional()
   @IsString()
   targetLength?: string;
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  districts?: string[];
 }
 
 @Controller('assistant')
@@ -4664,7 +4828,13 @@ export class AssistantController {
     if (dto.tone || dto.targetLength) {
       await this.memoryService.updateSessionMetadata(dto.sessionId, dto.tone, dto.targetLength);
     }
-    const result = await this.routerService.dispatch(dto.sessionId, dto.query, dto.attachments, dto.currentDraft);
+    const result = await this.routerService.dispatch(
+      dto.sessionId,
+      dto.query,
+      dto.attachments,
+      dto.currentDraft,
+      dto.districts,
+    );
     return {
       success: true,
       data: result,
@@ -5024,6 +5194,7 @@ export class QaIntentHandler implements IIntentHandler {
       currentDraft: payload.currentDraft,
       tone: memory.tone || 'solutif',
       targetLength: memory.targetLength || 'MEDIUM',
+      districts: payload.districts,
     });
 
     promptPayload.messages.splice(2, 0, ...historyMessages);
@@ -5167,6 +5338,8 @@ export interface IntentExecutionPayload {
   }>;
 
   currentDraft?: string;
+
+  districts?: string[];
 }
 
 export interface IIntentHandler {
@@ -5562,7 +5735,7 @@ export interface GenerateArticleOptions {
       fakta: string;
       sitasiAsli: string;
     }>;
-    kesimpulanRingkas?: string;
+    kesiaxialRingkas?: string;
   };
   parentSessionId?: string;
 }
@@ -5658,9 +5831,9 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
 
     const systemPrompt = `Anda adalah Penulis Artikel Utama & Analis Kebijakan BRIDA Kabupaten Mimika.
 ${validDocIds.length > 0
-  ? 'Tugas Anda: Susun artikel publikasi berbasis data aktual dari DOKUMEN ACUAN yang diberikan.'
-  : 'Tugas Anda: Susun artikel publikasi berdasarkan instruksi dan pengetahuan internal Anda (Mode Kreasi Bebas).'
-}
+        ? 'Tugas Anda: Susun artikel publikasi berbasis data aktual dari DOKUMEN ACUAN yang diberikan.'
+        : 'Tugas Anda: Susun artikel publikasi berdasarkan instruksi dan pengetahuan internal Anda (Mode Kreasi Bebas).'
+      }
 
 PANDUAN PENULISAN:
 - Judul Artikel: "${articleTitle}"
@@ -5668,6 +5841,12 @@ PANDUAN PENULISAN:
 - ${lengthGuidance}
 - Gunakan struktur narasi jurnalistik publik yang kuat (Judul, Subjudul, Analisis Faktual, Solusi Rekomendasi).
 ${manifestPromptSection}
+
+ATURAN FORMATTING MUTLAK (COMMONMARK COMPLIANCE - ZERO RANDOM HTML):
+1. DILARANG KERAS menghasilkan atau menyisipkan tag HTML pemformatan visual mentah kustom (seperti <p style="...">, <font>, <span style="...">, dll.) ke dalam isi naskah artikel.
+2. Semua bentuk daftar/poin wajib ditulis menggunakan simbol list standar CommonMark: gunakan tanda minus (-) atau bintang (*) diikuti oleh spasi (misalnya: - Poin Rekomendasi). Jangan gunakan tag HTML <ul> atau <li> secara manual.
+3. Penulisan judul/subjudul bab wajib menggunakan sintaks header ATX standar (# untuk Judul Utama, ## untuk Sub-judul, ### untuk Sub-sub-judul).
+4. Hindari manipulasi layout seperti menyematkan properti alignment teks visual secara inline dalam HTML. Biarkan representasi struktur dokumen murni menggunakan sintaks Markdown bersih.
 `;
 
     const userPromptMessage = validDocIds.length > 0
@@ -5803,7 +5982,14 @@ ${manifestPromptSection}
     }));
 
     const systemPrompt = `Anda adalah Asisten Penulis & Editor Artikel BRIDA Kabupaten Mimika.
-Perbarui / revisi draf artikel berdasarkan instruksi revisi terbaru dari pengguna. Pertahankan gaya bahasa ${session.tone || 'SOLUTIF'}.`;
+Perbarui / revisi draf naskah artikel berdasarkan instruksi revisi terbaru dari pengguna. Pertahankan gaya bahasa ${session.tone || 'SOLUTIF'}.
+
+ATURAN FORMATTING MUTLAK (COMMONMARK COMPLIANCE - ZERO RANDOM HTML):
+1. DILARANG KERAS menghasilkan atau menyisipkan tag HTML kustom visual (seperti <p style="...">, <font>, dll.) ke dalam teks naskah revisi Anda.
+2. Semua daftar wajib menggunakan simbol list standar CommonMark: gunakan tanda minus (-) atau bintang (*) diikuti oleh spasi (misalnya: - Poin Evaluasi). Jangan gunakan tag HTML <ul> atau <li> secara manual.
+3. Penulisan judul/subjudul wajib menggunakan sintaks header ATX standar (#, ##, ###).
+4. Hasil revisi naskah harus dikembalikan sebagai Markdown bersih, terstruktur, dan memiliki keterbacaan tinggi.
+`;
 
     const rawConversationTexts = conversationMessages.map((m: any) => m.content).concat([systemPrompt, userInstruction]);
     this.tokenEstimator.enforceBudgetCircuitBreaker(rawConversationTexts, this.MAX_DRAFTING_TOKEN_BUDGET);
@@ -5917,7 +6103,10 @@ const ARTICLE_OUTPUT_SCHEMA = {
   properties: {
     judulUsulan: { type: 'string' },
     ringkasan: { type: 'string' },
-    fullText: { type: 'string' },
+    fullText: {
+      type: 'string',
+      description: 'Isi lengkap naskah artikel dalam format CommonMark Markdown bersih (tanpa tag HTML kustom visual).'
+    },
   },
   required: ['fullText'],
 };
@@ -6270,6 +6459,7 @@ export class IntentRouterService {
     query: string,
     attachments?: Array<{ fileId: string; classification?: 'BASELINE' | 'REALIZATION' | 'GENERAL_REFERENCE' }>,
     currentDraft?: string,
+    districts?: string[],
   ): Promise<any> {
     if (!query || query.trim().length === 0) {
       throw new BadRequestException('Pesan atau kueri pengguna tidak boleh kosong.');
@@ -6288,6 +6478,7 @@ export class IntentRouterService {
       query: trimmedQuery,
       attachments,
       currentDraft,
+      districts,
     };
 
     let defaultHandler: IIntentHandler = this.qaHandler;

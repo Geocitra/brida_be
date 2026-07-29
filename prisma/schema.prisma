@@ -84,18 +84,20 @@ model DocumentMetadata {
 }
 
 model DocumentChunk {
-  id          String               @id @default(uuid()) @db.Uuid
-  documentId  String               @db.Uuid
-  chunkIndex  Int
-  rawText     String               @db.Text
-  tokenCount  Int
-  embedding   String?              @db.Text
-  createdAt   DateTime             @default(now())
+  id                 String               @id @default(uuid()) @db.Uuid
+  documentId         String               @db.Uuid
+  chunkIndex         Int
+  rawText            String               @db.Text
+  tokenCount         Int
+  embedding          String?              @db.Text
+  detected_districts String[]             @default([])
+  createdAt          DateTime             @default(now())
 
-  document    ReportDocument       @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  locations   GeospatialLocation[]
+  document           ReportDocument       @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  locations          GeospatialLocation[]
 
   @@index([documentId, chunkIndex])
+  @@index([detected_districts], type: Gin)
   @@map("document_chunks")
 }
 

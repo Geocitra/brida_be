@@ -28,6 +28,7 @@ export class IntentRouterService {
     query: string,
     attachments?: Array<{ fileId: string; classification?: 'BASELINE' | 'REALIZATION' | 'GENERAL_REFERENCE' }>,
     currentDraft?: string,
+    districts?: string[],
   ): Promise<any> {
     if (!query || query.trim().length === 0) {
       throw new BadRequestException('Pesan atau kueri pengguna tidak boleh kosong.');
@@ -47,6 +48,7 @@ export class IntentRouterService {
       query: trimmedQuery,
       attachments,   // Injeksi ID berkas transien & screenshots baru [5]
       currentDraft,  // Injeksi draf naskah Markdown aktif dari editor visual [5]
+      districts,     // Injeksi target filter daerah spasial baru
     };
 
     let defaultHandler: IIntentHandler = this.qaHandler;
