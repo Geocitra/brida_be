@@ -54,12 +54,17 @@ volumes:
     "@nestjs/common": "^10.3.0",
     "@nestjs/config": "^3.1.1",
     "@nestjs/core": "^10.3.0",
+    "@nestjs/jwt": "^11.0.2",
+    "@nestjs/passport": "^11.0.5",
     "@nestjs/platform-express": "^10.3.0",
     "@prisma/client": "^5.10.2",
+    "bcrypt": "^6.0.0",
     "class-transformer": "^0.5.1",
     "class-validator": "^0.14.1",
     "jsonrepair": "^3.15.0",
     "mammoth": "^1.7.0",
+    "passport": "^0.7.0",
+    "passport-jwt": "^4.0.1",
     "pdf-parse": "^1.1.1",
     "pdfkit": "^0.19.1",
     "reflect-metadata": "^0.2.1",
@@ -70,9 +75,12 @@ volumes:
     "@nestjs/cli": "^10.3.0",
     "@nestjs/schematics": "^10.1.0",
     "@nestjs/testing": "^10.3.0",
+    "@types/bcrypt": "^6.0.0",
     "@types/express": "^4.17.21",
+    "@types/jest": "^30.0.0",
     "@types/multer": "^1.4.11",
     "@types/node": "^20.11.16",
+    "@types/passport-jwt": "^4.0.1",
     "@types/pdf-parse": "^1.1.4",
     "@types/pdfkit": "^0.17.6",
     "@types/uuid": "^9.0.8",
@@ -80,6 +88,9 @@ volumes:
     "source-map-support": "^0.5.21",
     "ts-node": "^10.9.2",
     "typescript": "^5.3.3"
+  },
+  "prisma": {
+    "seed": "ts-node prisma/seed.ts"
   }
 }
 
@@ -409,6 +420,61 @@ model DeviationAnalysis {
   @@map("deviation_analyses")
 }
 
+model ExecutiveUser {
+  id           String   @id @default(uuid()) @db.Uuid
+  nip          String   @unique
+  fullName     String   @map("full_name")
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("executive_users")
+}
+
+--- FILE: prisma\seed.ts ---
+import { PrismaClient } from '@prisma/client';
+import * as bcrypt from 'bcrypt';
+
+const prisma = new PrismaClient();
+
+async function main() {
+  const defaultNip = '197804122003121002';
+  const defaultName = 'Darius Sabon Rain, S.E., M.Ec.Dev.';
+  const rawPassword = 'password123';
+
+  console.log('[Seeder] Memulai proses seeding akun Kepala BRIDA...');
+
+  const saltRounds = 10;
+  const passwordHash = await bcrypt.hash(rawPassword, saltRounds);
+
+  const executive = await prisma.executiveUser.upsert({
+    where: { nip: defaultNip },
+    update: {
+      fullName: defaultName,
+      passwordHash,
+    },
+    create: {
+      nip: defaultNip,
+      fullName: defaultName,
+      passwordHash,
+    },
+  });
+
+  console.log(`[Seeder Success] Akun Kepala BRIDA berhasil diamankan ke database:`);
+  console.log(` - NIP      : ${executive.nip}`);
+  console.log(` - Nama     : ${executive.fullName}`);
+  console.log(` - Password : ${rawPassword} (Gunakan ini untuk login)`);
+}
+
+main()
+  .catch((e) => {
+    console.error('[Seeder Error] Terjadi kesalahan saat seeding:', e);
+    process.exit(1);
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });
+
 --- FILE: prisma\migrations\20260727041023_26juli\migration.sql ---
 -- CreateEnum
 CREATE TYPE "DocumentStatus" AS ENUM ('PENDING', 'PROCESSING', 'READY', 'FAILED');
@@ -720,12 +786,24 @@ ALTER TABLE "document_chunks" ADD COLUMN     "detected_districts" TEXT[] DEFAULT
 -- CreateIndex
 CREATE INDEX "document_chunks_detected_districts_idx" ON "document_chunks" USING GIN ("detected_districts");
 
---- FILE: prisma\migrations\20260729030508_merge\migration.sql ---
+--- FILE: prisma\migrations\20260730044711_add_executive_user\migration.sql ---
 -- AlterTable
-ALTER TABLE "document_chunks" ADD COLUMN     "detected_districts" TEXT[] DEFAULT ARRAY[]::TEXT[];
+ALTER TABLE "document_chunks" ADD COLUMN     "district_density" JSONB DEFAULT '{}';
+
+-- CreateTable
+CREATE TABLE "executive_users" (
+    "id" UUID NOT NULL,
+    "nip" TEXT NOT NULL,
+    "full_name" TEXT NOT NULL,
+    "password_hash" TEXT NOT NULL,
+    "created_at" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updated_at" TIMESTAMP(3) NOT NULL,
+
+    CONSTRAINT "executive_users_pkey" PRIMARY KEY ("id")
+);
 
 -- CreateIndex
-CREATE INDEX "document_chunks_detected_districts_idx" ON "document_chunks" USING GIN ("detected_districts");
+CREATE UNIQUE INDEX "executive_users_nip_key" ON "executive_users"("nip");
 
 --- FILE: src\app.module.ts ---
 import { Module } from '@nestjs/common';
@@ -736,6 +814,7 @@ import { AiAgentModule } from './modules/ai-agent/ai-agent.module';
 import { InteractiveAssistantModule } from './modules/interactive-assistant/interactive-assistant.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { AnalysisModule } from './modules/analysis/analysis.module';
+import { AuthModule } from './modules/auth/auth.module';
 
 @Module({
   imports: [
@@ -748,6 +827,7 @@ import { AnalysisModule } from './modules/analysis/analysis.module';
     InteractiveAssistantModule,
     ReportsModule,
     AnalysisModule,
+    AuthModule,
   ],
 })
 export class AppModule {}
@@ -2558,13 +2638,7 @@ export class AnalysisController {
       const aiTokens = aiLogsSum._sum?.tokenCount || 0;
       const reportTokens = reportsSum._sum?.tokenCount || 0;
       const totalTokens = aiTokens + reportTokens;
-
-      const TOKEN_PRICE_IDR = 0.26;
-      const MAX_MONTHLY_PAGU_IDR = 500000;
-      const estimatedCostIdr = Math.round(totalTokens * TOKEN_PRICE_IDR);
-      const quotaPercentage = parseFloat(
-        Math.min(100, (estimatedCostIdr / MAX_MONTHLY_PAGU_IDR) * 100).toFixed(1)
-      );
+      const tokenBudget = this.mathService.calculateTokenBudget(totalTokens);
 
       const recentChats = recentChatsRaw.map((session) => {
         const lastMsgRaw = session.messages[0]?.content || '';
@@ -2631,13 +2705,7 @@ export class AnalysisController {
       return {
         success: true,
         data: {
-          tokenBudget: {
-            totalTokens,
-            estimatedCostIdr,
-            maxMonthlyPaguIdr: MAX_MONTHLY_PAGU_IDR,
-            quotaPercentage,
-            paguStatus: quotaPercentage >= 80 ? 'WARNING' : quotaPercentage >= 60 ? 'ALERT' : 'SAFE'
-          },
+          tokenBudget,
           recentChats,
           recentArticles
         }
@@ -3045,7 +3113,9 @@ export interface MathDeviationResult {
 
 export interface TokenBudgetResult {
   totalTokens: number;
+  remainingTokens: number;
   estimatedCostIdr: number;
+  remainingCostIdr: number;
   maxMonthlyPaguIdr: number;
   quotaPercentage: number;
   paguStatus: 'SAFE' | 'ALERT' | 'WARNING';
@@ -3054,9 +3124,11 @@ export interface TokenBudgetResult {
 @Injectable()
 export class AnalysisMathService {
 
-  private readonly TOKEN_PRICE_IDR = 0.26;
+  private readonly TOKEN_PRICE_USD = 0.00000024;
 
-  private readonly MAX_MONTHLY_PAGU_IDR = 500000;
+  private readonly TOTAL_CREDIT_USD = 5.00;
+
+  private readonly KURS_USD_TO_IDR = 18076;
 
   calculate(
     target: number,
@@ -3093,10 +3165,16 @@ export class AnalysisMathService {
   }
 
   calculateTokenBudget(totalTokens: number): TokenBudgetResult {
-    const estimatedCostIdr = Math.round(totalTokens * this.TOKEN_PRICE_IDR);
+    const estimatedCostUsd = totalTokens * this.TOKEN_PRICE_USD;
+    const estimatedCostIdr = Math.round(estimatedCostUsd * this.KURS_USD_TO_IDR);
+    const maxMonthlyPaguIdr = Math.round(this.TOTAL_CREDIT_USD * this.KURS_USD_TO_IDR);
+
+    const remainingCostUsd = Math.max(0, this.TOTAL_CREDIT_USD - estimatedCostUsd);
+    const remainingCostIdr = Math.round(remainingCostUsd * this.KURS_USD_TO_IDR);
+    const remainingTokens = Math.max(0, Math.floor(remainingCostUsd / this.TOKEN_PRICE_USD));
 
     const quotaPercentage = parseFloat(
-      Math.min(100, (estimatedCostIdr / this.MAX_MONTHLY_PAGU_IDR) * 100).toFixed(1)
+      Math.min(100, (estimatedCostUsd / this.TOTAL_CREDIT_USD) * 100).toFixed(1)
     );
 
     let paguStatus: 'SAFE' | 'ALERT' | 'WARNING' = 'SAFE';
@@ -3108,10 +3186,146 @@ export class AnalysisMathService {
 
     return {
       totalTokens,
+      remainingTokens,
       estimatedCostIdr,
-      maxMonthlyPaguIdr: this.MAX_MONTHLY_PAGU_IDR,
+      remainingCostIdr,
+      maxMonthlyPaguIdr,
       quotaPercentage,
       paguStatus,
+    };
+  }
+}
+
+--- FILE: src\modules\auth\auth.module.ts ---
+import { Module } from '@nestjs/common';
+import { JwtModule } from '@nestjs/jwt';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { AuthController } from './controllers/auth.controller';
+import { AuthService } from './services/auth.service';
+
+@Module({
+  imports: [
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      inject: [ConfigService],
+      useFactory: (configService: ConfigService) => ({
+        secret: configService.get<string>('JWT_SECRET') || 'brida_super_secret_key_2026',
+        signOptions: { expiresIn: '7d' },
+      }),
+    }),
+  ],
+  controllers: [AuthController],
+  providers: [AuthService],
+  exports: [AuthService],
+})
+export class AuthModule { }
+
+--- FILE: src\modules\auth\controllers\auth.controller.ts ---
+import { Controller, Post, Body, HttpCode, HttpStatus } from '@nestjs/common';
+import { AuthService } from '../services/auth.service';
+import { LoginDto } from '../dtos/login.dto';
+
+@Controller('auth')
+export class AuthController {
+  constructor(private readonly authService: AuthService) {}
+
+  @Post('login')
+  @HttpCode(HttpStatus.OK)
+  async login(@Body() dto: LoginDto) {
+    const result = await this.authService.login(dto);
+    return {
+      success: true,
+      data: result,
+    };
+  }
+}
+
+--- FILE: src\modules\auth\dtos\login.dto.ts ---
+import { IsString, IsNotEmpty, MinLength } from 'class-validator';
+
+export class LoginDto {
+  @IsString()
+  @IsNotEmpty({ message: 'NIP / Identitas tidak boleh kosong' })
+  nip!: string;
+
+  @IsString()
+  @IsNotEmpty({ message: 'Kata sandi tidak boleh kosong' })
+  @MinLength(6, { message: 'Kata sandi minimal 6 karakter' })
+  password!: string;
+}
+
+--- FILE: src\modules\auth\services\auth.service.ts ---
+import { Injectable, Logger, UnauthorizedException, OnModuleInit } from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
+import { PrismaService } from '../../../common/prisma/prisma.service';
+import { LoginDto } from '../dtos/login.dto';
+import * as bcrypt from 'bcrypt';
+
+@Injectable( )
+export class AuthService implements OnModuleInit {
+  private readonly logger = new Logger(AuthService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly jwtService: JwtService,
+  ) {}
+
+  async onModuleInit() {
+    try {
+      const defaultNip = '197804122003121002';
+      const existingUser = await this.prisma.executiveUser.findUnique({
+        where: { nip: defaultNip },
+      });
+
+      if (!existingUser) {
+        const saltRounds = 10;
+        const defaultPassword = 'password123';
+        const passwordHash = await bcrypt.hash(defaultPassword, saltRounds);
+
+        await this.prisma.executiveUser.create({
+          data: {
+            nip: defaultNip,
+            fullName: 'Darius Sabon Rain, S.E., M.Ec.Dev.',
+            passwordHash,
+          },
+        });
+        this.logger.log(`[Auth Seeder] Akun default Kepala BRIDA (NIP: ${defaultNip}) berhasil diinisialisasi.`);
+      }
+    } catch (err: any) {
+      this.logger.error(`[Auth Seeder Error] Gagal melakukan seeding akun default: ${err.message}`);
+    }
+  }
+
+  async login(dto: LoginDto): Promise<{ accessToken: string; executive: { nip: string; fullName: string } }> {
+    const { nip, password } = dto;
+    const cleanNip = nip.replace(/\s+/g, '').trim();
+
+    const user = await this.prisma.executiveUser.findUnique({
+      where: { nip: cleanNip },
+    });
+
+    if (!user) {
+      this.logger.warn(`[Login Failed] NIP tidak ditemukan: ${nip}`);
+      throw new UnauthorizedException('NIP atau Kata Sandi Otorisasi salah.');
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
+    if (!isPasswordValid) {
+      this.logger.warn(`[Login Failed] Password salah untuk NIP: ${nip}`);
+      throw new UnauthorizedException('NIP atau Kata Sandi Otorisasi salah.');
+    }
+
+    const payload = { sub: user.id, nip: user.nip, fullName: user.fullName };
+    const accessToken = this.jwtService.sign(payload);
+
+    this.logger.log(`[Login Success] Kepala BRIDA (${user.fullName}) berhasil masuk sistem.`);
+
+    return {
+      accessToken,
+      executive: {
+        nip: user.nip,
+        fullName: user.fullName,
+      },
     };
   }
 }
