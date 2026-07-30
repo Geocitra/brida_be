@@ -116,14 +116,7 @@ export class AnalysisController {
       const aiTokens = aiLogsSum._sum?.tokenCount || 0;
       const reportTokens = reportsSum._sum?.tokenCount || 0;
       const totalTokens = aiTokens + reportTokens;
-
-      // Tarif Biaya Komputasi Terpusat: IDR 0.26 per Token
-      const TOKEN_PRICE_IDR = 0.26;
-      const MAX_MONTHLY_PAGU_IDR = 500000;
-      const estimatedCostIdr = Math.round(totalTokens * TOKEN_PRICE_IDR);
-      const quotaPercentage = parseFloat(
-        Math.min(100, (estimatedCostIdr / MAX_MONTHLY_PAGU_IDR) * 100).toFixed(1)
-      );
+      const tokenBudget = this.mathService.calculateTokenBudget(totalTokens);
 
       // 3. Mapping Riwayat Obrolan Aktif (AI Chat)
       const recentChats = recentChatsRaw.map((session) => {
@@ -192,13 +185,7 @@ export class AnalysisController {
       return {
         success: true,
         data: {
-          tokenBudget: {
-            totalTokens,
-            estimatedCostIdr,
-            maxMonthlyPaguIdr: MAX_MONTHLY_PAGU_IDR,
-            quotaPercentage,
-            paguStatus: quotaPercentage >= 80 ? 'WARNING' : quotaPercentage >= 60 ? 'ALERT' : 'SAFE'
-          },
+          tokenBudget,
           recentChats,
           recentArticles
         }

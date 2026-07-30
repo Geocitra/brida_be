@@ -14,7 +14,9 @@ export interface MathDeviationResult {
 
 export interface TokenBudgetResult {
   totalTokens: number;
+  remainingTokens: number;
   estimatedCostIdr: number;
+  remainingCostIdr: number;
   maxMonthlyPaguIdr: number;
   quotaPercentage: number;
   paguStatus: 'SAFE' | 'ALERT' | 'WARNING';
@@ -22,11 +24,14 @@ export interface TokenBudgetResult {
 
 @Injectable()
 export class AnalysisMathService {
-  // Tarif Biaya Komputasi Terpusat: IDR 0.26 per Token (Gabungan Input & Output)
-  private readonly TOKEN_PRICE_IDR = 0.26;
+  // Tarif Biaya Komputasi Terpusat (GPT-4o-mini Weighted Average): USD 0.00000024 per Token
+  private readonly TOKEN_PRICE_USD = 0.00000024;
 
-  // Batas Pagu Anggaran AI Bulanan Kepala BRIDA: Rp500.000,-
-  private readonly MAX_MONTHLY_PAGU_IDR = 500000;
+  // Batas Pagu Anggaran AI Bulanan Kepala BRIDA (Prepaid Credit $5): USD 5.00
+  private readonly TOTAL_CREDIT_USD = 5.00;
+
+  // Kurs Terkini dari User: Rp18.076,- per USD
+  private readonly KURS_USD_TO_IDR = 18076;
 
   /**
    * Deterministic Math Calculation for Target vs Realization Deviation
@@ -73,11 +78,17 @@ export class AnalysisMathService {
    * @param totalTokens Jumlah akumulasi token (input + output) dari aktivitas AI
    */
   calculateTokenBudget(totalTokens: number): TokenBudgetResult {
-    const estimatedCostIdr = Math.round(totalTokens * this.TOKEN_PRICE_IDR);
+    const estimatedCostUsd = totalTokens * this.TOKEN_PRICE_USD;
+    const estimatedCostIdr = Math.round(estimatedCostUsd * this.KURS_USD_TO_IDR);
+    const maxMonthlyPaguIdr = Math.round(this.TOTAL_CREDIT_USD * this.KURS_USD_TO_IDR);
+    
+    const remainingCostUsd = Math.max(0, this.TOTAL_CREDIT_USD - estimatedCostUsd);
+    const remainingCostIdr = Math.round(remainingCostUsd * this.KURS_USD_TO_IDR);
+    const remainingTokens = Math.max(0, Math.floor(remainingCostUsd / this.TOKEN_PRICE_USD));
 
     // Hitung persentase pemakaian terhadap pagu bulanan (dibatasi maksimum 100%)
     const quotaPercentage = parseFloat(
-      Math.min(100, (estimatedCostIdr / this.MAX_MONTHLY_PAGU_IDR) * 100).toFixed(1)
+      Math.min(100, (estimatedCostUsd / this.TOTAL_CREDIT_USD) * 100).toFixed(1)
     );
 
     // Penentuan ambang batas kepatuhan anggaran (Pagu Status Guard)
@@ -90,8 +101,10 @@ export class AnalysisMathService {
 
     return {
       totalTokens,
+      remainingTokens,
       estimatedCostIdr,
-      maxMonthlyPaguIdr: this.MAX_MONTHLY_PAGU_IDR,
+      remainingCostIdr,
+      maxMonthlyPaguIdr,
       quotaPercentage,
       paguStatus,
     };

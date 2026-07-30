@@ -720,6 +720,13 @@ ALTER TABLE "document_chunks" ADD COLUMN     "detected_districts" TEXT[] DEFAULT
 -- CreateIndex
 CREATE INDEX "document_chunks_detected_districts_idx" ON "document_chunks" USING GIN ("detected_districts");
 
+--- FILE: prisma\migrations\20260729030508_merge\migration.sql ---
+-- AlterTable
+ALTER TABLE "document_chunks" ADD COLUMN     "detected_districts" TEXT[] DEFAULT ARRAY[]::TEXT[];
+
+-- CreateIndex
+CREATE INDEX "document_chunks_detected_districts_idx" ON "document_chunks" USING GIN ("detected_districts");
+
 --- FILE: src\app.module.ts ---
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
@@ -2440,11 +2447,12 @@ import { DocumentIngestionModule } from '../document-ingestion/document-ingestio
 export class AnalysisModule {}
 
 --- FILE: src\modules\analysis\controllers\analysis.controller.ts ---
-import { Controller, Post, Get, Body, HttpCode, HttpStatus } from '@nestjs/common';
+import { Controller, Post, Get, Body, HttpCode, HttpStatus, Logger } from '@nestjs/common';
 import { IsString, IsNumber, IsOptional, IsArray } from 'class-validator';
 import { AnalysisMathService } from '../services/analysis-math.service';
 import { AnalysisCausalService } from '../services/analysis-causal.service';
 import { PrismaService } from '../../../common/prisma/prisma.service';
+import { SessionType } from '@prisma/client';
 
 export class CompareAnalysisDto {
   @IsString()
@@ -2484,11 +2492,161 @@ export class CompareAnalysisDto {
 
 @Controller('analysis')
 export class AnalysisController {
+  private readonly logger = new Logger(AnalysisController.name);
+
   constructor(
     private readonly mathService: AnalysisMathService,
     private readonly causalService: AnalysisCausalService,
     private readonly prisma: PrismaService,
   ) { }
+
+  @Get('dashboard-meta')
+  async getDashboardMetadata() {
+    try {
+      this.logger.log('[AnalysisController] Mengagregasi metadata statistik dashboard eksekutif...');
+
+      const [
+        aiLogsSum,
+        reportsSum,
+        recentChatsRaw,
+        recentArticlesRaw
+      ] = await Promise.all([
+        this.prisma.aiAnalysisLog.aggregate({
+          _sum: { tokenCount: true }
+        }),
+        this.prisma.generatedReport.aggregate({
+          _sum: { tokenCount: true }
+        }),
+        this.prisma.chatSession.findMany({
+          where: { sessionType: SessionType.QA_CHAT },
+          orderBy: { updatedAt: 'desc' },
+          take: 5,
+          include: {
+            document: { select: { id: true, title: true } },
+            sources: {
+              include: {
+                document: { select: { id: true, title: true } }
+              }
+            },
+            messages: {
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+              select: { content: true }
+            }
+          }
+        }),
+        this.prisma.chatSession.findMany({
+          where: { sessionType: SessionType.ARTICLE_GENERATOR },
+          orderBy: { updatedAt: 'desc' },
+          take: 5,
+          include: {
+            document: { select: { id: true, title: true } },
+            sources: {
+              include: {
+                document: { select: { id: true, title: true } }
+              }
+            },
+            messages: {
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+              select: { content: true }
+            }
+          }
+        })
+      ]);
+
+      const aiTokens = aiLogsSum._sum?.tokenCount || 0;
+      const reportTokens = reportsSum._sum?.tokenCount || 0;
+      const totalTokens = aiTokens + reportTokens;
+
+      const TOKEN_PRICE_IDR = 0.26;
+      const MAX_MONTHLY_PAGU_IDR = 500000;
+      const estimatedCostIdr = Math.round(totalTokens * TOKEN_PRICE_IDR);
+      const quotaPercentage = parseFloat(
+        Math.min(100, (estimatedCostIdr / MAX_MONTHLY_PAGU_IDR) * 100).toFixed(1)
+      );
+
+      const recentChats = recentChatsRaw.map((session) => {
+        const lastMsgRaw = session.messages[0]?.content || '';
+        let lastMessageText = 'Belum ada pesan.';
+
+        if (lastMsgRaw) {
+          try {
+            const parsed = JSON.parse(lastMsgRaw);
+            if (parsed && typeof parsed === 'object') {
+              lastMessageText = parsed.answer || parsed.fullArticleText || lastMsgRaw;
+            }
+          } catch {
+            lastMessageText = lastMsgRaw;
+          }
+        }
+
+        const sourceTitles = session.sources.map((s) => s.document.title);
+        if (session.document && !sourceTitles.includes(session.document.title)) {
+          sourceTitles.unshift(session.document.title);
+        }
+
+        return {
+          id: session.id,
+          title: session.title,
+          lastMessage: lastMessageText,
+          updatedAt: session.updatedAt,
+          sourcesCount: sourceTitles.length,
+          sources: sourceTitles,
+        };
+      });
+
+      const recentArticles = recentArticlesRaw.map((session) => {
+        const lastMsgRaw = session.messages[0]?.content || '';
+        let snippetText = session.currentDraft || '';
+
+        if (!snippetText && lastMsgRaw) {
+          try {
+            const parsed = JSON.parse(lastMsgRaw);
+            if (parsed && typeof parsed === 'object') {
+              snippetText = parsed.updatedArticle?.draftMarkdown || parsed.fullArticleText || lastMsgRaw;
+            }
+          } catch {
+            snippetText = lastMsgRaw;
+          }
+        }
+
+        const sourceTitles = session.sources.map((s) => s.document.title);
+        if (session.document && !sourceTitles.includes(session.document.title)) {
+          sourceTitles.unshift(session.document.title);
+        }
+
+        return {
+          id: session.id,
+          title: session.articleTitle || session.title,
+          snippet: snippetText.slice(0, 150) + (snippetText.length > 150 ? '...' : ''),
+          updatedAt: session.updatedAt,
+          sourcesCount: sourceTitles.length,
+          sources: sourceTitles,
+          tone: session.tone,
+          targetLength: session.targetLength,
+        };
+      });
+
+      return {
+        success: true,
+        data: {
+          tokenBudget: {
+            totalTokens,
+            estimatedCostIdr,
+            maxMonthlyPaguIdr: MAX_MONTHLY_PAGU_IDR,
+            quotaPercentage,
+            paguStatus: quotaPercentage >= 80 ? 'WARNING' : quotaPercentage >= 60 ? 'ALERT' : 'SAFE'
+          },
+          recentChats,
+          recentArticles
+        }
+      };
+    } catch (err: any) {
+      this.logger.error(`[Dashboard Meta Aggregation Failed]: ${err.message}`, err.stack);
+      throw err;
+    }
+  }
 
   @Get('indicators')
   async getIndicatorMatrix() {
@@ -2569,7 +2727,6 @@ export class AnalysisController {
   @Post('compare')
   @HttpCode(HttpStatus.OK)
   async compareDeviation(@Body() dto: CompareAnalysisDto) {
-
     const mathResult = this.mathService.calculate(
       dto.targetValue,
       dto.realizationValue,
@@ -2587,7 +2744,6 @@ export class AnalysisController {
       dto.documentIds &&
       dto.documentIds.length > 0
     ) {
-
       const docs = await this.prisma.reportDocument.findMany({
         where: {
           id: { in: dto.documentIds },
@@ -2602,7 +2758,6 @@ export class AnalysisController {
         if (foundBaseline) {
           resolvedBaselineId = foundBaseline.id;
         } else if (docs.length > 0) {
-
           resolvedBaselineId = docs[0].id;
         }
       }
@@ -2612,7 +2767,6 @@ export class AnalysisController {
         if (foundRealization) {
           resolvedRealizationId = foundRealization.id;
         } else if (docs.length > 0) {
-
           resolvedRealizationId = docs[1]?.id || docs[0].id;
         }
       }
@@ -2889,8 +3043,20 @@ export interface MathDeviationResult {
   urgencyStatus: 'NORMAL' | 'WASPADA' | 'KRITIS';
 }
 
+export interface TokenBudgetResult {
+  totalTokens: number;
+  estimatedCostIdr: number;
+  maxMonthlyPaguIdr: number;
+  quotaPercentage: number;
+  paguStatus: 'SAFE' | 'ALERT' | 'WARNING';
+}
+
 @Injectable()
 export class AnalysisMathService {
+
+  private readonly TOKEN_PRICE_IDR = 0.26;
+
+  private readonly MAX_MONTHLY_PAGU_IDR = 500000;
 
   calculate(
     target: number,
@@ -2923,6 +3089,29 @@ export class AnalysisMathService {
       deviationValue,
       deviationPercentage,
       urgencyStatus,
+    };
+  }
+
+  calculateTokenBudget(totalTokens: number): TokenBudgetResult {
+    const estimatedCostIdr = Math.round(totalTokens * this.TOKEN_PRICE_IDR);
+
+    const quotaPercentage = parseFloat(
+      Math.min(100, (estimatedCostIdr / this.MAX_MONTHLY_PAGU_IDR) * 100).toFixed(1)
+    );
+
+    let paguStatus: 'SAFE' | 'ALERT' | 'WARNING' = 'SAFE';
+    if (quotaPercentage >= 80) {
+      paguStatus = 'WARNING';
+    } else if (quotaPercentage >= 60) {
+      paguStatus = 'ALERT';
+    }
+
+    return {
+      totalTokens,
+      estimatedCostIdr,
+      maxMonthlyPaguIdr: this.MAX_MONTHLY_PAGU_IDR,
+      quotaPercentage,
+      paguStatus,
     };
   }
 }
@@ -7074,7 +7263,7 @@ export class ReportsService {
     private readonly llmAdapter: VendorLlmAdapter,
     private readonly mathService: AnalysisMathService,
     private readonly causalService: AnalysisCausalService,
-  ) {}
+  ) { }
 
   public generateDocumentIdsHash(documentIds: string[]): string {
     if (!documentIds || documentIds.length === 0) {
@@ -7168,16 +7357,19 @@ export class ReportsService {
     const systemPrompt = `Anda adalah Asisten Analisis Kebijakan Utama untuk Bupati Mimika & Kepala BRIDA.
 Tugas Anda: Sintesiskan seluruh informasi faktual dari DOKUMEN ACUAN yang diberikan menjadi Laporan Eksekutif Resmi Nota Dinas Bupati.
 
-PANDUAN STRUKTUR & BIAYA OUTPUT JSON ESEKUTIF PRESISI:
-1. "title": Judul laporan resmi eksekutif (Maksimal 15 kata).
-2. "executiveSummary": Ringkasan eksekutif padat, faktual, dan solutif (Maksimal 200 - 250 kata).
-3. "urgency": "TINGGI" | "SEDANG" | "RENDAH".
-4. "recipient": "Bupati Mimika".
-5. "sender": "Kepala Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika".
-6. "period": Periode data (e.g. "Triwulan I - IV 2024 / Realtime Analysis").
-7. "deviations": TEPAT 3 objek deviasi paling kritis [{ "title": string, "baseline": string, "realization": string, "deviationText": string, "severityColor": string, "causes": string }] (di mana "causes" maksimal 2 kalimat).
-8. "nationalPolicyImpact": Object { "policyName": string, "simulationResults": string[] } (maksimal 2 poin ringkas).
-9. "actionPriorities": TEPAT 3 poin instruksi / Action Items prioritas utama (masing-masing 1 kalimat).
+PANDUAN OUTPUT JSON ESEKUTIF PRESISI:
+1. Kembalikan HANYA objek JSON valid sesuai skema.
+2. "title": Judul laporan resmi eksekutif (maksimal 15 kata).
+3. "executiveSummary": Ringkasan eksekutif padat, faktual, dan solutif. Nilai ini WAJIB berupa teks Markdown yang rapi, bukan plain text atau JSON mentah. Gunakan format seperti ##, **teks tebal**, bullet list, dan singkatan ringkas. Jangan gunakan blok kode atau literal JSON.
+4. "urgency": "TINGGI" | "SEDANG" | "RENDAH".
+5. "recipient": "Bupati Mimika".
+6. "sender": "Kepala Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika".
+7. "period": Periode data (contoh: "Triwulan I - IV 2024 / Realtime Analysis").
+8. "deviations": TEPAT 3 objek deviasi paling kritis. Setiap objek wajib punya field "title", "baseline", "realization", "deviationText", "severityColor", dan "causes". Nilai "causes" dan "deviationText" WAJIB berupa paragraf atau bullet Markdown singkat yang rapi.
+9. "nationalPolicyImpact": Object { "policyName": string, "simulationResults": string[] }. Nilai array WAJIB berupa poin Markdown singkat, bukan JSON mentah.
+10. "actionPriorities": TEPAT 3 poin instruksi / Action Items prioritas utama. Setiap elemen WAJIB berupa kalimat atau bullet Markdown yang rapi.
+11. JANGAN menampilkan token sitasi mentah seperti [uuid:1], [docId:chunkIndex], atau pola [abc][def] di dalam isi field string. Jika ingin menyebut sumber, gunakan frasa alami seperti "berdasarkan dokumen acuan" tanpa tanda kurung siku.
+12. Hindari output seperti {"executiveSummary":"..."} di dalam string. Hindari raw JSON atau markdown fence pada isi field string.
 `;
 
     const userPrompt = `Dokumen Acuan (${documentsWithText.length} dokumen):\n${documentsAssembled(documentsWithText)}\n\nKonteks Detail Full-Text:\n${assembledContext}`;
@@ -7234,8 +7426,8 @@ PANDUAN STRUKTUR & BIAYA OUTPUT JSON ESEKUTIF PRESISI:
                 math.urgencyStatus === 'KRITIS'
                   ? 'text-red-700 font-bold'
                   : math.urgencyStatus === 'WASPADA'
-                  ? 'text-amber-700 font-bold'
-                  : 'text-emerald-700 font-bold',
+                    ? 'text-amber-700 font-bold'
+                    : 'text-emerald-700 font-bold',
               causes,
             };
           }
@@ -7358,26 +7550,86 @@ const REPORT_OUTPUT_SCHEMA = {
 };
 
 function normalizeReportPayload(raw: any, docs: any[]): any {
+  const fallbackExecutiveSummary = `## Ringkasan Eksekutif\n\nSintesis terintegrasi berdasarkan ${docs.length} dokumen acuan menunjukkan bahwa target indikator makro daerah memerlukan percepatan dan koordinasi lintas instansi.`;
+
   return {
-    title: raw.title || `Nota Dinas Hasil Analisis Multidokumen (${docs.length} Dokumen Acuan)`,
-    urgency: raw.urgency || 'TINGGI',
-    recipient: raw.recipient || 'Bupati Mimika',
-    sender: raw.sender || 'Kepala Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika',
-    period: raw.period || 'Hasil Analisis Terintegrasi 2024',
+    title: normalizeMarkdownField(raw?.title, `Nota Dinas Hasil Analisis Multidokumen (${docs.length} Dokumen Acuan)`),
+    urgency: normalizeMarkdownField(raw?.urgency, 'TINGGI'),
+    recipient: normalizeMarkdownField(raw?.recipient, 'Bupati Mimika'),
+    sender: normalizeMarkdownField(raw?.sender, 'Kepala Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika'),
+    period: normalizeMarkdownField(raw?.period, 'Hasil Analisis Terintegrasi 2024'),
     date: new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' }),
-    executiveSummary:
-      raw.executiveSummary ||
-      `Sintesis terintegrasi berdasarkan ${docs.length} dokumen acuan menunjukkan bahwa target indikator makro daerah memerlukan percepatan dan koordinasi lintas instansi.`,
-    deviations: Array.isArray(raw.deviations) ? raw.deviations : [],
-    nationalPolicyImpact: raw.nationalPolicyImpact || {
-      policyName: 'Kebijakan Strategi Nasional Peningkatan Pelayanan Publik & Riset Daerah',
-      simulationResults: [
+    executiveSummary: normalizeMarkdownField(raw?.executiveSummary, fallbackExecutiveSummary),
+    deviations: Array.isArray(raw?.deviations)
+      ? raw.deviations.map((dev: any) => ({
+        title: normalizeMarkdownField(dev?.title, 'Indikator Prioritas'),
+        baseline: normalizeMarkdownField(dev?.baseline, '-'),
+        realization: normalizeMarkdownField(dev?.realization, '-'),
+        deviationText: normalizeMarkdownField(dev?.deviationText, 'Tinjau kembali data realisasi.'),
+        severityColor: normalizeMarkdownField(dev?.severityColor, 'text-red-700 font-bold'),
+        causes: normalizeMarkdownField(dev?.causes, 'Penyebab utama belum teridentifikasi.'),
+      }))
+      : [],
+    nationalPolicyImpact: {
+      policyName: normalizeMarkdownField(raw?.nationalPolicyImpact?.policyName, 'Kebijakan Strategi Nasional Peningkatan Pelayanan Publik & Riset Daerah'),
+      simulationResults: normalizeMarkdownList(raw?.nationalPolicyImpact?.simulationResults, [
         'Proyeksi peningkatan skor efisiensi riset daerah.',
         'Perlu tindak lanjut supervisi berkala pada proyek fisik berisiko deviasi.',
-      ],
+      ]),
     },
-    actionPriorities: Array.isArray(raw.actionPriorities) ? raw.actionPriorities : [],
+    actionPriorities: normalizeMarkdownList(raw?.actionPriorities, []),
   };
+}
+
+function normalizeMarkdownField(value: unknown, fallback: string): string {
+  if (typeof value === 'string') {
+    let content = value.trim();
+    if (!content) return fallback;
+
+    content = content.replace(/^```(?:json|markdown|md)?\s*/i, '').replace(/\s*```$/i, '');
+
+    if ((content.startsWith('{') || content.startsWith('[')) && content.includes(':')) {
+      try {
+        const parsed = JSON.parse(content);
+        if (typeof parsed === 'string') return normalizeMarkdownField(parsed, fallback);
+        if (parsed && typeof parsed === 'object') {
+          const candidate =
+            (parsed as any).markdown ||
+            (parsed as any).content ||
+            (parsed as any).text ||
+            (parsed as any).summary ||
+            (parsed as any).executiveSummary;
+          if (typeof candidate === 'string' && candidate.trim()) return normalizeMarkdownField(candidate, fallback);
+        }
+      } catch {
+
+      }
+    }
+
+    return stripCitationTokens(content);
+  }
+
+  return stripCitationTokens(fallback);
+}
+
+function stripCitationTokens(value: string): string {
+  if (!value) return value;
+
+  return value
+    .replace(/\[(?:[a-f0-9-]{8,}|doc(?:[-_a-z0-9]+)?):\d+\]/gi, '')
+    .replace(/\[(?:[a-f0-9-]{8,}|doc(?:[-_a-z0-9]+)?):\d+\]\[(?:[a-f0-9-]{8,}|doc(?:[-_a-z0-9]+)?):\d+\]/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function normalizeMarkdownList(value: unknown, fallback: string[]): string[] {
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => normalizeMarkdownField(item, ''))
+      .filter((item) => item && item.trim().length > 0);
+  }
+
+  return fallback;
 }
 
 function sanitizeDocument(doc: any): any {
@@ -7386,11 +7638,11 @@ function sanitizeDocument(doc: any): any {
     ...doc,
     metadata: doc.metadata
       ? {
-          ...doc.metadata,
-          fileSizeBytes: doc.metadata.fileSizeBytes
-            ? String(doc.metadata.fileSizeBytes)
-            : '0',
-        }
+        ...doc.metadata,
+        fileSizeBytes: doc.metadata.fileSizeBytes
+          ? String(doc.metadata.fileSizeBytes)
+          : '0',
+      }
       : null,
   };
 }
