@@ -296,3 +296,14 @@ model DeviationAnalysis {
 
   @@map("deviation_analyses")
 }
+
+model ExecutiveUser {
+  id           String   @id @default(uuid()) @db.Uuid
+  nip          String   @unique
+  fullName     String   @map("full_name")
+  passwordHash String   @map("password_hash")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@map("executive_users")
+}

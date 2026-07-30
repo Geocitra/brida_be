@@ -6,6 +6,7 @@ import { AiAgentModule } from './modules/ai-agent/ai-agent.module';
 import { InteractiveAssistantModule } from './modules/interactive-assistant/interactive-assistant.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { AnalysisModule } from './modules/analysis/analysis.module';
+import { AuthModule } from './modules/auth/auth.module';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { AnalysisModule } from './modules/analysis/analysis.module';
     InteractiveAssistantModule,
     ReportsModule,
     AnalysisModule,
+    AuthModule,
   ],
 })
 export class AppModule {}
