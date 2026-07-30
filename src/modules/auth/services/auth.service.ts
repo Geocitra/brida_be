@@ -16,7 +16,7 @@ export class AuthService implements OnModuleInit {
   // Seeding otomatis akun Kepala BRIDA jika belum ada di database
   async onModuleInit() {
     try {
-      const defaultNip = '19780412 200312 1 002';
+      const defaultNip = '197804122003121002';
       const existingUser = await this.prisma.executiveUser.findUnique({
         where: { nip: defaultNip },
       });
@@ -42,9 +42,10 @@ export class AuthService implements OnModuleInit {
 
   async login(dto: LoginDto): Promise<{ accessToken: string; executive: { nip: string; fullName: string } }> {
     const { nip, password } = dto;
+    const cleanNip = nip.replace(/\s+/g, '').trim();
 
     const user = await this.prisma.executiveUser.findUnique({
-      where: { nip: nip.trim() },
+      where: { nip: cleanNip },
     });
 
     if (!user) {
