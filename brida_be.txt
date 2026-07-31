@@ -3227,6 +3227,8 @@ export interface TokenBudgetResult {
   remainingTokens: number;
   estimatedCostIdr: number;
   remainingCostIdr: number;
+  remainingCostUsd: number;
+  totalCreditUsd: number;
   maxMonthlyPaguIdr: number;
   quotaPercentage: number;
   paguStatus: 'SAFE' | 'ALERT' | 'WARNING';
@@ -3297,9 +3299,9 @@ export class AnalysisMathService {
     );
 
     let paguStatus: 'SAFE' | 'ALERT' | 'WARNING' = 'SAFE';
-    if (quotaPercentage >= 80) {
+    if (quotaPercentage >= 85) {
       paguStatus = 'WARNING';
-    } else if (quotaPercentage >= 60) {
+    } else if (quotaPercentage >= 50) {
       paguStatus = 'ALERT';
     }
 
@@ -3308,6 +3310,8 @@ export class AnalysisMathService {
       remainingTokens,
       estimatedCostIdr,
       remainingCostIdr,
+      remainingCostUsd: parseFloat(remainingCostUsd.toFixed(2)),
+      totalCreditUsd,
       maxMonthlyPaguIdr,
       quotaPercentage,
       paguStatus,
@@ -4785,7 +4789,7 @@ export class DocumentIngestionService {
 
   async listAllDocuments(): Promise<DocumentResponseDto[]> {
     const docs = await this.repository.findAll();
-    return docs.map((doc) => ({
+    return docs.map((doc: (typeof docs)[number]) => ({
       id: doc.id,
       title: doc.title,
       fileUrl: doc.fileUrl,
@@ -4845,7 +4849,7 @@ export class DocumentIngestionService {
       chunkCount: doc.chunks ? doc.chunks.length : 0,
       extractedLocationsCount: locationCount,
       chunks: doc.chunks
-        ? doc.chunks.map((c) => ({
+        ? doc.chunks.map((c: (typeof doc.chunks)[number]) => ({
           chunkIndex: c.chunkIndex,
           rawText: c.rawText,
           tokenCount: c.tokenCount,
@@ -6638,7 +6642,7 @@ export class ArticleGeneratorService {
       const doc = await this.documentRepository.findById(docId);
       if (doc) {
         sourceDocs.push(doc);
-        const text = doc.chunks ? doc.chunks.map((c) => c.rawText).join('\n\n') : '';
+        const text = doc.chunks ? doc.chunks.map((c: (typeof doc.chunks)[number]) => c.rawText).join('\n\n') : '';
         const category = doc.metadata?.category || 'Umum';
 
         const sourceUrl = (doc.metadata as any)?.sourceUrl;
@@ -6701,6 +6705,7 @@ ATURAN FORMATTING MUTLAK (COMMONMARK COMPLIANCE - ZERO RANDOM HTML):
 2. Semua bentuk daftar/poin wajib ditulis menggunakan simbol list standar CommonMark: gunakan tanda minus (-) atau bintang (*) diikuti oleh spasi (misalnya: - Poin Rekomendasi). Jangan gunakan tag HTML <ul> atau <li> secara manual.
 3. Penulisan judul/subjudul bab wajib menggunakan sintaks header ATX standar (# untuk Judul Utama, ## untuk Sub-judul, ### untuk Sub-sub-judul).
 4. Hindari manipulasi layout seperti menyematkan properti alignment teks visual secara inline dalam HTML. Biarkan representasi struktur dokumen murni menggunakan sintaks Markdown bersih.
+5. DILARANG keras menyertakan awalan label seperti "Artikel Strategis:", "Laporan:", "Draft:", "Draf:", atau sejenisnya sebelum Judul Utama. Tuliskan Judul Utama naskah (Header H1 '#') secara langsung, bersih, dan profesional.
 `;
 
     const userPromptMessage = validDocIds.length > 0
@@ -6733,9 +6738,11 @@ ATURAN FORMATTING MUTLAK (COMMONMARK COMPLIANCE - ZERO RANDOM HTML):
       );
 
       fullArticleText = llmResult.fullText || formatArticleFromLlm(llmResult, articleTitle);
+      fullArticleText = cleanArticleTitlePrefix(fullArticleText);
     } catch (err: any) {
       this.logger.warn(`[Article LLM Fallback] Gagal memanggil API: ${err.message}. Menggunakan sintesis fallback.`);
       fullArticleText = createFallbackArticleText(articleTitle, sourceDocs, tone, targetLength);
+      fullArticleText = cleanArticleTitlePrefix(fullArticleText);
     }
 
     await this.chatRepository.addMessage({
@@ -6847,6 +6854,7 @@ ATURAN FORMATTING MUTLAK (COMMONMARK COMPLIANCE - ZERO RANDOM HTML):
 2. Semua daftar wajib menggunakan simbol list standar CommonMark: gunakan tanda minus (-) atau bintang (*) diikuti oleh spasi (misalnya: - Poin Evaluasi). Jangan gunakan tag HTML <ul> atau <li> secara manual.
 3. Penulisan judul/subjudul wajib menggunakan sintaks header ATX standar (#, ##, ###).
 4. Hasil revisi naskah harus dikembalikan sebagai Markdown bersih, terstruktur, dan memiliki keterbacaan tinggi.
+5. DILARANG keras menyertakan awalan label seperti "Artikel Strategis:", "Laporan:", "Draft:", "Draf:", atau sejenisnya sebelum Judul Utama. Tuliskan Judul Utama naskah secara langsung, bersih, dan profesional.
 `;
 
     const rawConversationTexts = conversationMessages.map((m: any) => m.content).concat([systemPrompt, userInstruction]);
@@ -6869,6 +6877,7 @@ ATURAN FORMATTING MUTLAK (COMMONMARK COMPLIANCE - ZERO RANDOM HTML):
       );
 
       revisedArticleText = llmResult.fullText || formatArticleFromLlm(llmResult, session.articleTitle || session.title);
+      revisedArticleText = cleanArticleTitlePrefix(revisedArticleText);
     } catch (err: any) {
       revisedArticleText = `[Hasil Revisi Draf Artikel - ${new Date().toLocaleTimeString('id-ID')}]\n\n${userInstruction}\n\n` + (conversationMessages[conversationMessages.length - 1]?.content || '');
     }
@@ -7022,6 +7031,15 @@ Dalam konteks tata kelola pemerintahan yang responsif, sintesis data menunjukkan
 ---
 *Dikeluarkan oleh BRIDA SMART Analysis &bull; Pemerintah Kabupaten Mimika*
 `.trim();
+}
+
+function cleanArticleTitlePrefix(text: string): string {
+  if (!text) return '';
+
+  let cleaned = text.replace(/^(#\s*)(?:Artikel\s+Strategis|Laporan\s+Strategis|Draft|Draf|Analisis\s+Strategis|Rilis\s+Pers):\s*/i, '$1');
+
+  cleaned = cleaned.replace(/^(?:Artikel\s+Strategis|Laporan\s+Strategis|Draft|Draf|Analisis\s+Strategis|Rilis\s+Pers):\s*/i, '');
+  return cleaned;
 }
 
 --- FILE: src\modules\interactive-assistant\services\chat-memory.service.ts ---
