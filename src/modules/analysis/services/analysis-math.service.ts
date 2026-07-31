@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 export interface MathDeviationResult {
   indicatorName: string;
@@ -24,11 +25,10 @@ export interface TokenBudgetResult {
 
 @Injectable()
 export class AnalysisMathService {
+  constructor(private readonly configService: ConfigService) {}
+
   // Tarif Biaya Komputasi Terpusat (GPT-4o-mini Weighted Average): USD 0.00000024 per Token
   private readonly TOKEN_PRICE_USD = 0.00000024;
-
-  // Batas Pagu Anggaran AI Bulanan Kepala BRIDA (Prepaid Credit $5): USD 5.00
-  private readonly TOTAL_CREDIT_USD = 5.00;
 
   // Kurs Terkini dari User: Rp18.076,- per USD
   private readonly KURS_USD_TO_IDR = 18076;
@@ -78,17 +78,28 @@ export class AnalysisMathService {
    * @param totalTokens Jumlah akumulasi token (input + output) dari aktivitas AI
    */
   calculateTokenBudget(totalTokens: number): TokenBudgetResult {
+    const totalCreditUsd = parseFloat(
+      this.configService.get<string>('OPENAI_TOTAL_CREDIT_USD') || '5.00'
+    );
+    const preUsedCreditUsd = parseFloat(
+      this.configService.get<string>('OPENAI_PRE_USED_CREDIT_USD') || '0.38'
+    );
+
     const estimatedCostUsd = totalTokens * this.TOKEN_PRICE_USD;
     const estimatedCostIdr = Math.round(estimatedCostUsd * this.KURS_USD_TO_IDR);
-    const maxMonthlyPaguIdr = Math.round(this.TOTAL_CREDIT_USD * this.KURS_USD_TO_IDR);
     
-    const remainingCostUsd = Math.max(0, this.TOTAL_CREDIT_USD - estimatedCostUsd);
+    // Total Kredit yang dibeli (pagu max)
+    const maxMonthlyPaguIdr = Math.round(totalCreditUsd * this.KURS_USD_TO_IDR);
+    
+    // Sisa saldo & token
+    const remainingCostUsd = Math.max(0, totalCreditUsd - preUsedCreditUsd - estimatedCostUsd);
     const remainingCostIdr = Math.round(remainingCostUsd * this.KURS_USD_TO_IDR);
     const remainingTokens = Math.max(0, Math.floor(remainingCostUsd / this.TOKEN_PRICE_USD));
 
     // Hitung persentase pemakaian terhadap pagu bulanan (dibatasi maksimum 100%)
+    const totalUsedUsd = preUsedCreditUsd + estimatedCostUsd;
     const quotaPercentage = parseFloat(
-      Math.min(100, (estimatedCostUsd / this.TOTAL_CREDIT_USD) * 100).toFixed(1)
+      Math.min(100, (totalUsedUsd / totalCreditUsd) * 100).toFixed(1)
     );
 
     // Penentuan ambang batas kepatuhan anggaran (Pagu Status Guard)

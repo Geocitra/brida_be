@@ -65,6 +65,7 @@ export class AnalysisController {
       const [
         aiLogsSum,
         reportsSum,
+        chatMessagesSum,
         recentChatsRaw,
         recentArticlesRaw
       ] = await Promise.all([
@@ -72,6 +73,9 @@ export class AnalysisController {
           _sum: { tokenCount: true }
         }),
         this.prisma.generatedReport.aggregate({
+          _sum: { tokenCount: true }
+        }),
+        this.prisma.chatMessage.aggregate({
           _sum: { tokenCount: true }
         }),
         this.prisma.chatSession.findMany({
@@ -115,7 +119,8 @@ export class AnalysisController {
       // 2. Penghitungan Anggaran Token Sesuai Aturan Sistem (Information Expert)
       const aiTokens = aiLogsSum._sum?.tokenCount || 0;
       const reportTokens = reportsSum._sum?.tokenCount || 0;
-      const totalTokens = aiTokens + reportTokens;
+      const chatTokens = chatMessagesSum._sum?.tokenCount || 0;
+      const totalTokens = aiTokens + reportTokens + chatTokens;
       const tokenBudget = this.mathService.calculateTokenBudget(totalTokens);
 
       // 3. Mapping Riwayat Obrolan Aktif (AI Chat)
