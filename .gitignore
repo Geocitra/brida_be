@@ -32,6 +32,7 @@ Thumbs.db
 # Database local artifacts
 /*.db
 /*.db-journal
+!Dockerfile.db
 
 bum.py
 new.py
