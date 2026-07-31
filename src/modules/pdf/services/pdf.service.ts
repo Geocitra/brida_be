@@ -1,12 +1,13 @@
-import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { join } from 'path';
 import { existsSync, readFileSync } from 'fs';
 import * as puppeteer from 'puppeteer-core';
 import { GeneratePdfDto } from '../dto/generate-pdf.dto';
 
 @Injectable()
-export class PdfService {
+export class PdfService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PdfService.name);
+  private browser: puppeteer.Browser | null = null;
 
   // Pemetaan font ke berkas TTF lokal di assets/fonts
   private readonly fontFileMap = {
@@ -35,6 +36,71 @@ export class PdfService {
       boldItalic: 'arialbi.ttf',
     },
   };
+
+  async onModuleInit() {
+    this.logger.log('Menginisialisasi PdfService - Menyiapkan Singleton Browser...');
+    try {
+      await this.getBrowser();
+      this.logger.log('Singleton Browser berhasil di-boot dan stand-by.');
+    } catch (err: any) {
+      this.logger.warn(`Gagal meluncurkan browser saat startup: ${err.message}. Browser akan diluncurkan sesuai kebutuhan (lazy-load).`);
+    }
+  }
+
+  async onModuleDestroy() {
+    this.logger.log('Menutup PdfService - Menghentikan Singleton Browser...');
+    if (this.browser) {
+      try {
+        await this.browser.close();
+      } catch (err) {
+        this.logger.error('Error saat menutup browser:', err);
+      }
+      this.browser = null;
+    }
+  }
+
+  /**
+   * Mengembalikan instance browser yang sedang berjalan, atau meluncurkan yang baru jika belum ada/bermasalah.
+   */
+  private async getBrowser(): Promise<puppeteer.Browser> {
+    if (this.browser && this.browser.connected) {
+      return this.browser;
+    }
+
+    // Jika instance tidak aktif atau terputus, pastikan kita close dulu
+    if (this.browser) {
+      try {
+        await this.browser.close();
+      } catch {}
+      this.browser = null;
+    }
+
+    const executablePath = this.getExecutablePath();
+    this.logger.log(`Meluncurkan instance Chromium baru menggunakan: ${executablePath}`);
+
+    this.browser = await puppeteer.launch({
+      executablePath,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--disable-gpu',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process', // Hemat RAM di VPS
+        '--disable-extensions',
+      ],
+    });
+
+    // Auto-recovery jika browser crash/close tak terduga
+    this.browser.on('disconnected', () => {
+      this.logger.warn('Koneksi Chromium terputus. Instance akan di-reset.');
+      this.browser = null;
+    });
+
+    return this.browser;
+  }
 
   /**
    * Menemukan executable Chromium/Chrome secara dinamis berdasarkan OS
@@ -76,7 +142,7 @@ export class PdfService {
   }
 
   /**
-   * Core generator PDF menggunakan Puppeteer
+   * Core generator PDF menggunakan Puppeteer dengan Singleton Browser
    */
   async generatePdf(dto: GeneratePdfDto): Promise<Buffer> {
     const { htmlContent, fontFamily, fontSize, lineSpacing, marginCm } = dto;
@@ -84,7 +150,7 @@ export class PdfService {
 
     this.logger.log(`Memulai proses pencetakan PDF dengan font ${fontFamily}, size ${fontSize}pt, margin ${marginCm}cm`);
 
-    let browser: puppeteer.Browser | null = null;
+    let page: puppeteer.Page | null = null;
 
     try {
       // 1. Load Base64 untuk 4 varian font terpilih
@@ -171,23 +237,12 @@ export class PdfService {
         </html>
       `;
 
-      // 3. Launch Puppeteer
-      const executablePath = this.getExecutablePath();
-      this.logger.debug(`Meluncurkan Puppeteer menggunakan executable: ${executablePath}`);
-
-      browser = await puppeteer.launch({
-        executablePath,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--disable-gpu',
-        ],
-      });
-
-      const page = await browser.newPage();
-      await page.setContent(fullHtmlContent, { waitUntil: 'networkidle0' as any });
+      // 3. Dapatkan instance browser singleton dan buka halaman baru
+      const browser = await this.getBrowser();
+      page = await browser.newPage();
+      
+      // Gunakan domcontentloaded untuk efisiensi RAM/waktu proses di VPS
+      await page.setContent(fullHtmlContent, { waitUntil: 'domcontentloaded' as any });
 
       // 4. Generate PDF buffer
       const marginPoints = `${marginCm}cm`;
@@ -217,8 +272,12 @@ export class PdfService {
       const errMsg = error instanceof Error ? error.message : String(error);
       throw new InternalServerErrorException(`Failed to generate PDF: ${errMsg}`);
     } finally {
-      if (browser) {
-        await browser.close();
+      if (page) {
+        try {
+          await page.close();
+        } catch (err) {
+          this.logger.error('Gagal menutup tab halaman:', err);
+        }
       }
     }
   }
