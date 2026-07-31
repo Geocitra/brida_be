@@ -79,7 +79,7 @@ export class ArticleGeneratorService {
       });
     }
 
-    // 2. Ekstraksi konteks dari seluruh dokumen acuan terpilih
+    // 2. Ekstraksi konteks dari seluruh dokumen acuan terpilih (Hibrida Lokal & Eksternal)
     const docTexts: string[] = [];
     const sourceDocs: any[] = [];
 
@@ -87,8 +87,16 @@ export class ArticleGeneratorService {
       const doc = await this.documentRepository.findById(docId);
       if (doc) {
         sourceDocs.push(doc);
-        const text = doc.chunks ? doc.chunks.map((c) => c.rawText).join('\n\n') : '';
-        docTexts.push(`=== DOKUMEN ACUAN: ${doc.title} (${doc.metadata?.category || 'Umum'}) ===\n${text.slice(0, 10000)}`);
+        const text = doc.chunks ? doc.chunks.map((c: (typeof doc.chunks)[number]) => c.rawText).join('\n\n') : '';
+        const category = doc.metadata?.category || 'Umum';
+
+        // Asersi tipe dinamis yang aman untuk menghindari kegagalan kompilasi jika Prisma client belum di-generate ulang
+        const sourceUrl = (doc.metadata as any)?.sourceUrl;
+        const sourceUrlText = sourceUrl ? `\nSumber Tautan Web: ${sourceUrl}` : '';
+
+        docTexts.push(
+          `=== DOKUMEN ACUAN: ${doc.title} (Kategori: ${category})${sourceUrlText} ===\n${text.slice(0, 10000)}`
+        );
       }
     }
 
@@ -101,7 +109,7 @@ export class ArticleGeneratorService {
       lengthGuidance = 'Target Panjang Teks: Minimal 1500 kata (Mendalam, Analisis Kebijakan Komprehensif)';
     }
 
-    // Bangun seksi prompt berbasis manifest diskusi (SSM) jika ada [Two-Pass Pipeline]
+    // Bangun seksi prompt berbasis Of-Record manifest diskusi (SSM) jika ada [Two-Pass Pipeline]
     let manifestPromptSection = '';
     if (synthesizedManifest) {
       const argumenList = Array.isArray(synthesizedManifest.argumenKunci)
@@ -145,6 +153,7 @@ ATURAN FORMATTING MUTLAK (COMMONMARK COMPLIANCE - ZERO RANDOM HTML):
 2. Semua bentuk daftar/poin wajib ditulis menggunakan simbol list standar CommonMark: gunakan tanda minus (-) atau bintang (*) diikuti oleh spasi (misalnya: - Poin Rekomendasi). Jangan gunakan tag HTML <ul> atau <li> secara manual.
 3. Penulisan judul/subjudul bab wajib menggunakan sintaks header ATX standar (# untuk Judul Utama, ## untuk Sub-judul, ### untuk Sub-sub-judul).
 4. Hindari manipulasi layout seperti menyematkan properti alignment teks visual secara inline dalam HTML. Biarkan representasi struktur dokumen murni menggunakan sintaks Markdown bersih.
+5. DILARANG keras menyertakan awalan label seperti "Artikel Strategis:", "Laporan:", "Draft:", "Draf:", atau sejenisnya sebelum Judul Utama. Tuliskan Judul Utama naskah (Header H1 '#') secara langsung, bersih, dan profesional.
 `;
 
     const userPromptMessage = validDocIds.length > 0
@@ -180,9 +189,11 @@ ATURAN FORMATTING MUTLAK (COMMONMARK COMPLIANCE - ZERO RANDOM HTML):
       );
 
       fullArticleText = llmResult.fullText || formatArticleFromLlm(llmResult, articleTitle);
+      fullArticleText = cleanArticleTitlePrefix(fullArticleText);
     } catch (err: any) {
       this.logger.warn(`[Article LLM Fallback] Gagal memanggil API: ${err.message}. Menggunakan sintesis fallback.`);
       fullArticleText = createFallbackArticleText(articleTitle, sourceDocs, tone, targetLength);
+      fullArticleText = cleanArticleTitlePrefix(fullArticleText);
     }
 
     // Rekam draf artikel yang berhasil disintesis asisten ke DB
@@ -309,6 +320,7 @@ ATURAN FORMATTING MUTLAK (COMMONMARK COMPLIANCE - ZERO RANDOM HTML):
 2. Semua daftar wajib menggunakan simbol list standar CommonMark: gunakan tanda minus (-) atau bintang (*) diikuti oleh spasi (misalnya: - Poin Evaluasi). Jangan gunakan tag HTML <ul> atau <li> secara manual.
 3. Penulisan judul/subjudul wajib menggunakan sintaks header ATX standar (#, ##, ###).
 4. Hasil revisi naskah harus dikembalikan sebagai Markdown bersih, terstruktur, dan memiliki keterbacaan tinggi.
+5. DILARANG keras menyertakan awalan label seperti "Artikel Strategis:", "Laporan:", "Draft:", "Draf:", atau sejenisnya sebelum Judul Utama. Tuliskan Judul Utama naskah secara langsung, bersih, dan profesional.
 `;
 
     // --- INTEGRASI TOKEN BUDGET CIRCUIT BREAKER PADA PROSES INTERAKSI REVISI [5, 7] ---
@@ -332,6 +344,7 @@ ATURAN FORMATTING MUTLAK (COMMONMARK COMPLIANCE - ZERO RANDOM HTML):
       );
 
       revisedArticleText = llmResult.fullText || formatArticleFromLlm(llmResult, session.articleTitle || session.title);
+      revisedArticleText = cleanArticleTitlePrefix(revisedArticleText);
     } catch (err: any) {
       revisedArticleText = `[Hasil Revisi Draf Artikel - ${new Date().toLocaleTimeString('id-ID')}]\n\n${userInstruction}\n\n` + (conversationMessages[conversationMessages.length - 1]?.content || '');
     }
@@ -487,4 +500,13 @@ Dalam konteks tata kelola pemerintahan yang responsif, sintesis data menunjukkan
 ---
 *Dikeluarkan oleh BRIDA SMART Analysis &bull; Pemerintah Kabupaten Mimika*
 `.trim();
+}
+
+function cleanArticleTitlePrefix(text: string): string {
+  if (!text) return '';
+  // Menghapus awalan klasifikasi dari H1 header di awal dokumen
+  let cleaned = text.replace(/^(#\s*)(?:Artikel\s+Strategis|Laporan\s+Strategis|Draft|Draf|Analisis\s+Strategis|Rilis\s+Pers):\s*/i, '$1');
+  // Menghapus awalan klasifikasi jika tanpa H1 header di awal dokumen
+  cleaned = cleaned.replace(/^(?:Artikel\s+Strategis|Laporan\s+Strategis|Draft|Draf|Analisis\s+Strategis|Rilis\s+Pers):\s*/i, '');
+  return cleaned;
 }

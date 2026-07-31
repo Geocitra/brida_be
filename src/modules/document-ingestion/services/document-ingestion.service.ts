@@ -17,6 +17,7 @@ import { GeospatialParserService } from './geospatial-parser.service';
 import { DocumentRepository } from '../repositories/document.repository';
 import { UploadDocumentDto } from '../dtos/upload-document.dto';
 import { DocumentResponseDto } from '../dtos/document-response.dto';
+import { PrismaService } from '../../../common/prisma/prisma.service';
 
 @Injectable()
 export class DocumentIngestionService {
@@ -32,6 +33,7 @@ export class DocumentIngestionService {
     private readonly batchProcessor: EmbeddingBatchProcessor,
     private readonly geospatialParser: GeospatialParserService,
     private readonly repository: DocumentRepository,
+    private readonly prisma: PrismaService, // Menyuntikkan PrismaService untuk pembaruan metadata virtual
   ) {
     if (!fs.existsSync(this.uploadDir)) {
       fs.mkdirSync(this.uploadDir, { recursive: true });
@@ -121,13 +123,127 @@ export class DocumentIngestionService {
       fs.unlinkSync(tempFilePath);
       this.logger.log(`[Cleanup Pass] Berkas transien '${targetFile}' berhasil dihapus.`);
     } catch (cleanupErr) {
-      // Menggunakan pola asersi tipe modern 'instanceof Error' (Lebih aman dibanding raw casting) [5]
       const errorMessage = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
-
       this.logger.warn(`Gagal menghapus berkas transien: ${errorMessage}`);
     }
 
     return result;
+  }
+
+  /**
+   * Mengolah dokumen virtual hasil scraping dari internet secara transaksional
+   * dan menyimpannya sebagai fisik berkas teks lokal agar kompatibel dengan pembaca internal.
+   */
+  async processScrapedWebDocument(
+    scrapedText: string,
+    title: string,
+    sourceUrl: string,
+    category: string = 'Referensi Umum & Kliping',
+    additionalMeta: Record<string, any> = {},
+  ): Promise<DocumentResponseDto> {
+    const startTime = Date.now();
+    this.logger.log(`[Virtual Ingestion] Menjalankan pipa pengayaan untuk dokumen hasil scrap: ${title}`);
+
+    // 1. Hitung Checksum SHA-256 dari teks mentah untuk memblokir duplikasi scraping
+    const textBuffer = Buffer.from(scrapedText, 'utf-8');
+    const checksumHash = crypto.createHash('sha256').update(textBuffer).digest('hex');
+
+    const existingDoc = await this.repository.findByChecksum(checksumHash);
+    if (existingDoc) {
+      this.logger.log(`[Virtual Cache Hit] Artikel berita/dokumen web sudah tersimpan sebelumnya: ${existingDoc.id}`);
+      return this.getDocumentDetails(existingDoc.id);
+    }
+
+    // 2. Simpan naskah bersih secara fisik sebagai file teks .txt di direktori uploads
+    const fileNameOnDisk = `scraped_${checksumHash}.txt`;
+    const filePathOnDisk = path.join(this.uploadDir, fileNameOnDisk);
+    fs.writeFileSync(filePathOnDisk, textBuffer);
+
+    // 3. Jalankan Pipeline Sanitasi
+    const sanitizedText = this.sanitizerPipeline.sanitize(scrapedText);
+
+    // 4. Pembagian Chunk Semantik
+    const chunkObjects = this.semanticChunker.createSemanticChunks(sanitizedText);
+
+    // 5. Batching Generator Embedding Semantik
+    const chunksWithEmbeddings = await this.batchProcessor.processInBatches(
+      chunkObjects,
+      this.embeddingProvider,
+    );
+
+    // 6. Ekstraksi Lokasi Geospasial PostGIS & Deteksi Kerapatan Distrik
+    let totalTokenCount = 0;
+    let totalLocationsCount = 0;
+    const chunkItems = chunksWithEmbeddings.map((item) => {
+      totalTokenCount += item.chunkData.tokenCount;
+      const locations = this.geospatialParser.extractGeospatialLocations(item.chunkData.rawText);
+      const spatialAnalysis = this.geospatialParser.calculateDistrictDensity(item.chunkData.rawText);
+      totalLocationsCount += locations.length;
+      return {
+        chunkData: item.chunkData,
+        embedding: item.embedding,
+        locations,
+        detectedDistricts: spatialAnalysis.detected,
+        districtDensity: spatialAnalysis.density,
+      };
+    });
+
+    const executionTimeMs = Date.now() - startTime;
+
+    // 7. Commit Transaksional ke PostgreSQL DB (Atomic Transaction)
+    const savedDoc = await this.repository.createDocumentWithTransaction({
+      title: title,
+      fileUrl: filePathOnDisk,
+      mimeType: 'text/plain',
+      checksumHash,
+      fileSizeBytes: BigInt(textBuffer.length),
+      pageCount: Math.max(1, Math.ceil(scrapedText.length / 3000)),
+      totalTokenCount,
+      category: category,
+      uploadedBy: 'AKLS_SCRAPER_BOT',
+      docType: 'GENERAL_REFERENCE',
+      chunks: chunkItems,
+      executionTimeMs,
+    });
+
+    // 8. Sinkronisasi Metadata Tambahan (sourceUrl & externalMetadata) ke tabel DocumentMetadata
+    try {
+      await this.prisma.documentMetadata.update({
+        where: { documentId: savedDoc.id },
+        data: {
+          sourceUrl: sourceUrl,
+          externalMetadata: {
+            scrapedAt: new Date().toISOString(),
+            originalLength: scrapedText.length,
+            ...additionalMeta,
+          },
+        },
+      });
+      this.logger.log(`[Virtual Ingestion Done] Metadata eksternal berhasil disinkronkan untuk Dokumen ID: ${savedDoc.id}`);
+    } catch (metaErr: any) {
+      this.logger.error(`[Metadata Sync Failed] Gagal mencatat metadata eksternal: ${metaErr.message}`);
+    }
+
+    return {
+      id: savedDoc.id,
+      title: savedDoc.title,
+      fileUrl: savedDoc.fileUrl,
+      mimeType: savedDoc.mimeType,
+      checksumHash: savedDoc.checksumHash,
+      status: savedDoc.status,
+      createdAt: savedDoc.createdAt,
+      metadata: {
+        fileSizeBytes: textBuffer.length.toString(),
+        pageCount: Math.max(1, Math.ceil(scrapedText.length / 3000)),
+        totalTokenCount,
+        category: category,
+        uploadedBy: 'AKLS_SCRAPER_BOT',
+        docType: 'GENERAL_REFERENCE',
+        sourceUrl: sourceUrl,
+      },
+      chunkCount: chunkObjects.length,
+      extractedLocationsCount: totalLocationsCount,
+    };
   }
 
   /**
@@ -234,7 +350,7 @@ export class DocumentIngestionService {
 
   async listAllDocuments(): Promise<DocumentResponseDto[]> {
     const docs = await this.repository.findAll();
-    return docs.map((doc) => ({
+    return docs.map((doc: (typeof docs)[number]) => ({
       id: doc.id,
       title: doc.title,
       fileUrl: doc.fileUrl,
@@ -250,6 +366,7 @@ export class DocumentIngestionService {
           category: doc.metadata.category,
           uploadedBy: doc.metadata.uploadedBy,
           docType: doc.metadata.docType,
+          sourceUrl: doc.metadata.sourceUrl || undefined,
         }
         : undefined,
       chunkCount: doc._count?.chunks ?? 0,
@@ -287,12 +404,13 @@ export class DocumentIngestionService {
           category: doc.metadata.category,
           uploadedBy: doc.metadata.uploadedBy,
           docType: doc.metadata.docType,
+          sourceUrl: doc.metadata.sourceUrl || undefined,
         }
         : undefined,
       chunkCount: doc.chunks ? doc.chunks.length : 0,
       extractedLocationsCount: locationCount,
       chunks: doc.chunks
-        ? doc.chunks.map((c) => ({
+        ? doc.chunks.map((c: (typeof doc.chunks)[number]) => ({
           chunkIndex: c.chunkIndex,
           rawText: c.rawText,
           tokenCount: c.tokenCount,
@@ -326,9 +444,9 @@ export class DocumentIngestionService {
 
   async retroactiveTagging(): Promise<{ updatedChunksCount: number; updatedDocumentsCount: number }> {
     this.logger.log('[Retroactive Tagging] Memulai proses sinkronisasi riwayat dokumen...');
-    
+
     const chunks = await this.repository.findChunksForRetroactiveSync();
-    
+
     if (chunks.length === 0) {
       this.logger.log('[Retroactive Tagging] Semua dokumen sudah tersinkronisasi. 0 chunk diproses.');
       return { updatedChunksCount: 0, updatedDocumentsCount: 0 };

@@ -18,6 +18,8 @@ export interface TokenBudgetResult {
   remainingTokens: number;
   estimatedCostIdr: number;
   remainingCostIdr: number;
+  remainingCostUsd: number;
+  totalCreditUsd: number;
   maxMonthlyPaguIdr: number;
   quotaPercentage: number;
   paguStatus: 'SAFE' | 'ALERT' | 'WARNING';
@@ -103,11 +105,13 @@ export class AnalysisMathService {
     );
 
     // Penentuan ambang batas kepatuhan anggaran (Pagu Status Guard)
+    // WARNING: Sisa kredit ≤ 15% (terpakai ≥ 85%) — Alert Kritis seperti token listrik
+    // ALERT  : Sisa kredit ≤ 50% (terpakai ≥ 50%) — Waspada dini
     let paguStatus: 'SAFE' | 'ALERT' | 'WARNING' = 'SAFE';
-    if (quotaPercentage >= 80) {
-      paguStatus = 'WARNING'; // Status Kritis / Melebihi 80% pagu
-    } else if (quotaPercentage >= 60) {
-      paguStatus = 'ALERT';   // Status Waspada / Melebihi 60% pagu
+    if (quotaPercentage >= 85) {
+      paguStatus = 'WARNING'; // Status Kritis / Sisa ≤ 15% → Segera Isi Ulang
+    } else if (quotaPercentage >= 50) {
+      paguStatus = 'ALERT';   // Status Waspada / Sisa ≤ 50%
     }
 
     return {
@@ -115,6 +119,8 @@ export class AnalysisMathService {
       remainingTokens,
       estimatedCostIdr,
       remainingCostIdr,
+      remainingCostUsd: parseFloat(remainingCostUsd.toFixed(2)),
+      totalCreditUsd,
       maxMonthlyPaguIdr,
       quotaPercentage,
       paguStatus,

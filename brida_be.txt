@@ -5,21 +5,73 @@
 version: '3.8'
 
 services:
-  brida_db:
-    image: postgis/postgis:16-3.4
-    container_name: brida_postgres_postgis
-    environment:
-      POSTGRES_USER: brida_user
-      POSTGRES_PASSWORD: brida_password
-      POSTGRES_DB: brida_smart_analysis
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+  brida-db:
+    build:
+      context: .
+      dockerfile: Dockerfile.db
+    container_name: brida-db
     restart: unless-stopped
+    environment:
+      POSTGRES_DB: edaily_prod
+      POSTGRES_USER: edaily_user
+      POSTGRES_PASSWORD: "Persibnuaing1933!"
+    volumes:
+      - brida_db_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - brida-network
+
+  brida-be:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: brida-be
+    restart: unless-stopped
+    depends_on:
+      - brida-db
+    volumes:
+      - ./uploads:/app/uploads
+    env_file:
+      - .env
+    environment:
+      PORT: 3000
+      NODE_ENV: production
+      DATABASE_URL: "postgresql://edaily_user:Persibnuaing1933!@brida-db:5432/edaily_prod?schema=public"
+    networks:
+      - brida-network
+      - e-daily-report_default
+
+networks:
+  brida-network:
+  e-daily-report_default:
+    external: true
 
 volumes:
-  postgres_data:
+  brida_db_data:
+
+--- FILE: Dockerfile ---
+# Stage 1: Build
+FROM node:20-slim AS builder
+WORKDIR /app
+RUN apt-get update && apt-get install -y openssl python3 make g++ gcc libpq-dev && rm -rf /var/lib/apt/lists/*
+COPY package*.json ./
+RUN npm ci
+COPY prisma ./prisma/
+RUN npx prisma generate
+COPY . .
+RUN npm run build
+
+# Stage 2: Run
+FROM node:20-slim
+WORKDIR /app
+RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+COPY --from=builder /app/package*.json ./
+COPY --from=builder /app/node_modules ./node_modules
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/prisma ./prisma
+
+EXPOSE 3000
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/main"]
 
 --- FILE: nest-cli.json ---
 {
@@ -191,17 +243,22 @@ model ReportDocument {
 }
 
 model DocumentMetadata {
-  id              String         @id @default(uuid()) @db.Uuid
-  documentId      String         @unique @db.Uuid
-  fileSizeBytes   BigInt
-  pageCount       Int            @default(0)
-  totalTokenCount Int            @default(0)
-  category        String         @default("General Report")
-  uploadedBy      String         @default("SYSTEM_STAF")
-  docType         String         @default("REALIZATION")
-  createdAt       DateTime       @default(now())
+  id               String         @id @default(uuid()) @db.Uuid
+  documentId       String         @unique @db.Uuid
+  fileSizeBytes    BigInt
+  pageCount        Int            @default(0)
+  totalTokenCount  Int            @default(0)
+  category         String         @default("General Report")
+  uploadedBy       String         @default("SYSTEM_STAF")
+  docType          String         @default("REALIZATION")
 
-  document        ReportDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  // Bidang Baru: Dukungan Pelacakan Dokumen Virtual Hasil Scraping Eksternal
+  sourceUrl        String?        @map("source_url") @db.VarChar(2048)
+  externalMetadata Json?          @map("external_metadata") @default("{}")
+
+  createdAt        DateTime       @default(now())
+
+  document         ReportDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
 
   @@map("document_metadata")
 }
@@ -353,8 +410,8 @@ model GeneratedReport {
   tokenCount       Int               @default(0)
   llmProvider      String            @default("GEMINI_FLASH")
   status           DocumentStatus    @default(READY)
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
 
   sources          ReportSourceRef[]
 
@@ -804,6 +861,11 @@ CREATE TABLE "executive_users" (
 
 -- CreateIndex
 CREATE UNIQUE INDEX "executive_users_nip_key" ON "executive_users"("nip");
+
+--- FILE: prisma\migrations\20260731060631_add_web_scraping_metadata_fields\migration.sql ---
+-- AlterTable
+ALTER TABLE "document_metadata" ADD COLUMN     "external_metadata" JSONB DEFAULT '{}',
+ADD COLUMN     "source_url" VARCHAR(2048);
 
 --- FILE: src\app.module.ts ---
 import { Module } from '@nestjs/common';
@@ -1909,6 +1971,7 @@ export class ContextAssemblyService {
       targetLength = 'MEDIUM',
       topK = 10,
       similarityThreshold = 0.5,
+      districts = [],
     } = options;
 
     let contextPayloadText = '';
@@ -1919,20 +1982,54 @@ export class ContextAssemblyService {
       const validDocs = docs.filter((d): d is NonNullable<typeof d> => d !== null && d !== undefined);
 
       if (validDocs.length > 0) {
-        const totalTokens = validDocs.reduce((acc, doc) => acc + (doc.metadata?.totalTokenCount || 0), 0);
 
-        if (totalTokens < DYNAMIC_CONTEXT_TOKEN_THRESHOLD) {
-          contextPayloadText = await this.executeFullDocumentStuffingStrategy(validDocs, totalTokens, options.districts);
-        } else {
-          contextPayloadText = await this.executeDynamicRagStrategy(
-            validDocs,
-            totalTokens,
-            userQuery,
-            topK,
-            similarityThreshold,
-            options.districts,
-          );
+        const localDocs = validDocs.filter((d) => !(d.metadata as any)?.sourceUrl);
+        const externalDocs = validDocs.filter((d) => !!(d.metadata as any)?.sourceUrl);
+
+        let localContextText = '';
+        let externalContextText = '';
+
+        if (localDocs.length > 0) {
+          const localTokens = localDocs.reduce((acc, doc) => acc + (doc.metadata?.totalTokenCount || 0), 0);
+          if (localTokens < DYNAMIC_CONTEXT_TOKEN_THRESHOLD) {
+            localContextText = await this.executeFullDocumentStuffingStrategy(localDocs, localTokens, districts);
+          } else {
+            localContextText = await this.executeDynamicRagStrategy(
+              localDocs,
+              localTokens,
+              userQuery,
+              topK,
+              similarityThreshold,
+              districts,
+            );
+          }
         }
+
+        if (externalDocs.length > 0) {
+          const externalTokens = externalDocs.reduce((acc, doc) => acc + (doc.metadata?.totalTokenCount || 0), 0);
+          if (externalTokens < DYNAMIC_CONTEXT_TOKEN_THRESHOLD) {
+            externalContextText = await this.executeFullDocumentStuffingStrategy(externalDocs, externalTokens, districts);
+          } else {
+            externalContextText = await this.executeDynamicRagStrategy(
+              externalDocs,
+              externalTokens,
+              userQuery,
+              topK,
+              similarityThreshold,
+              districts,
+            );
+          }
+        }
+
+        const localSection = localContextText
+          ? `=== DOKUMEN UTAMA (OTORITAS LOKAL - GROUND TRUTH BRIDA MIMIKA) ===\n\nGunakan dokumen di bawah ini sebagai sumber kebenaran utama fakta daerah:\n\n${localContextText}`
+          : '';
+
+        const externalSection = externalContextText
+          ? `=== DOKUMEN PENDUKUNG (PENGAYAAN EKSTERNAL / KOMPARASI NASIONAL) ===\n\nGunakan dokumen di bawah ini secara proaktif untuk komparasi, dasar hukum pusat, atau pengayaan analisis:\n\n${externalContextText}`
+          : '';
+
+        contextPayloadText = [localSection, externalSection].filter(Boolean).join('\n\n');
       }
     } else {
       this.logger.log('[Zero-Reference Mode] Tidak ada dokumen acuan terdaftar. AI berfokus pada draf & ketikan pengguna.');
@@ -1968,6 +2065,14 @@ ATURAN TARGET AUDIENS GAYA BAHASA (TONE STEERING):
 - Fokus utama penulisan: ${steering.focus}
 - Gaya penyampaian bahasa: ${steering.style}
 - **Kosa Kata Fungsional Wajib (Vocabulary Steer):** Anda wajib menyisipkan istilah-istilah taktis berikut secara natural dalam naskah: *${steering.vocabulary}*
+
+ATURAN PRIORITAS SUMBER DATA (HIERARCHY OF TRUTH) [1.1.2]:
+1. Anda wajib mengutamakan fakta dari [DOKUMEN UTAMA] sebagai kebenaran mutlak data daerah Kabupaten Mimika.
+2. Gunakan data dari [DOKUMEN PENDUKUNG] secara proaktif dan cerdas untuk melengkapi analisis dengan komparasi nasional, berita terkini, atau landasan hukum kementerian terkait.
+3. Sebutkan nama dokumen rujukan secara alami (contoh: "berdasarkan data BPS...") dan sematkan selalu sitasi aslinya [docId:chunkIndex] di sebelah klaim fakta.
+
+ATURAN FORMATTING DAN PENATAAN PARAGRAF (SPASI GANDA):
+- Setiap paragraf baru di dalam naskah wajib dipisahkan menggunakan spasi ganda standar Markdown (double newline / '\\n\\n') sehingga menghasilkan visualisasi ruang kosong 1 baris yang konsisten secara estetik.
 
 ATURAN PANJANG NASKAH & BLUEPRINT DENSITAS STRUKTURAL:
 ${lengthGuidance}
@@ -2588,6 +2693,7 @@ export class AnalysisController {
       const [
         aiLogsSum,
         reportsSum,
+        chatMessagesSum,
         recentChatsRaw,
         recentArticlesRaw
       ] = await Promise.all([
@@ -2595,6 +2701,9 @@ export class AnalysisController {
           _sum: { tokenCount: true }
         }),
         this.prisma.generatedReport.aggregate({
+          _sum: { tokenCount: true }
+        }),
+        this.prisma.chatMessage.aggregate({
           _sum: { tokenCount: true }
         }),
         this.prisma.chatSession.findMany({
@@ -2637,7 +2746,8 @@ export class AnalysisController {
 
       const aiTokens = aiLogsSum._sum?.tokenCount || 0;
       const reportTokens = reportsSum._sum?.tokenCount || 0;
-      const totalTokens = aiTokens + reportTokens;
+      const chatTokens = chatMessagesSum._sum?.tokenCount || 0;
+      const totalTokens = aiTokens + reportTokens + chatTokens;
       const tokenBudget = this.mathService.calculateTokenBudget(totalTokens);
 
       const recentChats = recentChatsRaw.map((session) => {
@@ -3098,6 +3208,7 @@ export class AnalysisCausalService {
 
 --- FILE: src\modules\analysis\services\analysis-math.service.ts ---
 import { Injectable } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 
 export interface MathDeviationResult {
   indicatorName: string;
@@ -3123,10 +3234,9 @@ export interface TokenBudgetResult {
 
 @Injectable()
 export class AnalysisMathService {
+  constructor(private readonly configService: ConfigService) {}
 
   private readonly TOKEN_PRICE_USD = 0.00000024;
-
-  private readonly TOTAL_CREDIT_USD = 5.00;
 
   private readonly KURS_USD_TO_IDR = 18076;
 
@@ -3165,16 +3275,25 @@ export class AnalysisMathService {
   }
 
   calculateTokenBudget(totalTokens: number): TokenBudgetResult {
+    const totalCreditUsd = parseFloat(
+      this.configService.get<string>('OPENAI_TOTAL_CREDIT_USD') || '5.00'
+    );
+    const preUsedCreditUsd = parseFloat(
+      this.configService.get<string>('OPENAI_PRE_USED_CREDIT_USD') || '0.38'
+    );
+
     const estimatedCostUsd = totalTokens * this.TOKEN_PRICE_USD;
     const estimatedCostIdr = Math.round(estimatedCostUsd * this.KURS_USD_TO_IDR);
-    const maxMonthlyPaguIdr = Math.round(this.TOTAL_CREDIT_USD * this.KURS_USD_TO_IDR);
 
-    const remainingCostUsd = Math.max(0, this.TOTAL_CREDIT_USD - estimatedCostUsd);
+    const maxMonthlyPaguIdr = Math.round(totalCreditUsd * this.KURS_USD_TO_IDR);
+
+    const remainingCostUsd = Math.max(0, totalCreditUsd - preUsedCreditUsd - estimatedCostUsd);
     const remainingCostIdr = Math.round(remainingCostUsd * this.KURS_USD_TO_IDR);
     const remainingTokens = Math.max(0, Math.floor(remainingCostUsd / this.TOKEN_PRICE_USD));
 
+    const totalUsedUsd = preUsedCreditUsd + estimatedCostUsd;
     const quotaPercentage = parseFloat(
-      Math.min(100, (estimatedCostUsd / this.TOTAL_CREDIT_USD) * 100).toFixed(1)
+      Math.min(100, (totalUsedUsd / totalCreditUsd) * 100).toFixed(1)
     );
 
     let paguStatus: 'SAFE' | 'ALERT' | 'WARNING' = 'SAFE';
@@ -3531,6 +3650,7 @@ export interface DocumentResponseDto {
     category: string;
     uploadedBy: string;
     docType?: string;
+    sourceUrl?: string;
   };
   chunkCount?: number;
   extractedLocationsCount?: number;
@@ -3982,6 +4102,7 @@ export interface CreateDocumentTransactionInput {
 @Injectable()
 export class DocumentRepository {
   private readonly logger = new Logger(DocumentRepository.name);
+  private pgVectorSupported: boolean | null = null;
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -4018,163 +4139,168 @@ export class DocumentRepository {
     });
   }
 
-  async findSimilarChunks(params: VectorSearchParams): Promise<RetrievalResult[]> {    const limit = params.limit || 10;
+  async findSimilarChunks(params: VectorSearchParams): Promise<RetrievalResult[]> {
+    const limit = params.limit || 10;
     const threshold = params.similarityThreshold ?? 0.5;
     const vectorStr = `[${params.queryVector.join(',')}]`;
 
     const FALLBACK_SIMILARITY_SCORE = 0.5;
+    let chunks: any[] = [];
 
-    try {
-      let rawResults: any[];
-      if (params.districts && params.districts.length > 0) {
+    if (this.pgVectorSupported !== false) {
+      try {
+        let rawResults: any[];
+        if (params.districts && params.districts.length > 0) {
 
-        rawResults = await this.prisma.$queryRawUnsafe(
-          `
-          SELECT
-            "id" AS "chunkId",
-            "documentId",
-            "chunkIndex",
-            "rawText",
-            "tokenCount",
-            (1 - ("embedding"::vector <=> $1::vector)) AS "similarityScore"
-          FROM "document_chunks"
-          WHERE "documentId" = $2::uuid
-            AND "embedding" IS NOT NULL
-            AND "detected_districts" && $4::text[]
-          ORDER BY "similarityScore" DESC
-          LIMIT $3;
-          `,
-          vectorStr,
-          params.documentId,
-          limit,
-          params.districts,
+          rawResults = await this.prisma.$queryRawUnsafe(
+            `
+            SELECT
+              "id" AS "chunkId",
+              "documentId",
+              "chunkIndex",
+              "rawText",
+              "tokenCount",
+              (1 - ("embedding"::vector <=> $1::vector)) AS "similarityScore"
+            FROM "document_chunks"
+            WHERE "documentId" = $2::uuid
+              AND "embedding" IS NOT NULL
+              AND "detected_districts" && $4::text[]
+            ORDER BY "similarityScore" DESC
+            LIMIT $3;
+            `,
+            vectorStr,
+            params.documentId,
+            limit,
+            params.districts,
+          );
+        } else {
+
+          rawResults = await this.prisma.$queryRawUnsafe(
+            `
+            SELECT
+              "id" AS "chunkId",
+              "documentId",
+              "chunkIndex",
+              "rawText",
+              "tokenCount",
+              (1 - ("embedding"::vector <=> $1::vector)) AS "similarityScore"
+            FROM "document_chunks"
+            WHERE "documentId" = $2::uuid
+              AND "embedding" IS NOT NULL
+            ORDER BY "similarityScore" DESC
+            LIMIT $3;
+            `,
+            vectorStr,
+            params.documentId,
+            limit,
+          );
+        }
+
+        this.logger.log(
+          `[pgvector Search] Dokumen ID: ${params.documentId} - Ditemukan ${rawResults.length} chunks (Limit ${limit}).`,
         );
-      } else {
 
-        rawResults = await this.prisma.$queryRawUnsafe(
-          `
-          SELECT
-            "id" AS "chunkId",
-            "documentId",
-            "chunkIndex",
-            "rawText",
-            "tokenCount",
-            (1 - ("embedding"::vector <=> $1::vector)) AS "similarityScore"
-          FROM "document_chunks"
-          WHERE "documentId" = $2::uuid
-            AND "embedding" IS NOT NULL
-          ORDER BY "similarityScore" DESC
-          LIMIT $3;
-          `,
-          vectorStr,
-          params.documentId,
-          limit,
+        this.pgVectorSupported = true;
+
+        return rawResults.map((r) => ({
+          chunkId: r.chunkId,
+          documentId: r.documentId,
+          chunkIndex: r.chunkIndex,
+          rawText: r.rawText,
+          tokenCount: r.tokenCount,
+          similarityScore: parseFloat(r.similarityScore) || 0.85,
+        }));
+      } catch (err: unknown) {
+        const errorMessage = err instanceof Error ? err.message : String(err);
+
+        this.pgVectorSupported = false;
+
+        this.logger.warn(
+          `[pgvector Fallback] Database lokal PostgreSQL tidak mendukung extension 'vector'. ` +
+          `Sistem otomatis beralih menggunakan pencarian kata kunci (keyword search) secara permanen untuk sesi ini. ` +
+          `Error: ${errorMessage}`
         );
       }
+    }
 
-      this.logger.log(
-        `[pgvector Search] Dokumen ID: ${params.documentId} - Ditemukan ${rawResults.length} chunks (Limit ${limit}).`,
-      );
+    const queryText = params.queryText;
+    if (queryText) {
 
-      return rawResults.map((r) => ({
-        chunkId: r.chunkId,
-        documentId: r.documentId,
-        chunkIndex: r.chunkIndex,
-        rawText: r.rawText,
-        tokenCount: r.tokenCount,
-        similarityScore: parseFloat(r.similarityScore) || 0.85,
-      }));
-    } catch (err: unknown) {
+      const stopwords = new Set([
+        'dan', 'di', 'ke', 'dari', 'yang', 'untuk', 'dengan', 'ini', 'itu', 'adalah', 'yaitu', 'pada', 'atau', 'dalam', 'saya', 'kami', 'anda', 'mereka', 'dia'
+      ]);
+      const words = queryText
+        .toLowerCase()
+        .split(/[^a-zA-Z0-9]+/)
+        .filter((w) => w.length > 2 && !stopwords.has(w));
 
-      const errorMessage = err instanceof Error ? err.message : String(err);
-      const errorStack   = err instanceof Error ? err.stack : undefined;
-      this.logger.error(
-        `[pgvector FALLBACK] Gagal menjalankan vector similarity search untuk Dokumen ID: ${params.documentId}. ` +
-        `Beralih ke smart keyword-based fallback. ` +
-        `Error: ${errorMessage}`,
-        errorStack,
-      );
+      if (words.length > 0) {
 
-      let chunks: any[] = [];
-      const queryText = params.queryText;
-      if (queryText) {
+        const matchedDbChunks = await this.prisma.documentChunk.findMany({
+          where: {
+            documentId: params.documentId,
+            ...(params.districts && params.districts.length > 0 ? {
+              detected_districts: {
+                hasSome: params.districts,
+              },
+            } : {}),
+            OR: words.map((word) => ({
+              rawText: {
+                contains: word,
+                mode: 'insensitive',
+              },
+            })),
+          },
+        });
 
-        const stopwords = new Set([
-          'dan', 'di', 'ke', 'dari', 'yang', 'untuk', 'dengan', 'ini', 'itu', 'adalah', 'yaitu', 'pada', 'atau', 'dalam', 'saya', 'kami', 'anda', 'mereka', 'dia'
-        ]);
-        const words = queryText
-          .toLowerCase()
-          .split(/[^a-zA-Z0-9]+/)
-          .filter((w) => w.length > 2 && !stopwords.has(w));
+        if (matchedDbChunks.length > 0) {
 
-        if (words.length > 0) {
-
-          const matchedDbChunks = await this.prisma.documentChunk.findMany({
-            where: {
-              documentId: params.documentId,
-              ...(params.districts && params.districts.length > 0 ? {
-                detected_districts: {
-                  hasSome: params.districts,
-                },
-              } : {}),
-              OR: words.map((word) => ({
-                rawText: {
-                  contains: word,
-                  mode: 'insensitive',
-                },
-              })),
-            },
+          const scoredChunks = matchedDbChunks.map((chunk) => {
+            let matches = 0;
+            const textLower = chunk.rawText.toLowerCase();
+            for (const word of words) {
+              let pos = textLower.indexOf(word);
+              while (pos !== -1) {
+                matches++;
+                pos = textLower.indexOf(word, pos + word.length);
+              }
+            }
+            return { chunk, matches };
           });
 
-          if (matchedDbChunks.length > 0) {
+          chunks = scoredChunks
+            .filter((sc) => sc.matches > 0)
+            .sort((a, b) => b.matches - a.matches)
+            .map((sc) => sc.chunk)
+            .slice(0, limit);
 
-            const scoredChunks = matchedDbChunks.map((chunk) => {
-              let matches = 0;
-              const textLower = chunk.rawText.toLowerCase();
-              for (const word of words) {
-                let pos = textLower.indexOf(word);
-                while (pos !== -1) {
-                  matches++;
-                  pos = textLower.indexOf(word, pos + word.length);
-                }
-              }
-              return { chunk, matches };
-            });
-
-            chunks = scoredChunks
-              .filter((sc) => sc.matches > 0)
-              .sort((a, b) => b.matches - a.matches)
-              .map((sc) => sc.chunk)
-              .slice(0, limit);
-
-            this.logger.log(
-              `[pgvector FALLBACK] Keyword search berhasil. Ditemukan ${chunks.length} chunks relevan berbasis kata kunci.`,
-            );
-          }
+          this.logger.log(
+            `[pgvector Fallback] Keyword search berhasil. Ditemukan ${chunks.length} chunks relevan berbasis kata kunci.`,
+          );
         }
       }
-
-      if (chunks.length === 0) {
-        this.logger.warn(
-          `[pgvector FALLBACK] Keyword search menghasilkan 0 hasil atau queryText kosong. Menggunakan chronological fallback.`,
-        );
-        chunks = await this.prisma.documentChunk.findMany({
-          where: { documentId: params.documentId },
-          take: limit,
-          orderBy: { chunkIndex: 'asc' },
-        });
-      }
-
-      return chunks.map((c) => ({
-        chunkId: c.id,
-        documentId: c.documentId,
-        chunkIndex: c.chunkIndex,
-        rawText: c.rawText,
-        tokenCount: c.tokenCount,
-
-        similarityScore: FALLBACK_SIMILARITY_SCORE,
-      }));
     }
+
+    if (chunks.length === 0) {
+      this.logger.warn(
+        `[pgvector Fallback] Keyword search menghasilkan 0 hasil atau queryText kosong. Menggunakan chronological fallback.`,
+      );
+      chunks = await this.prisma.documentChunk.findMany({
+        where: { documentId: params.documentId },
+        take: limit,
+        orderBy: { chunkIndex: 'asc' },
+      });
+    }
+
+    return chunks.map((c) => ({
+      chunkId: c.id,
+      documentId: c.documentId,
+      chunkIndex: c.chunkIndex,
+      rawText: c.rawText,
+      tokenCount: c.tokenCount,
+
+      similarityScore: FALLBACK_SIMILARITY_SCORE,
+    }));
   }
 
   async createDocumentWithTransaction(input: CreateDocumentTransactionInput): Promise<ReportDocument> {
@@ -4366,6 +4492,7 @@ import { GeospatialParserService } from './geospatial-parser.service';
 import { DocumentRepository } from '../repositories/document.repository';
 import { UploadDocumentDto } from '../dtos/upload-document.dto';
 import { DocumentResponseDto } from '../dtos/document-response.dto';
+import { PrismaService } from '../../../common/prisma/prisma.service';
 
 @Injectable()
 export class DocumentIngestionService {
@@ -4381,6 +4508,7 @@ export class DocumentIngestionService {
     private readonly batchProcessor: EmbeddingBatchProcessor,
     private readonly geospatialParser: GeospatialParserService,
     private readonly repository: DocumentRepository,
+    private readonly prisma: PrismaService,
   ) {
     if (!fs.existsSync(this.uploadDir)) {
       fs.mkdirSync(this.uploadDir, { recursive: true });
@@ -4454,13 +4582,115 @@ export class DocumentIngestionService {
       fs.unlinkSync(tempFilePath);
       this.logger.log(`[Cleanup Pass] Berkas transien '${targetFile}' berhasil dihapus.`);
     } catch (cleanupErr) {
-
       const errorMessage = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
-
       this.logger.warn(`Gagal menghapus berkas transien: ${errorMessage}`);
     }
 
     return result;
+  }
+
+  async processScrapedWebDocument(
+    scrapedText: string,
+    title: string,
+    sourceUrl: string,
+    category: string = 'Referensi Umum & Kliping',
+    additionalMeta: Record<string, any> = {},
+  ): Promise<DocumentResponseDto> {
+    const startTime = Date.now();
+    this.logger.log(`[Virtual Ingestion] Menjalankan pipa pengayaan untuk dokumen hasil scrap: ${title}`);
+
+    const textBuffer = Buffer.from(scrapedText, 'utf-8');
+    const checksumHash = crypto.createHash('sha256').update(textBuffer).digest('hex');
+
+    const existingDoc = await this.repository.findByChecksum(checksumHash);
+    if (existingDoc) {
+      this.logger.log(`[Virtual Cache Hit] Artikel berita/dokumen web sudah tersimpan sebelumnya: ${existingDoc.id}`);
+      return this.getDocumentDetails(existingDoc.id);
+    }
+
+    const fileNameOnDisk = `scraped_${checksumHash}.txt`;
+    const filePathOnDisk = path.join(this.uploadDir, fileNameOnDisk);
+    fs.writeFileSync(filePathOnDisk, textBuffer);
+
+    const sanitizedText = this.sanitizerPipeline.sanitize(scrapedText);
+
+    const chunkObjects = this.semanticChunker.createSemanticChunks(sanitizedText);
+
+    const chunksWithEmbeddings = await this.batchProcessor.processInBatches(
+      chunkObjects,
+      this.embeddingProvider,
+    );
+
+    let totalTokenCount = 0;
+    let totalLocationsCount = 0;
+    const chunkItems = chunksWithEmbeddings.map((item) => {
+      totalTokenCount += item.chunkData.tokenCount;
+      const locations = this.geospatialParser.extractGeospatialLocations(item.chunkData.rawText);
+      const spatialAnalysis = this.geospatialParser.calculateDistrictDensity(item.chunkData.rawText);
+      totalLocationsCount += locations.length;
+      return {
+        chunkData: item.chunkData,
+        embedding: item.embedding,
+        locations,
+        detectedDistricts: spatialAnalysis.detected,
+        districtDensity: spatialAnalysis.density,
+      };
+    });
+
+    const executionTimeMs = Date.now() - startTime;
+
+    const savedDoc = await this.repository.createDocumentWithTransaction({
+      title: title,
+      fileUrl: filePathOnDisk,
+      mimeType: 'text/plain',
+      checksumHash,
+      fileSizeBytes: BigInt(textBuffer.length),
+      pageCount: Math.max(1, Math.ceil(scrapedText.length / 3000)),
+      totalTokenCount,
+      category: category,
+      uploadedBy: 'AKLS_SCRAPER_BOT',
+      docType: 'GENERAL_REFERENCE',
+      chunks: chunkItems,
+      executionTimeMs,
+    });
+
+    try {
+      await this.prisma.documentMetadata.update({
+        where: { documentId: savedDoc.id },
+        data: {
+          sourceUrl: sourceUrl,
+          externalMetadata: {
+            scrapedAt: new Date().toISOString(),
+            originalLength: scrapedText.length,
+            ...additionalMeta,
+          },
+        },
+      });
+      this.logger.log(`[Virtual Ingestion Done] Metadata eksternal berhasil disinkronkan untuk Dokumen ID: ${savedDoc.id}`);
+    } catch (metaErr: any) {
+      this.logger.error(`[Metadata Sync Failed] Gagal mencatat metadata eksternal: ${metaErr.message}`);
+    }
+
+    return {
+      id: savedDoc.id,
+      title: savedDoc.title,
+      fileUrl: savedDoc.fileUrl,
+      mimeType: savedDoc.mimeType,
+      checksumHash: savedDoc.checksumHash,
+      status: savedDoc.status,
+      createdAt: savedDoc.createdAt,
+      metadata: {
+        fileSizeBytes: textBuffer.length.toString(),
+        pageCount: Math.max(1, Math.ceil(scrapedText.length / 3000)),
+        totalTokenCount,
+        category: category,
+        uploadedBy: 'AKLS_SCRAPER_BOT',
+        docType: 'GENERAL_REFERENCE',
+        sourceUrl: sourceUrl,
+      },
+      chunkCount: chunkObjects.length,
+      extractedLocationsCount: totalLocationsCount,
+    };
   }
 
   private async ingestDocumentCore(
@@ -4571,6 +4801,7 @@ export class DocumentIngestionService {
           category: doc.metadata.category,
           uploadedBy: doc.metadata.uploadedBy,
           docType: doc.metadata.docType,
+          sourceUrl: doc.metadata.sourceUrl || undefined,
         }
         : undefined,
       chunkCount: doc._count?.chunks ?? 0,
@@ -4608,6 +4839,7 @@ export class DocumentIngestionService {
           category: doc.metadata.category,
           uploadedBy: doc.metadata.uploadedBy,
           docType: doc.metadata.docType,
+          sourceUrl: doc.metadata.sourceUrl || undefined,
         }
         : undefined,
       chunkCount: doc.chunks ? doc.chunks.length : 0,
@@ -5183,6 +5415,8 @@ import { PromptInjectionSanitizer } from './utils/prompt-injection-sanitizer.uti
 import { ArticleGeneratorService } from './services/article-generator.service';
 import { DiscussionBridgeService } from './services/discussion-bridge.service';
 import { TranscriptDistiller } from './utils/transcript-distiller.util';
+import { UrlScraperService } from './services/url-scraper.service';
+import { WebSearchService } from './services/web-search.service';
 
 @Module({
   imports: [DocumentIngestionModule, AiAgentModule],
@@ -5194,6 +5428,8 @@ import { TranscriptDistiller } from './utils/transcript-distiller.util';
     ArticleGeneratorService,
     DiscussionBridgeService,
     TranscriptDistiller,
+    UrlScraperService,
+    WebSearchService,
     QaIntentHandler,
     ArticleIntentHandler,
     IntentRouterService,
@@ -5205,6 +5441,8 @@ import { TranscriptDistiller } from './utils/transcript-distiller.util';
     ArticleGeneratorService,
     DiscussionBridgeService,
     TranscriptDistiller,
+    UrlScraperService,
+    WebSearchService,
     QaIntentHandler,
     ArticleIntentHandler,
     IntentRouterService,
@@ -5599,6 +5837,8 @@ import { VendorLlmAdapter, MultimodalChatMessage } from '../../ai-agent/provider
 import { PromptInjectionSanitizer } from '../utils/prompt-injection-sanitizer.util';
 import { DocumentIngestionService } from '../../document-ingestion/services/document-ingestion.service';
 import { ChatRepository } from '../repositories/chat.repository';
+import { UrlScraperService } from '../services/url-scraper.service';
+import { WebSearchService } from '../services/web-search.service';
 
 const DUAL_PANE_COOPERATIVE_SCHEMA = {
   type: 'object',
@@ -5637,6 +5877,8 @@ export class QaIntentHandler implements IIntentHandler {
   private readonly uploadDir = path.resolve(process.env.UPLOAD_DESTINATION || './uploads');
   private readonly tempDir = path.join(this.uploadDir, 'temp');
 
+  private readonly URL_REGEX = /https?:\/\/[^\s]+/gi;
+
   constructor(
     private readonly sanitizer: PromptInjectionSanitizer,
     private readonly chatMemory: ChatMemoryService,
@@ -5644,6 +5886,8 @@ export class QaIntentHandler implements IIntentHandler {
     private readonly llmAdapter: VendorLlmAdapter,
     private readonly ingestionService: DocumentIngestionService,
     private readonly chatRepository: ChatRepository,
+    private readonly urlScraperService: UrlScraperService,
+    private readonly webSearchService: WebSearchService,
   ) { }
 
   getIntentType(): IntentType {
@@ -5719,6 +5963,68 @@ export class QaIntentHandler implements IIntentHandler {
           } catch (imageErr: any) {
             this.logger.error(`[Screenshot Resolution Failed] Gagal memuat data biner gambar: ${imageErr.message}`);
           }
+        }
+      }
+    }
+
+    const foundUrls = sanitizedQuery.match(this.URL_REGEX) || [];
+
+    if (foundUrls.length > 0) {
+
+      this.logger.log(`[URL Interceptor] Mendeteksi ${foundUrls.length} tautan eksternal untuk diekstraksi.`);
+
+      const scrapeTasks = foundUrls.map(async (url) => {
+        try {
+          const scraped = await this.urlScraperService.scrapeAndExtract(url);
+          const virtualDoc = await this.ingestionService.processScrapedWebDocument(
+            scraped.cleanText,
+            scraped.title,
+            scraped.sourceUrl,
+            'Referensi Web Scraping',
+            { method: 'DIRECT_URL_SCRAPE', sessionId: payload.sessionId }
+          );
+          return virtualDoc.id;
+        } catch (scrapeErr: any) {
+          this.logger.error(`[Parallel Scrape Failed] Gagal memproses URL ${url}: ${scrapeErr.message}`);
+          return null;
+        }
+      });
+
+      const scrapedDocIds = (await Promise.all(scrapeTasks)).filter((id): id is string => id !== null);
+
+      for (const virtualDocId of scrapedDocIds) {
+        documentIds.push(virtualDocId);
+        await this.chatRepository.linkDocumentSource(payload.sessionId, virtualDocId);
+      }
+    } else {
+
+      const isAnalyticalQuery = sanitizedQuery.length > 12 &&
+        !/^(halo|hi|hai|pagi|siang|sore|malam|terima kasih|thanks|p|tes|test)/i.test(sanitizedQuery);
+
+      if (isAnalyticalQuery) {
+        try {
+          this.logger.log(`[Proactive Search] Kueri analitis terdeteksi. Melakukan pengayaan eksternal secara proaktif...`);
+          const searchResults = await this.webSearchService.searchReputableWeb(sanitizedQuery, 2);
+
+          if (searchResults && searchResults.length > 0) {
+            const compiledSearchText = searchResults
+              .map((res, i) => `=== ARTIKEL LUAR ${i + 1}: ${res.title} ===\nTautan: ${res.link}\nRingkasan Fakta: ${res.snippet}`)
+              .join('\n\n');
+
+            const virtualDoc = await this.ingestionService.processScrapedWebDocument(
+              compiledSearchText,
+              `Pengayaan Web: ${sanitizedQuery.slice(0, 30)}...`,
+              searchResults[0].link,
+              'Pengayaan Proaktif Web',
+              { queryUsed: sanitizedQuery, sessionId: payload.sessionId }
+            );
+
+            documentIds.push(virtualDoc.id);
+            await this.chatRepository.linkDocumentSource(payload.sessionId, virtualDoc.id);
+            this.logger.log(`[Proactive Search] Konteks eksternal tervalidasi berhasil diintegrasikan ke RAG pipeline.`);
+          }
+        } catch (searchErr: any) {
+          this.logger.error(`[Proactive Search Failed] Gagal mengayakan konteks eksternal: ${searchErr.message}`);
         }
       }
     }
@@ -6333,7 +6639,14 @@ export class ArticleGeneratorService {
       if (doc) {
         sourceDocs.push(doc);
         const text = doc.chunks ? doc.chunks.map((c) => c.rawText).join('\n\n') : '';
-        docTexts.push(`=== DOKUMEN ACUAN: ${doc.title} (${doc.metadata?.category || 'Umum'}) ===\n${text.slice(0, 10000)}`);
+        const category = doc.metadata?.category || 'Umum';
+
+        const sourceUrl = (doc.metadata as any)?.sourceUrl;
+        const sourceUrlText = sourceUrl ? `\nSumber Tautan Web: ${sourceUrl}` : '';
+
+        docTexts.push(
+          `=== DOKUMEN ACUAN: ${doc.title} (Kategori: ${category})${sourceUrlText} ===\n${text.slice(0, 10000)}`
+        );
       }
     }
 
@@ -7099,6 +7412,297 @@ export class IntentRouterService {
 
     return 0.0;
   }
+}
+
+--- FILE: src\modules\interactive-assistant\services\url-scraper.service.ts ---
+import { Injectable, Logger, BadRequestException, InternalServerErrorException } from '@nestjs/common';
+import * as dns from 'dns';
+import { promisify } from 'util';
+
+const lookupAsync = promisify(dns.lookup);
+
+export interface ScrapeResult {
+    title: string;
+    cleanText: string;
+    sourceUrl: string;
+    wordCount: number;
+}
+
+@Injectable()
+export class UrlScraperService {
+    private readonly logger = new Logger(UrlScraperService.name);
+
+    private readonly MAX_WORD_LIMIT = 2500;
+
+    async scrapeAndExtract(url: string): Promise<ScrapeResult> {
+        this.logger.log(`[UrlScraper] Memulai proses verifikasi dan penarikan URL: ${url}`);
+
+        try {
+            const parsedUrl = new URL(url);
+
+            if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+                throw new BadRequestException('Protokol URL tidak diizinkan. Gunakan http atau https.');
+            }
+
+            const resolvedDns = await lookupAsync(parsedUrl.hostname);
+            const targetIp = resolvedDns.address;
+
+            if (this.isPrivateOrLocalIp(targetIp)) {
+                this.logger.warn(`[SSRF ALERT] Deteksi alamat IP privat/lokal: ${targetIp} pada domain ${parsedUrl.hostname}`);
+                throw new BadRequestException('Koneksi ditolak: Akses ke alamat IP lokal/privat dilarang demi keamanan server.');
+            }
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+            const response = await fetch(url, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 (Googlebot-Image/1.0)',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+                    'Accept-Language': 'id-ID,id;q=0.9,en-US;q=0.8,en;q=0.7',
+                },
+                signal: controller.signal,
+            });
+
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                throw new BadRequestException(`Gagal mengunduh halaman web. Server eksternal merespon dengan kode: ${response.status}`);
+            }
+
+            const rawHtml = await response.text();
+            const extractedTitle = this.extractTitle(rawHtml, parsedUrl.hostname);
+            const cleanContentText = this.sanitizeAndExtractText(rawHtml);
+
+            const wordCount = cleanContentText.split(/\s+/).length;
+            const finalizedText = this.truncateToWordLimit(cleanContentText, this.MAX_WORD_LIMIT);
+
+            this.logger.log(`[UrlScraper] Berhasil mengunduh & men-sanitasi '${extractedTitle}' (${wordCount} kata).`);
+
+            return {
+                title: extractedTitle,
+                cleanText: finalizedText,
+                sourceUrl: url,
+                wordCount: Math.min(wordCount, this.MAX_WORD_LIMIT),
+            };
+        } catch (err: any) {
+            if (err.name === 'AbortError') {
+                this.logger.error(`[Scraper Timeout] Koneksi ke ${url} melebihi batas waktu tunggu.`);
+                throw new InternalServerErrorException('Waktu tunggu habis saat menghubungi server eksternal.');
+            }
+            if (err instanceof BadRequestException) {
+                throw err;
+            }
+            this.logger.error(`[Scraper Failed] Gagal melakukan scraping pada ${url}: ${err.message}`);
+            throw new InternalServerErrorException(`Sistem gagal mengekstrak konten web: ${err.message}`);
+        }
+    }
+
+    private isPrivateOrLocalIp(ip: string): boolean {
+
+        const ipv4Regex = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/;
+        const match = ip.match(ipv4Regex);
+
+        if (match) {
+            const [, oct1, oct2] = match.map(Number);
+
+            if (oct1 === 127) return true;
+
+            if (oct1 === 10) return true;
+
+            if (oct1 === 172 && oct2 >= 16 && oct2 <= 31) return true;
+
+            if (oct1 === 192 && oct2 === 168) return true;
+
+            if (oct1 === 169 && oct2 === 254) return true;
+            return false;
+        }
+
+        const cleanIp = ip.toLowerCase();
+        if (
+            cleanIp === '::1' ||
+            cleanIp.startsWith('fe80:') ||
+            cleanIp.startsWith('fc00:') ||
+            cleanIp.startsWith('fd00:')
+        ) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private extractTitle(html: string, fallback: string): string {
+        const titleMatch = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html);
+        if (titleMatch && titleMatch[1]) {
+            return this.decodeHtmlEntities(titleMatch[1].trim());
+        }
+        return fallback;
+    }
+
+    private sanitizeAndExtractText(html: string): string {
+
+        let cleaned = html
+            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+            .replace(/<head[^>]*>[\s\S]*?<\/head>/gi, '')
+            .replace(/<iframe[^>]*>[\s\S]*?<\/iframe>/gi, '')
+            .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
+            .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
+            .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
+            .replace(/<svg[^>]*>[\s\S]*?<\/svg>/gi, '')
+            .replace(/<noscript[^>]*>[\s\S]*?<\/noscript>/gi, '');
+
+        const textTagRegex = /<(p|h1|h2|h3|h4|h5|h6|li)[^>]*>([\s\S]*?)<\/\1>/gi;
+        const textBlocks: string[] = [];
+        let match;
+
+        while ((match = textTagRegex.exec(cleaned)) !== null) {
+            let blockText = match[2];
+
+            blockText = blockText.replace(/<[^>]*>/g, '');
+
+            blockText = this.decodeHtmlEntities(blockText);
+
+            const trimmed = blockText.trim();
+            if (trimmed.length > 10) {
+                textBlocks.push(trimmed);
+            }
+        }
+
+        if (textBlocks.length === 0) {
+            const bodyMatch = /<body[^>]*>([\s\S]*?)<\/body>/gi.exec(cleaned);
+            const bodyContent = bodyMatch ? bodyMatch[1] : cleaned;
+            const strippedBody = bodyContent
+                .replace(/<[^>]*>/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+            return this.decodeHtmlEntities(strippedBody);
+        }
+
+        return textBlocks.join('\n\n');
+    }
+
+    private decodeHtmlEntities(text: string): string {
+        return text
+            .replace(/&nbsp;/g, ' ')
+            .replace(/&amp;/g, '&')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'")
+            .replace(/&apos;/g, "'")
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    private truncateToWordLimit(text: string, limit: number): string {
+        const words = text.split(/\s+/);
+        if (words.length <= limit) return text;
+        return words.slice(0, limit).join(' ') + '\n\n[Konten eksternal dipotong oleh sistem BRIDA untuk efisiensi token...]';
+    }
+}
+
+--- FILE: src\modules\interactive-assistant\services\web-search.service.ts ---
+import { Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+
+export interface SearchQueryResult {
+    title: string;
+    link: string;
+    snippet: string;
+}
+
+@Injectable()
+export class WebSearchService {
+    private readonly logger = new Logger(WebSearchService.name);
+
+    private readonly REPUTABLE_SITES_WHITELIST = [
+        'site:antaranews.com',
+        'site:kompas.com',
+        'site:tempo.co',
+        'site:republika.co.id',
+        'site:detik.com',
+        'site:cnbcindonesia.com',
+        'site:bps.go.id',
+        'site:bappenas.go.id',
+        'site:kemkes.go.id',
+        'site:kemendagri.go.id',
+        'site:sinta.kemdikbud.go.id',
+        'site:garuda.kemdikbud.go.id'
+    ];
+
+    constructor(private readonly configService: ConfigService) { }
+
+    async searchReputableWeb(userQuery: string, limit: number = 3): Promise<SearchQueryResult[]> {
+        const apiKey = this.configService.get<string>('SERPER_API_KEY');
+
+        if (!apiKey || apiKey.trim().length === 0) {
+            this.logger.warn('[WebSearch] SERPER_API_KEY tidak dikonfigurasi di file .env. Mengaktifkan fallback pencarian kosong.');
+            return [];
+        }
+
+        try {
+            const enrichedQuery = this.formulateEnrichedQuery(userQuery);
+            this.logger.log(`[WebSearch] Mengirim kueri proaktif berfilter: ${enrichedQuery}`);
+
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000);
+
+            const response = await fetch('https://google.serper.dev/search', {
+                method: 'POST',
+                headers: {
+                    'X-API-KEY': apiKey,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    q: enrichedQuery,
+                    num: limit,
+                    gl: 'id',
+                    hl: 'id',
+                }),
+                signal: controller.signal,
+            });
+
+            clearTimeout(timeoutId);
+
+            if (!response.ok) {
+                throw new Error(`Koneksi ke Serper API ditolak dengan status: ${response.status}`);
+            }
+
+            const searchJson = await response.json();
+            const organicResults = searchJson.organic || [];
+
+            const parsedResults: SearchQueryResult[] = organicResults.map((item: any) => ({
+                title: item.title || 'Artikel Terkait',
+                link: item.link || '',
+                snippet: item.snippet || '',
+            })).filter((item: any) => item.link.length > 0);
+
+            this.logger.log(`[WebSearch] Sukses mengumpulkan ${parsedResults.length} hasil pencarian eksternal tervalidasi.`);
+            return parsedResults;
+
+        } catch (err: any) {
+
+            this.logger.error(`[WebSearch Failed] Pencarian eksternal terganggu (Protected Variations Active): ${err.message}`);
+            return [];
+        }
+    }
+
+    private formulateEnrichedQuery(userQuery: string): string {
+
+        const sanitizedQuery = userQuery
+            .replace(/[^\w\s\u00C0-\u017F]/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+
+        if (sanitizedQuery.length === 0) {
+            return 'Kabupaten Mimika';
+        }
+
+        const siteFilters = `(${this.REPUTABLE_SITES_WHITELIST.join(' OR ')})`;
+
+        return `"${sanitizedQuery}" ${siteFilters}`;
+    }
 }
 
 --- FILE: src\modules\interactive-assistant\utils\prompt-injection-sanitizer.util.ts ---

@@ -76,31 +76,69 @@ export class ContextAssemblyService {
       targetLength = 'MEDIUM',
       topK = 10,
       similarityThreshold = 0.5,
+      districts = [],
     } = options;
 
     let contextPayloadText = '';
     const activeTone = tone.toLowerCase();
 
-    // 1. Jalur Jalankan Dokumen Acuan (RAG vs Stuffing) jika ada referensi yang dipilih
+    // 1. Jalankan Penyaringan dan Partisi Dokumen Acuan (Standard vs External Scraped) [1.1.2]
     if (documentIds.length > 0) {
       const docs = await Promise.all(documentIds.map((id) => this.repository.findById(id)));
       const validDocs = docs.filter((d): d is NonNullable<typeof d> => d !== null && d !== undefined);
 
       if (validDocs.length > 0) {
-        const totalTokens = validDocs.reduce((acc, doc) => acc + (doc.metadata?.totalTokenCount || 0), 0);
+        // Partisi Dokumen Utama (Otoritas Lokal) dan Dokumen Pendukung (Eksternal / Scraped)
+        const localDocs = validDocs.filter((d) => !(d.metadata as any)?.sourceUrl);
+        const externalDocs = validDocs.filter((d) => !!(d.metadata as any)?.sourceUrl);
 
-        if (totalTokens < DYNAMIC_CONTEXT_TOKEN_THRESHOLD) {
-          contextPayloadText = await this.executeFullDocumentStuffingStrategy(validDocs, totalTokens, options.districts);
-        } else {
-          contextPayloadText = await this.executeDynamicRagStrategy(
-            validDocs,
-            totalTokens,
-            userQuery,
-            topK,
-            similarityThreshold,
-            options.districts,
-          );
+        let localContextText = '';
+        let externalContextText = '';
+
+        // Proses Partisi Dokumen Utama (Lokal BRIDA)
+        if (localDocs.length > 0) {
+          const localTokens = localDocs.reduce((acc, doc) => acc + (doc.metadata?.totalTokenCount || 0), 0);
+          if (localTokens < DYNAMIC_CONTEXT_TOKEN_THRESHOLD) {
+            localContextText = await this.executeFullDocumentStuffingStrategy(localDocs, localTokens, districts);
+          } else {
+            localContextText = await this.executeDynamicRagStrategy(
+              localDocs,
+              localTokens,
+              userQuery,
+              topK,
+              similarityThreshold,
+              districts,
+            );
+          }
         }
+
+        // Proses Partisi Dokumen Pendukung (Scraped Web / Proactive Search)
+        if (externalDocs.length > 0) {
+          const externalTokens = externalDocs.reduce((acc, doc) => acc + (doc.metadata?.totalTokenCount || 0), 0);
+          if (externalTokens < DYNAMIC_CONTEXT_TOKEN_THRESHOLD) {
+            externalContextText = await this.executeFullDocumentStuffingStrategy(externalDocs, externalTokens, districts);
+          } else {
+            externalContextText = await this.executeDynamicRagStrategy(
+              externalDocs,
+              externalTokens,
+              userQuery,
+              topK,
+              similarityThreshold,
+              districts,
+            );
+          }
+        }
+
+        // Susun payload teks terstruktur dengan header seksi yang tegas
+        const localSection = localContextText
+          ? `=== DOKUMEN UTAMA (OTORITAS LOKAL - GROUND TRUTH BRIDA MIMIKA) ===\n\nGunakan dokumen di bawah ini sebagai sumber kebenaran utama fakta daerah:\n\n${localContextText}`
+          : '';
+
+        const externalSection = externalContextText
+          ? `=== DOKUMEN PENDUKUNG (PENGAYAAN EKSTERNAL / KOMPARASI NASIONAL) ===\n\nGunakan dokumen di bawah ini secara proaktif untuk komparasi, dasar hukum pusat, atau pengayaan analisis:\n\n${externalContextText}`
+          : '';
+
+        contextPayloadText = [localSection, externalSection].filter(Boolean).join('\n\n');
       }
     } else {
       this.logger.log('[Zero-Reference Mode] Tidak ada dokumen acuan terdaftar. AI berfokus pada draf & ketikan pengguna.');
@@ -138,6 +176,14 @@ ATURAN TARGET AUDIENS GAYA BAHASA (TONE STEERING):
 - Fokus utama penulisan: ${steering.focus}
 - Gaya penyampaian bahasa: ${steering.style}
 - **Kosa Kata Fungsional Wajib (Vocabulary Steer):** Anda wajib menyisipkan istilah-istilah taktis berikut secara natural dalam naskah: *${steering.vocabulary}*
+
+ATURAN PRIORITAS SUMBER DATA (HIERARCHY OF TRUTH) [1.1.2]:
+1. Anda wajib mengutamakan fakta dari [DOKUMEN UTAMA] sebagai kebenaran mutlak data daerah Kabupaten Mimika.
+2. Gunakan data dari [DOKUMEN PENDUKUNG] secara proaktif dan cerdas untuk melengkapi analisis dengan komparasi nasional, berita terkini, atau landasan hukum kementerian terkait.
+3. Sebutkan nama dokumen rujukan secara alami (contoh: "berdasarkan data BPS...") dan sematkan selalu sitasi aslinya [docId:chunkIndex] di sebelah klaim fakta.
+
+ATURAN FORMATTING DAN PENATAAN PARAGRAF (SPASI GANDA):
+- Setiap paragraf baru di dalam naskah wajib dipisahkan menggunakan spasi ganda standar Markdown (double newline / '\\n\\n') sehingga menghasilkan visualisasi ruang kosong 1 baris yang konsisten secara estetik.
 
 ATURAN PANJANG NASKAH & BLUEPRINT DENSITAS STRUKTURAL:
 ${lengthGuidance}
@@ -301,7 +347,7 @@ ATURAN COLLABORATIVE CO-WRITING:
       if (doc) {
         // Ambil hasil agregasi database secepat kilat
         const density = await this.repository.getDocumentDistrictDensity(id);
-        
+
         const densityLines = Object.entries(density)
           .map(([district, count]) => `- Distrik ${district}: Disebut sebanyak ${count} kali dalam dokumen`)
           .join('\n');

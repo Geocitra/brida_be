@@ -13,6 +13,7 @@ export interface DocumentResponseDto {
     category: string;
     uploadedBy: string;
     docType?: string;
+    sourceUrl?: string;
   };
   chunkCount?: number;
   extractedLocationsCount?: number;
