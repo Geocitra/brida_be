@@ -53,7 +53,11 @@ volumes:
 # Stage 1: Build
 FROM node:20-slim AS builder
 WORKDIR /app
-RUN apt-get update && apt-get install -y openssl python3 make g++ gcc libpq-dev && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y openssl python3 make g++ gcc libpq-dev \
+    chromium libglib2.0-0 libnss3 libatk1.0-0 libatk-bridge2.0-0 libcups2 \
+    libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 \
+    libpango-1.0-0 libcairo2 libasound2 libx11-6 libxext6 libxrender1 \
+    --no-install-recommends && rm -rf /var/lib/apt/lists/*
 COPY package*.json ./
 RUN npm ci
 COPY prisma ./prisma/
@@ -64,7 +68,11 @@ RUN npm run build
 # Stage 2: Run
 FROM node:20-slim
 WORKDIR /app
-RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y openssl chromium libglib2.0-0 libnss3 \
+    libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 libxcomposite1 \
+    libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 \
+    libasound2 libx11-6 libxext6 libxrender1 \
+    --no-install-recommends && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/package*.json ./
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
@@ -79,7 +87,8 @@ CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/main"]
   "collection": "@nestjs/schematics",
   "sourceRoot": "src",
   "compilerOptions": {
-    "deleteOutDir": true
+    "deleteOutDir": true,
+    "assets": ["assets/**/*"]
   }
 }
 
@@ -119,6 +128,7 @@ CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/main"]
     "passport-jwt": "^4.0.1",
     "pdf-parse": "^1.1.1",
     "pdfkit": "^0.19.1",
+    "puppeteer-core": "^25.4.0",
     "reflect-metadata": "^0.2.1",
     "rxjs": "^7.8.1",
     "uuid": "^9.0.1"
@@ -877,6 +887,7 @@ import { InteractiveAssistantModule } from './modules/interactive-assistant/inte
 import { ReportsModule } from './modules/reports/reports.module';
 import { AnalysisModule } from './modules/analysis/analysis.module';
 import { AuthModule } from './modules/auth/auth.module';
+import { PdfModule } from './modules/pdf/pdf.module';
 
 @Module({
   imports: [
@@ -890,6 +901,7 @@ import { AuthModule } from './modules/auth/auth.module';
     ReportsModule,
     AnalysisModule,
     AuthModule,
+    PdfModule,
   ],
 })
 export class AppModule {}
@@ -7884,6 +7896,302 @@ PANDUAN EKSTRAKSI:
             };
         }
     }
+}
+
+--- FILE: src\modules\pdf\pdf.module.ts ---
+import { Module } from '@nestjs/common';
+import { PdfController } from './controllers/pdf.controller';
+import { PdfService } from './services/pdf.service';
+
+@Module({
+  controllers: [PdfController],
+  providers: [PdfService],
+  exports: [PdfService],
+})
+export class PdfModule {}
+
+--- FILE: src\modules\pdf\controllers\pdf.controller.ts ---
+import { Controller, Post, Body, Res, Logger } from '@nestjs/common';
+import { Response } from 'express';
+import { PdfService } from '../services/pdf.service';
+import { GeneratePdfDto } from '../dto/generate-pdf.dto';
+
+@Controller('pdf')
+export class PdfController {
+  private readonly logger = new Logger(PdfController.name);
+
+  constructor(private readonly pdfService: PdfService) {}
+
+  @Post('generate')
+  async generatePdf(@Body() dto: GeneratePdfDto, @Res() res: Response) {
+    try {
+      const pdfBuffer = await this.pdfService.generatePdf(dto);
+
+      const filename = dto.filename || 'Draf_Artikel_AKLS_Mimika.pdf';
+      const cleanFilename = filename.toLowerCase().endsWith('.pdf') ? filename : `${filename}.pdf`;
+
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': `attachment; filename="${encodeURIComponent(cleanFilename)}"`,
+        'Content-Length': pdfBuffer.length,
+      });
+
+      res.end(pdfBuffer);
+    } catch (error) {
+      this.logger.error('Gagal memproses pembuatan PDF:', error);
+      const errMsg = error instanceof Error ? error.message : String(error);
+      res.status(500).json({
+        statusCode: 500,
+        message: `Gagal membuat PDF: ${errMsg}`,
+        error: 'Internal Server Error'
+      });
+    }
+  }
+}
+
+--- FILE: src\modules\pdf\dto\generate-pdf.dto.ts ---
+import { IsString, IsNotEmpty, IsIn, IsNumber, Min, Max, IsOptional } from 'class-validator';
+
+export class GeneratePdfDto {
+  @IsString()
+  @IsNotEmpty()
+  htmlContent!: string;
+
+  @IsIn(['Calibri', 'Times New Roman', 'Verdana', 'Arial'])
+  fontFamily!: string;
+
+  @IsNumber()
+  @Min(8)
+  @Max(36)
+  fontSize!: number;
+
+  @IsNumber()
+  @Min(1)
+  @Max(3)
+  lineSpacing!: number;
+
+  @IsNumber()
+  @Min(1.5)
+  @Max(5)
+  marginCm!: number;
+
+  @IsString()
+  @IsOptional()
+  filename?: string;
+}
+
+--- FILE: src\modules\pdf\services\pdf.service.ts ---
+import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import { join } from 'path';
+import { existsSync, readFileSync } from 'fs';
+import * as puppeteer from 'puppeteer-core';
+import { GeneratePdfDto } from '../dto/generate-pdf.dto';
+
+@Injectable()
+export class PdfService {
+  private readonly logger = new Logger(PdfService.name);
+
+  private readonly fontFileMap = {
+    'Calibri': {
+      normal: 'calibri.ttf',
+      bold: 'calibrib.ttf',
+      italic: 'calibrii.ttf',
+      boldItalic: 'calibriz.ttf',
+    },
+    'Times New Roman': {
+      normal: 'times.ttf',
+      bold: 'timesbd.ttf',
+      italic: 'timesi.ttf',
+      boldItalic: 'timesbi.ttf',
+    },
+    'Verdana': {
+      normal: 'verdana.ttf',
+      bold: 'verdanab.ttf',
+      italic: 'verdanai.ttf',
+      boldItalic: 'verdanaz.ttf',
+    },
+    'Arial': {
+      normal: 'arial.ttf',
+      bold: 'arialbd.ttf',
+      italic: 'ariali.ttf',
+      boldItalic: 'arialbi.ttf',
+    },
+  };
+
+  private getExecutablePath(): string {
+    let executablePath = '/usr/bin/chromium';
+
+    if (process.platform === 'win32') {
+      const winPaths = [
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files\\Google\\Chrome Beta\\Application\\chrome.exe',
+        join(process.env.LOCALAPPDATA || '', 'Google\\Chrome\\Application\\chrome.exe'),
+      ];
+      for (const p of winPaths) {
+        if (existsSync(p)) {
+          executablePath = p;
+          break;
+        }
+      }
+    }
+    return executablePath;
+  }
+
+  private getFontBase64(filename: string): string {
+    const isProd = process.env.NODE_ENV === 'production';
+    const fontsDir = join(process.cwd(), isProd ? 'dist/assets/fonts' : 'src/assets/fonts');
+    const filePath = join(fontsDir, filename);
+
+    if (!existsSync(filePath)) {
+      this.logger.error(`File font tidak ditemukan di path: ${filePath}`);
+      throw new InternalServerErrorException(`Font file not found: ${filename}`);
+    }
+
+    return readFileSync(filePath).toString('base64');
+  }
+
+  async generatePdf(dto: GeneratePdfDto): Promise<Buffer> {
+    const { htmlContent, fontFamily, fontSize, lineSpacing, marginCm } = dto;
+    const selectedFonts = this.fontFileMap[fontFamily as keyof typeof this.fontFileMap] || this.fontFileMap['Calibri'];
+
+    this.logger.log(`Memulai proses pencetakan PDF dengan font ${fontFamily}, size ${fontSize}pt, margin ${marginCm}cm`);
+
+    let browser: puppeteer.Browser | null = null;
+
+    try {
+
+      const fontNormal = this.getFontBase64(selectedFonts.normal);
+      const fontBold = this.getFontBase64(selectedFonts.bold);
+      const fontItalic = this.getFontBase64(selectedFonts.italic);
+      const fontBoldItalic = this.getFontBase64(selectedFonts.boldItalic);
+
+      const fullHtmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <style>
+            @font-face {
+              font-family: '${fontFamily}';
+              src: url(data:font/truetype;charset=utf-8;base64,${fontNormal}) format('truetype');
+              font-weight: normal;
+              font-style: normal;
+            }
+            @font-face {
+              font-family: '${fontFamily}';
+              src: url(data:font/truetype;charset=utf-8;base64,${fontBold}) format('truetype');
+              font-weight: bold;
+              font-style: normal;
+            }
+            @font-face {
+              font-family: '${fontFamily}';
+              src: url(data:font/truetype;charset=utf-8;base64,${fontItalic}) format('truetype');
+              font-weight: normal;
+              font-style: italic;
+            }
+            @font-face {
+              font-family: '${fontFamily}';
+              src: url(data:font/truetype;charset=utf-8;base64,${fontBoldItalic}) format('truetype');
+              font-weight: bold;
+              font-style: italic;
+            }
+
+            * {
+              box-sizing: border-box;
+            }
+
+            body {
+              font-family: '${fontFamily}', sans-serif;
+              font-size: ${fontSize}pt;
+              line-height: ${lineSpacing};
+              margin: 0;
+              padding: 0;
+              background: white;
+              color: #000000;
+              word-wrap: break-word;
+            }
+
+            p {
+              margin-top: 0;
+              margin-bottom: 12px;
+              text-align: justify;
+            }
+
+            ul, ol {
+              margin-top: 0;
+              margin-bottom: 12px;
+              padding-left: 20px;
+            }
+
+            li {
+              margin-bottom: 4px;
+              line-height: ${lineSpacing};
+            }
+
+            div[data-type="page-break"] {
+              page-break-after: always;
+              break-after: page;
+              height: 0;
+              overflow: hidden;
+            }
+          </style>
+        </head>
+        <body>
+          ${htmlContent}
+        </body>
+        </html>
+      `;
+
+      const executablePath = this.getExecutablePath();
+      this.logger.debug(`Meluncurkan Puppeteer menggunakan executable: ${executablePath}`);
+
+      browser = await puppeteer.launch({
+        executablePath,
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-accelerated-2d-canvas',
+          '--disable-gpu',
+        ],
+      });
+
+      const page = await browser.newPage();
+      await page.setContent(fullHtmlContent, { waitUntil: 'networkidle0' as any });
+
+      const marginPoints = `${marginCm}cm`;
+      const pdfBuffer = await page.pdf({
+        format: 'A4',
+        printBackground: true,
+        margin: {
+          top: marginPoints,
+          bottom: marginPoints,
+          left: marginPoints,
+          right: marginPoints,
+        },
+        displayHeaderFooter: true,
+        headerTemplate: '<span style="font-size: 0px"></span>',
+        footerTemplate: `
+          <div style="font-size: 8px; font-family: Arial, sans-serif; color: #94a3b8; width: 100%; text-align: right; padding-right: ${marginCm}cm; margin-bottom: 10px; box-sizing: border-box;">
+            Halaman <span class="pageNumber"></span> dari <span class="totalPages"></span>
+          </div>
+        `,
+      });
+
+      this.logger.log(`PDF berhasil dibuat, ukuran: ${pdfBuffer.length} bytes`);
+      return Buffer.from(pdfBuffer);
+
+    } catch (error) {
+      this.logger.error('Error saat membuat PDF via Puppeteer:', error);
+      const errMsg = error instanceof Error ? error.message : String(error);
+      throw new InternalServerErrorException(`Failed to generate PDF: ${errMsg}`);
+    } finally {
+      if (browser) {
+        await browser.close();
+      }
+    }
+  }
 }
 
 --- FILE: src\modules\reports\reports.controller.ts ---
