@@ -71,7 +71,7 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
     if (this.browser) {
       try {
         await this.browser.close();
-      } catch {}
+      } catch { }
       this.browser = null;
     }
 
@@ -107,7 +107,7 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
    */
   private getExecutablePath(): string {
     let executablePath = '/usr/bin/chromium'; // Default Linux / Docker
-    
+
     if (process.platform === 'win32') {
       const winPaths = [
         'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
@@ -204,6 +204,8 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
               background: white;
               color: #000000;
               word-wrap: break-word;
+              white-space: pre-wrap;
+              tab-size: 48px;
             }
 
             p {
@@ -229,6 +231,24 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
               height: 0;
               overflow: hidden;
             }
+
+            /* --- INJEKSI CSS TABEL --- */
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 10px;
+              margin-bottom: 16px;
+            }
+            th, td {
+              border: 1px solid #cbd5e1;
+              padding: 6px 10px;
+              text-align: left;
+              vertical-align: top;
+            }
+            th {
+              background-color: #f8fafc;
+              font-weight: bold;
+            }
           </style>
         </head>
         <body>
@@ -240,7 +260,7 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
       // 3. Dapatkan instance browser singleton dan buka halaman baru
       const browser = await this.getBrowser();
       page = await browser.newPage();
-      
+
       // Gunakan domcontentloaded untuk efisiensi RAM/waktu proses di VPS
       await page.setContent(fullHtmlContent, { waitUntil: 'domcontentloaded' as any });
 

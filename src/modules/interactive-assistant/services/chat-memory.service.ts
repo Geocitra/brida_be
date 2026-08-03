@@ -75,8 +75,12 @@ export class ChatMemoryService {
     let accumulatedTokens = 0;
     let prunedCount = 0;
 
-    // 2. Iterasi pesan: Ambil pesan terbaru hingga menyentuh batas token atau batas RECENT_WINDOW_SIZE [1]
+    // 2. Iterasi pesan: Ambil pesan terbaru hingga menyentuh batas token atau batas RECENT_WINDOW_SIZE
     for (const msg of rawMessages) {
+      if (msg.role === MessageRole.SYSTEM) {
+        continue; // Lewati log audit sistem agar tidak mengotori ingatan LLM
+      }
+
       const msgTokens = msg.tokenCount || this.tokenEstimator.estimateTokenCount(msg.content);
 
       if (

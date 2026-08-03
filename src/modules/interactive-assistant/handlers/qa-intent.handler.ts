@@ -15,6 +15,9 @@ import { ChatRepository } from '../repositories/chat.repository';
 import { UrlScraperService } from '../services/url-scraper.service';
 import { WebSearchService } from '../services/web-search.service';
 
+// --- Impor Style Guide Global ---
+import { EDITORIAL_STYLE_GUIDE } from '../../ai-agent/constants/system-prompts.constant';
+
 // Skema Respons Obrolan Kolaboratif Dual-Pane
 const DUAL_PANE_COOPERATIVE_SCHEMA = {
   type: 'object',
@@ -23,7 +26,7 @@ const DUAL_PANE_COOPERATIVE_SCHEMA = {
     answer: {
       type: 'string',
       description:
-        'The conversational feedback/thought process in Bahasa Indonesia explaining what changes you made, what data you analyzed, or answering the user. Format strictly using beautiful, rich Markdown (using headers ##, bold texts, bullet lists, and comparison tables if comparing data). Always embed structured citation anchors in the format [docId:chunkIndex] (e.g. [doc-001:2]) adjacent to any claims, metrics, or factual statements derived from the context chunks.',
+        `The conversational feedback/thought process in Bahasa Indonesia explaining what changes you made, what data you analyzed, or answering the user. Format strictly using beautiful, rich Markdown (using headers ##, bold texts, bullet lists, and comparison tables if comparing data). Always embed structured citation anchors in the format [docId:chunkIndex] (e.g. [doc-001:2]) adjacent to any claims, metrics, or factual statements derived from the context chunks. WAJIB patuhi panduan berikut:\n\n${EDITORIAL_STYLE_GUIDE}`,
     },
     suggestions: {
       type: 'array',
@@ -36,11 +39,11 @@ const DUAL_PANE_COOPERATIVE_SCHEMA = {
       properties: {
         title: {
           type: 'string',
-          description: 'The updated or newly generated article title.',
+          description: 'The updated or newly generated article title. DILARANG menggunakan prefix "Artikel Strategis:" atau semacamnya.',
         },
         draftMarkdown: {
           type: 'string',
-          description: 'The fully updated or newly generated article text formatted in Markdown. If the user only asked a question without editing or creating the article, return the unmodified currentDraft or leave this blank.',
+          description: `The fully updated or newly generated article text formatted in Markdown. If the user only asked a question without editing or creating the article, return the unmodified currentDraft or leave this blank. JIKA MENGHASILKAN TEKS BARU, WAJIB PATUHI:\n\n${EDITORIAL_STYLE_GUIDE}`,
         },
       },
     },
@@ -245,7 +248,25 @@ export class QaIntentHandler implements IIntentHandler {
       0.5,
     );
 
-    // 8. Sinkronisasi State Naskah Draf ke Database (Pane Kanan)
+    // 8. Proteksi Guardrail: Mencegah teks penolakan/obrolan AI menimpa draf artikel asli
+    if (analysisResult.updatedArticle && analysisResult.updatedArticle.draftMarkdown) {
+      const draft = analysisResult.updatedArticle.draftMarkdown.trim();
+      const answer = (analysisResult.answer || '').trim();
+      
+      const isIdenticalToAnswer = draft === answer;
+      const isRefusalKeyword = draft.includes('tidak ditemukan di dalam dokumen') || 
+                              draft.includes('belum bisa ditulis') || 
+                              draft.includes('belum menemukan isi artikel') ||
+                              draft.includes('tidak memiliki akses');
+      const isShortNonArticle = !draft.startsWith('#') && draft.length < 400;
+
+      if (isIdenticalToAnswer || isRefusalKeyword || isShortNonArticle) {
+        this.logger.warn(`[Guardrail] Mencegah pembaruan draf dengan teks penolakan/obrolan AI. Teks dicegah: "${draft.slice(0, 100)}..."`);
+        delete analysisResult.updatedArticle;
+      }
+    }
+
+    // 8.5 Sinkronisasi State Naskah Draf ke Database (Pane Kanan)
     if (analysisResult.updatedArticle && analysisResult.updatedArticle.draftMarkdown) {
       const updatedDraft = analysisResult.updatedArticle.draftMarkdown;
       const updatedTitle = analysisResult.updatedArticle.title || memory.articleTitle || memory.title;
@@ -301,7 +322,8 @@ export class QaIntentHandler implements IIntentHandler {
         role: 'system',
         content: `Anda adalah asisten pencatat memori kognitif BRIDA Mimika. 
 Tugas Anda: Perbarui [RINGKASAN EPISODIK OBROLAN] secara padat dan kronologis (maksimal 200 kata). 
-Gabungkan ringkasan sebelumnya dengan obrolan baru tanpa pengantar apa pun.`,
+Gabungkan ringkasan sebelumnya dengan obrolan baru tanpa pengantar apa pun.
+WAJIB patuhi gaya bahasa berikut saat meringkas:\n${EDITORIAL_STYLE_GUIDE}`,
       },
       {
         role: 'user',

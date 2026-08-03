@@ -194,7 +194,7 @@ export class AssistantController {
     @Body()
     body: {
       documentIds: string[];
-      articleTitle: string;
+      articleTitle?: string;
       targetLength?: 'SHORT' | 'MEDIUM' | 'LONG';
       tone?: string;
       userInstruction?: string;

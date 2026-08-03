@@ -1183,18 +1183,30 @@ import { AiAgentController } from './controllers/ai-agent.controller';
 export class AiAgentModule {}
 
 --- FILE: src\modules\ai-agent\constants\system-prompts.constant.ts ---
-export const BRIDA_SYSTEM_PERSONA = `Anda adalah seorang Senior Systems Analyst dan Analis Investigasi Kasus di Badan Riset dan Inovasi Daerah (BRIDA).
-Tugas utama Anda adalah menganalisis dokumen laporan statis (seperti laporan investigasi korupsi, analisis kebijakan, dan dokumen hukum) yang diunggah oleh staf BRIDA.
+export const EDITORIAL_STYLE_GUIDE = `
+=== KLASTER EDITORIAL & GAYA SELINGKUNG JURNALISTIK ===
+1. PERSONA PENULIS: Anda adalah Jurnalis Senior, Kolumnis Kebijakan Publik, dan Analis Utama BRIDA Kabupaten Mimika. Gunakan bahasa Indonesia ragam jurnalistik populer yang luwes, dinamis, dan humanis. HILANGKAN sama sekali nada kaku, mekanis, atau gaya bahasa ala robot AI.
+2. ATURAN PENJUDULAN (ANTI-PREFIX): DILARANG KERAS menggunakan awalan/prefix label apapun sebelum judul (misal: "Artikel Strategis:", "Judul:", "Laporan:", "Draf:"). Langsung tuliskan judul bersih menggunakan Heading 1 Markdown (contoh: # Harga BBM Hari Ini Turun).
+3. DIET KOMA & SINTAKSIS AKTIF: HINDARI penggunaan kalimat majemuk bertingkat yang dihubungkan dengan banyak tanda koma (,). Pecah kalimat panjang menjadi 2-3 kalimat tunggal yang tegas, pendek, dan bernapas panjang. Gunakan struktur kalimat aktif. HINDARI kata transisi mekanis di awal paragraf (seperti: "Selain itu,", "Dapat disimpulkan bahwa,").
+4. ANTI-TAUTOLOGI (REPETISI): DILARANG KERAS mengulang frasa atau kata yang memiliki padanan makna sama secara berurutan (pleonasme). Hindari kata-kata berlebihan seperti "sangat penting sekali" atau "hanya sekadar ... saja". Gunakan variasi diksi yang kaya agar narasi tidak membosankan.
+5. TATA LETAK PARAGRAF: Anda WAJIB memberikan jarak satu baris kosong (menggunakan double newline / \\n\\n) di antara setiap pergantian paragraf atau poin list, agar dokumen tidak menumpuk dan nyaman dibaca oleh eksekutif.
+6. PENYAJIAN TABEL DATA: Jika output atau analisis Anda mengharuskan penyajian data komparatif, rincian anggaran, perbandingan target vs realisasi, atau statistik numerik, Anda WAJIB menyajikannya di dalam format Tabel Markdown.
+`;
 
-ATURAN MUTLAK (ZERO-KNOWLEDGE BASE ENFORCEMENT):
-1. Anda HANYA BOHLEH memberikan analisis, jawaban, dan informasi yang secara EKSPLISIT tercantum di dalam teks dokumen terlampir.
-2. DILARANG KERAS menambahkan asumsi, spekulasi, atau pengetahuan eksternal di luar teks dokumen.
-3. Jika informasi yang ditanyakan oleh pengguna tidak tercantum di dalam dokumen, Anda WAJIB menjawab: "Informasi tersebut tidak ditemukan di dalam dokumen laporan yang diunggah."
-4. Jawaban Anda harus selalu terstruktur, berbasis bukti faktual, dan menyertakan kutipan/referensi paragraf dokumen jika relevan.`;
+export const BRIDA_SYSTEM_PERSONA = `Anda adalah seorang Jurnalis Investigasi Senior, Analis Kebijakan Publik, dan Systems Analyst di Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika.
+Tugas utama Anda adalah mengekstrak, menganalisis, dan menyajikan wawasan dari dokumen laporan yang diunggah oleh staf BRIDA secara komprehensif, terstruktur, namun membumi (humanis).
 
-export const BRIDA_GUARDRAIL_POSTFIX = `[INSTRUKSI PENUTUP MUDUR - RECENTENCY BIAS GUARDRAIL]
-Evaluasi dan jawab pertanyaan pengguna di atas secara eksklusif berdasarkan teks konteks dokumen terlampir.
-Terapkan Aturan Zero-Knowledge Base secara mutlak. Jangan menambahkan asumsi atau opini eksternal apa pun. Hasil analisis WAJIB dalam format JSON yang terstruktur.`;
+${EDITORIAL_STYLE_GUIDE}
+
+ATURAN MUTLAK (ZERO-KNOWLEDGE BASE ENFORCEMENT & INTEGRITAS DATA):
+1. Anda HANYA BOLEH memberikan analisis, jawaban, dan informasi yang secara EKSPLISIT tercantum di dalam teks dokumen terlampir (kecuali sistem mengaktifkan mode Proactive Web Search/Pencarian Eksternal).
+2. DILARANG KERAS menambahkan asumsi, spekulasi, halusinasi data, atau pengetahuan eksternal di luar teks dokumen rujukan.
+3. Jika informasi yang ditanyakan oleh pengguna tidak tercantum di dalam dokumen, Anda WAJIB menjawab dengan bahasa jurnalistik yang luwes bahwa: "Informasi tersebut tidak ditemukan di dalam dokumen laporan rujukan."
+4. Jawaban Anda harus selalu terstruktur, berbasis bukti faktual, dan WAJIB menyertakan kutipan/referensi paragraf asli (contoh format: [doc-xyz:chunkIndex]) yang bersebelahan dengan klaim faktual.`;
+
+export const BRIDA_GUARDRAIL_POSTFIX = `[INSTRUKSI PENUTUP MUNDUR - RECENCY BIAS GUARDRAIL]
+Evaluasi dan jawab pertanyaan pengguna di atas secara eksklusif berdasarkan teks konteks dokumen terlampir. SELALU terapkan secara ketat Klaster Editorial & Gaya Selingkung Jurnalistik (Diet Koma, Anti-Prefix Judul, Spasi Paragraf Ganda, dan Penggunaan Tabel Markdown).
+Terapkan Aturan Zero-Knowledge Base secara mutlak. Jangan menambahkan asumsi atau opini eksternal apa pun. Pastikan jika output memerlukan format JSON, hasilnya harus berupa struktur JSON murni yang valid tanpa awalan atau akhiran teks Markdown \`\`\` di luarnya.`;
 
 export const DYNAMIC_CONTEXT_TOKEN_THRESHOLD = 80000;
 
@@ -5669,7 +5681,7 @@ export class AssistantController {
     @Body()
     body: {
       documentIds: string[];
-      articleTitle: string;
+      articleTitle?: string;
       targetLength?: 'SHORT' | 'MEDIUM' | 'LONG';
       tone?: string;
       userInstruction?: string;
@@ -5856,6 +5868,8 @@ import { ChatRepository } from '../repositories/chat.repository';
 import { UrlScraperService } from '../services/url-scraper.service';
 import { WebSearchService } from '../services/web-search.service';
 
+import { EDITORIAL_STYLE_GUIDE } from '../../ai-agent/constants/system-prompts.constant';
+
 const DUAL_PANE_COOPERATIVE_SCHEMA = {
   type: 'object',
   required: ['answer'],
@@ -5863,7 +5877,7 @@ const DUAL_PANE_COOPERATIVE_SCHEMA = {
     answer: {
       type: 'string',
       description:
-        'The conversational feedback/thought process in Bahasa Indonesia explaining what changes you made, what data you analyzed, or answering the user. Format strictly using beautiful, rich Markdown (using headers ##, bold texts, bullet lists, and comparison tables if comparing data). Always embed structured citation anchors in the format [docId:chunkIndex] (e.g. [doc-001:2]) adjacent to any claims, metrics, or factual statements derived from the context chunks.',
+        `The conversational feedback/thought process in Bahasa Indonesia explaining what changes you made, what data you analyzed, or answering the user. Format strictly using beautiful, rich Markdown (using headers ##, bold texts, bullet lists, and comparison tables if comparing data). Always embed structured citation anchors in the format [docId:chunkIndex] (e.g. [doc-001:2]) adjacent to any claims, metrics, or factual statements derived from the context chunks. WAJIB patuhi panduan berikut:\n\n${EDITORIAL_STYLE_GUIDE}`,
     },
     suggestions: {
       type: 'array',
@@ -5876,11 +5890,11 @@ const DUAL_PANE_COOPERATIVE_SCHEMA = {
       properties: {
         title: {
           type: 'string',
-          description: 'The updated or newly generated article title.',
+          description: 'The updated or newly generated article title. DILARANG menggunakan prefix "Artikel Strategis:" atau semacamnya.',
         },
         draftMarkdown: {
           type: 'string',
-          description: 'The fully updated or newly generated article text formatted in Markdown. If the user only asked a question without editing or creating the article, return the unmodified currentDraft or leave this blank.',
+          description: `The fully updated or newly generated article text formatted in Markdown. If the user only asked a question without editing or creating the article, return the unmodified currentDraft or leave this blank. JIKA MENGHASILKAN TEKS BARU, WAJIB PATUHI:\n\n${EDITORIAL_STYLE_GUIDE}`,
         },
       },
     },
@@ -6127,7 +6141,8 @@ export class QaIntentHandler implements IIntentHandler {
         role: 'system',
         content: `Anda adalah asisten pencatat memori kognitif BRIDA Mimika.
 Tugas Anda: Perbarui [RINGKASAN EPISODIK OBROLAN] secara padat dan kronologis (maksimal 200 kata).
-Gabungkan ringkasan sebelumnya dengan obrolan baru tanpa pengantar apa pun.`,
+Gabungkan ringkasan sebelumnya dengan obrolan baru tanpa pengantar apa pun.
+WAJIB patuhi gaya bahasa berikut saat meringkas:\n${EDITORIAL_STYLE_GUIDE}`,
       },
       {
         role: 'user',
@@ -6585,9 +6600,11 @@ import { ChatRepository } from '../repositories/chat.repository';
 import { TokenEstimatorUtil } from '../../ai-agent/utils/token-estimator.util';
 import { ArticleLength, MessageRole, SessionType } from '@prisma/client';
 
+import { EDITORIAL_STYLE_GUIDE } from '../../ai-agent/constants/system-prompts.constant';
+
 export interface GenerateArticleOptions {
   documentIds: string[];
-  articleTitle: string;
+  articleTitle?: string;
   targetLength?: 'SHORT' | 'MEDIUM' | 'LONG' | ArticleLength;
   tone?: string;
   userInstruction?: string;
@@ -6628,9 +6645,7 @@ export class ArticleGeneratorService {
     } = options;
 
     const validDocIds = documentIds || [];
-    if (!articleTitle || !articleTitle.trim()) {
-      throw new BadRequestException('Judul artikel tidak boleh kosong.');
-    }
+    const normalizedTitle = (articleTitle || '').trim() || 'Draf Artikel Publikasi';
 
     let session = options.sessionId
       ? await this.chatRepository.findSessionById(options.sessionId)
@@ -6639,7 +6654,7 @@ export class ArticleGeneratorService {
     if (!session) {
       session = await this.chatRepository.createArticleSession({
         documentIds: validDocIds,
-        articleTitle,
+        articleTitle: normalizedTitle,
         targetLength: targetLength as ArticleLength,
         tone,
         initialPrompt: userInstruction,
@@ -6705,9 +6720,9 @@ ${validDocIds.length > 0
         : 'Tugas Anda: Susun artikel publikasi berdasarkan instruksi dan pengetahuan internal Anda (Mode Kreasi Bebas).'
       }
 
-PANDUAN PENULISAN:
-- Judul Artikel: "${articleTitle}"
-- Gaya Bahasa (Tone): ${tone.toUpperCase()}
+PANDUAN PENULISAN & PARAMETER UTAMA:
+- Judul Artikel: "${normalizedTitle}"
+- Gaya Bahasa (Tone Target): ${tone.toUpperCase()}
 - ${lengthGuidance}
 - Gunakan struktur narasi jurnalistik publik yang kuat (Judul, Subjudul, Analisis Faktual, Solusi Rekomendasi).
 ${manifestPromptSection}
@@ -6717,12 +6732,13 @@ ATURAN FORMATTING MUTLAK (COMMONMARK COMPLIANCE - ZERO RANDOM HTML):
 2. Semua bentuk daftar/poin wajib ditulis menggunakan simbol list standar CommonMark: gunakan tanda minus (-) atau bintang (*) diikuti oleh spasi (misalnya: - Poin Rekomendasi). Jangan gunakan tag HTML <ul> atau <li> secara manual.
 3. Penulisan judul/subjudul bab wajib menggunakan sintaks header ATX standar (# untuk Judul Utama, ## untuk Sub-judul, ### untuk Sub-sub-judul).
 4. Hindari manipulasi layout seperti menyematkan properti alignment teks visual secara inline dalam HTML. Biarkan representasi struktur dokumen murni menggunakan sintaks Markdown bersih.
-5. DILARANG keras menyertakan awalan label seperti "Artikel Strategis:", "Laporan:", "Draft:", "Draf:", atau sejenisnya sebelum Judul Utama. Tuliskan Judul Utama naskah (Header H1 '#') secara langsung, bersih, dan profesional.
+
+${EDITORIAL_STYLE_GUIDE}
 `;
 
     const userPromptMessage = validDocIds.length > 0
-      ? `Judul Artikel yang Diinginkan: "${articleTitle}"\n${promptUserInstruction}\n\nDOKUMEN ACUAN:\n${assembledDocsContext}`
-      : `Judul Artikel yang Diinginkan: "${articleTitle}"\n${promptUserInstruction}`;
+      ? `Judul Artikel yang Diinginkan: "${normalizedTitle}"\n${promptUserInstruction}\n\nDOKUMEN ACUAN:\n${assembledDocsContext}`
+      : `Judul Artikel yang Diinginkan: "${normalizedTitle}"\n${promptUserInstruction}`;
 
     const compiledPrompts = [systemPrompt, userPromptMessage];
     this.tokenEstimator.enforceBudgetCircuitBreaker({
@@ -6734,7 +6750,7 @@ ATURAN FORMATTING MUTLAK (COMMONMARK COMPLIANCE - ZERO RANDOM HTML):
     await this.chatRepository.addMessage({
       sessionId: session.id,
       role: MessageRole.USER,
-      content: `[JUDUL ARTIKEL]: ${articleTitle}\n[TONE]: ${tone}\n[PANJANG]: ${targetLength}\n${userInstruction || ''}`,
+      content: `[JUDUL ARTIKEL]: ${normalizedTitle}\n[TONE]: ${tone}\n[PANJANG]: ${targetLength}\n${userInstruction || ''}`,
       tokenCount: this.tokenEstimator.estimateTokenCount(userPromptMessage),
     });
 
@@ -6749,11 +6765,11 @@ ATURAN FORMATTING MUTLAK (COMMONMARK COMPLIANCE - ZERO RANDOM HTML):
         0.7,
       );
 
-      fullArticleText = llmResult.fullText || formatArticleFromLlm(llmResult, articleTitle);
+      fullArticleText = llmResult.fullText || formatArticleFromLlm(llmResult, normalizedTitle);
       fullArticleText = cleanArticleTitlePrefix(fullArticleText);
     } catch (err: any) {
       this.logger.warn(`[Article LLM Fallback] Gagal memanggil API: ${err.message}. Menggunakan sintesis fallback.`);
-      fullArticleText = createFallbackArticleText(articleTitle, sourceDocs, tone, targetLength);
+      fullArticleText = createFallbackArticleText(normalizedTitle, sourceDocs, tone, targetLength);
       fullArticleText = cleanArticleTitlePrefix(fullArticleText);
     }
 
@@ -6770,7 +6786,7 @@ ATURAN FORMATTING MUTLAK (COMMONMARK COMPLIANCE - ZERO RANDOM HTML):
       success: true,
       id: session.id,
       sessionId: session.id,
-      articleTitle,
+      articleTitle: normalizedTitle,
       tone,
       targetLength,
       fullArticleText,
@@ -6866,7 +6882,8 @@ ATURAN FORMATTING MUTLAK (COMMONMARK COMPLIANCE - ZERO RANDOM HTML):
 2. Semua daftar wajib menggunakan simbol list standar CommonMark: gunakan tanda minus (-) atau bintang (*) diikuti oleh spasi (misalnya: - Poin Evaluasi). Jangan gunakan tag HTML <ul> atau <li> secara manual.
 3. Penulisan judul/subjudul wajib menggunakan sintaks header ATX standar (#, ##, ###).
 4. Hasil revisi naskah harus dikembalikan sebagai Markdown bersih, terstruktur, dan memiliki keterbacaan tinggi.
-5. DILARANG keras menyertakan awalan label seperti "Artikel Strategis:", "Laporan:", "Draft:", "Draf:", atau sejenisnya sebelum Judul Utama. Tuliskan Judul Utama naskah secara langsung, bersih, dan profesional.
+
+${EDITORIAL_STYLE_GUIDE}
 `;
 
     const rawConversationTexts = conversationMessages.map((m: any) => m.content).concat([systemPrompt, userInstruction]);
@@ -7981,15 +7998,16 @@ export class GeneratePdfDto {
 }
 
 --- FILE: src\modules\pdf\services\pdf.service.ts ---
-import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import { Injectable, InternalServerErrorException, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { join } from 'path';
 import { existsSync, readFileSync } from 'fs';
 import * as puppeteer from 'puppeteer-core';
 import { GeneratePdfDto } from '../dto/generate-pdf.dto';
 
 @Injectable()
-export class PdfService {
+export class PdfService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PdfService.name);
+  private browser: puppeteer.Browser | null = null;
 
   private readonly fontFileMap = {
     'Calibri': {
@@ -8017,6 +8035,66 @@ export class PdfService {
       boldItalic: 'arialbi.ttf',
     },
   };
+
+  async onModuleInit() {
+    this.logger.log('Menginisialisasi PdfService - Menyiapkan Singleton Browser...');
+    try {
+      await this.getBrowser();
+      this.logger.log('Singleton Browser berhasil di-boot dan stand-by.');
+    } catch (err: any) {
+      this.logger.warn(`Gagal meluncurkan browser saat startup: ${err.message}. Browser akan diluncurkan sesuai kebutuhan (lazy-load).`);
+    }
+  }
+
+  async onModuleDestroy() {
+    this.logger.log('Menutup PdfService - Menghentikan Singleton Browser...');
+    if (this.browser) {
+      try {
+        await this.browser.close();
+      } catch (err) {
+        this.logger.error('Error saat menutup browser:', err);
+      }
+      this.browser = null;
+    }
+  }
+
+  private async getBrowser(): Promise<puppeteer.Browser> {
+    if (this.browser && this.browser.connected) {
+      return this.browser;
+    }
+
+    if (this.browser) {
+      try {
+        await this.browser.close();
+      } catch { }
+      this.browser = null;
+    }
+
+    const executablePath = this.getExecutablePath();
+    this.logger.log(`Meluncurkan instance Chromium baru menggunakan: ${executablePath}`);
+
+    this.browser = await puppeteer.launch({
+      executablePath,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--disable-gpu',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process',
+        '--disable-extensions',
+      ],
+    });
+
+    this.browser.on('disconnected', () => {
+      this.logger.warn('Koneksi Chromium terputus. Instance akan di-reset.');
+      this.browser = null;
+    });
+
+    return this.browser;
+  }
 
   private getExecutablePath(): string {
     let executablePath = '/usr/bin/chromium';
@@ -8057,7 +8135,7 @@ export class PdfService {
 
     this.logger.log(`Memulai proses pencetakan PDF dengan font ${fontFamily}, size ${fontSize}pt, margin ${marginCm}cm`);
 
-    let browser: puppeteer.Browser | null = null;
+    let page: puppeteer.Page | null = null;
 
     try {
 
@@ -8135,6 +8213,24 @@ export class PdfService {
               height: 0;
               overflow: hidden;
             }
+
+            /* --- INJEKSI CSS TABEL --- */
+            table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 10px;
+              margin-bottom: 16px;
+            }
+            th, td {
+              border: 1px solid #cbd5e1;
+              padding: 6px 10px;
+              text-align: left;
+              vertical-align: top;
+            }
+            th {
+              background-color: #f8fafc;
+              font-weight: bold;
+            }
           </style>
         </head>
         <body>
@@ -8143,22 +8239,10 @@ export class PdfService {
         </html>
       `;
 
-      const executablePath = this.getExecutablePath();
-      this.logger.debug(`Meluncurkan Puppeteer menggunakan executable: ${executablePath}`);
+      const browser = await this.getBrowser();
+      page = await browser.newPage();
 
-      browser = await puppeteer.launch({
-        executablePath,
-        args: [
-          '--no-sandbox',
-          '--disable-setuid-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-accelerated-2d-canvas',
-          '--disable-gpu',
-        ],
-      });
-
-      const page = await browser.newPage();
-      await page.setContent(fullHtmlContent, { waitUntil: 'networkidle0' as any });
+      await page.setContent(fullHtmlContent, { waitUntil: 'domcontentloaded' as any });
 
       const marginPoints = `${marginCm}cm`;
       const pdfBuffer = await page.pdf({
@@ -8187,8 +8271,12 @@ export class PdfService {
       const errMsg = error instanceof Error ? error.message : String(error);
       throw new InternalServerErrorException(`Failed to generate PDF: ${errMsg}`);
     } finally {
-      if (browser) {
-        await browser.close();
+      if (page) {
+        try {
+          await page.close();
+        } catch (err) {
+          this.logger.error('Gagal menutup tab halaman:', err);
+        }
       }
     }
   }
@@ -8397,6 +8485,8 @@ import { GenerateReportDto } from './dto/generate-report.dto';
 import { AnalysisMathService } from '../analysis/services/analysis-math.service';
 import { AnalysisCausalService } from '../analysis/services/analysis-causal.service';
 
+import { EDITORIAL_STYLE_GUIDE } from '../ai-agent/constants/system-prompts.constant';
+
 @Injectable()
 export class ReportsService {
   private readonly logger = new Logger(ReportsService.name);
@@ -8514,6 +8604,8 @@ PANDUAN OUTPUT JSON ESEKUTIF PRESISI:
 10. "actionPriorities": TEPAT 3 poin instruksi / Action Items prioritas utama. Setiap elemen WAJIB berupa kalimat atau bullet Markdown yang rapi.
 11. JANGAN menampilkan token sitasi mentah seperti [uuid:1], [docId:chunkIndex], atau pola [abc][def] di dalam isi field string. Jika ingin menyebut sumber, gunakan frasa alami seperti "berdasarkan dokumen acuan" tanpa tanda kurung siku.
 12. Hindari output seperti {"executiveSummary":"..."} di dalam string. Hindari raw JSON atau markdown fence pada isi field string.
+
+${EDITORIAL_STYLE_GUIDE}
 `;
 
     const userPrompt = `Dokumen Acuan (${documentsWithText.length} dokumen):\n${documentsAssembled(documentsWithText)}\n\nKonteks Detail Full-Text:\n${assembledContext}`;
@@ -8790,7 +8882,6 @@ function sanitizeDocument(doc: any): any {
       : null,
   };
 }
-
 
 --- FILE: src\modules\reports\dto\generate-report.dto.ts ---
 import { IsArray, IsString, IsOptional, IsBoolean } from 'class-validator';

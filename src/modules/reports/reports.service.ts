@@ -6,6 +6,9 @@ import { GenerateReportDto } from './dto/generate-report.dto';
 import { AnalysisMathService } from '../analysis/services/analysis-math.service';
 import { AnalysisCausalService } from '../analysis/services/analysis-causal.service';
 
+// --- Impor Style Guide Global ---
+import { EDITORIAL_STYLE_GUIDE } from '../ai-agent/constants/system-prompts.constant';
+
 @Injectable()
 export class ReportsService {
   private readonly logger = new Logger(ReportsService.name);
@@ -106,7 +109,6 @@ export class ReportsService {
       combinedTokenEstimate += doc.metadata?.totalTokenCount || docText.length / 4;
     }
 
-    // 3. Assemble Prompt & Payload for LLM Generation
     // 3. Assemble Full-Context Prompt & Payload for LLM Generation (Zero Information Loss)
     const assembledContext = documentsWithText
       .map(
@@ -115,6 +117,7 @@ export class ReportsService {
       )
       .join('\n\n--------------------------------------------------\n\n');
 
+    // SYSTEM PROMPT: Mengintegrasikan Style Guide & CommonMark Compliance untuk Laporan
     const systemPrompt = `Anda adalah Asisten Analisis Kebijakan Utama untuk Bupati Mimika & Kepala BRIDA.
 Tugas Anda: Sintesiskan seluruh informasi faktual dari DOKUMEN ACUAN yang diberikan menjadi Laporan Eksekutif Resmi Nota Dinas Bupati.
 
@@ -131,6 +134,8 @@ PANDUAN OUTPUT JSON ESEKUTIF PRESISI:
 10. "actionPriorities": TEPAT 3 poin instruksi / Action Items prioritas utama. Setiap elemen WAJIB berupa kalimat atau bullet Markdown yang rapi.
 11. JANGAN menampilkan token sitasi mentah seperti [uuid:1], [docId:chunkIndex], atau pola [abc][def] di dalam isi field string. Jika ingin menyebut sumber, gunakan frasa alami seperti "berdasarkan dokumen acuan" tanpa tanda kurung siku.
 12. Hindari output seperti {"executiveSummary":"..."} di dalam string. Hindari raw JSON atau markdown fence pada isi field string.
+
+${EDITORIAL_STYLE_GUIDE}
 `;
 
     const userPrompt = `Dokumen Acuan (${documentsWithText.length} dokumen):\n${documentsAssembled(documentsWithText)}\n\nKonteks Detail Full-Text:\n${assembledContext}`;
@@ -411,4 +416,3 @@ function sanitizeDocument(doc: any): any {
       : null,
   };
 }
-
