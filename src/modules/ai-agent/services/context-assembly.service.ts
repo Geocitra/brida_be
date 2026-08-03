@@ -143,7 +143,7 @@ export class ContextAssemblyService {
       : '';
 
     const scrapedSection = scrapedUrls.length > 0
-      ? `=== DOKUMEN PENDUKUNG (SITASI WEB LANGSUNG) ===\n\nBerikut adalah konten dari tautan web yang dimasukkan oleh pengguna atau hasil pencarian eksternal. Gunakan sebagai acuan pendukung analitis. Anda WAJIB menggunakan tautan URL aslinya secara langsung sebagai sitasi resmi (misalnya: [Judul Halaman](URL)):\n\n` +
+      ? `=== DOKUMEN PENDUKUNG (SITASI WEB LANGSUNG) ===\n\nBerikut adalah konten dari tautan web yang dimasukkan oleh pengguna atau hasil pencarian eksternal. Gunakan sebagai acuan pendukung analitis.\n\nATURAN SITASI WEB WAJIB: Anda HARUS menyematkan sitasi URL aslinya menggunakan format kurung siku langsung: [URL] (misalnya: [https://www.contoh.com/halaman]) di sebelah setiap klaim fakta yang bersumber dari halaman web tersebut. JANGAN gunakan format Markdown link biasa [Judul](URL). SELALU gunakan format [URL] saja.\n\n` +
         scrapedUrls.map((page, idx) => `[SUMBER ${idx + 1}]:\nJudul: ${page.title}\nTautan: ${page.url}\nKonten:\n${page.text}`).join('\n\n')
       : '';
 
