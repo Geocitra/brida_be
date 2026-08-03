@@ -234,6 +234,13 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
               overflow: hidden;
             }
 
+            img {
+              max-width: 100%;
+              height: auto;
+              display: block;
+              margin: 16px auto;
+            }
+
             /* --- INJEKSI CSS TABEL --- */
             table {
               width: 100%;
@@ -265,6 +272,20 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
 
       // Gunakan domcontentloaded untuk efisiensi RAM/waktu proses di VPS
       await page.setContent(fullHtmlContent, { waitUntil: 'domcontentloaded' as any });
+
+      // Pastikan semua gambar (terutama Base64 hasil copy-paste) selesai dimuat dan dirender sebelum mencetak
+      await page.evaluate(async () => {
+        const images = Array.from(document.querySelectorAll('img'));
+        await Promise.all(
+          images.map((img) => {
+            if (img.complete) return;
+            return new Promise((resolve) => {
+              img.onload = resolve;
+              img.onerror = resolve;
+            });
+          })
+        );
+      });
 
       // 4. Generate PDF buffer
       const marginPoints = `${marginCm}cm`;
