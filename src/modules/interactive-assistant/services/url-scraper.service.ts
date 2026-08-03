@@ -73,7 +73,7 @@ export class UrlScraperService {
             return {
                 title: extractedTitle,
                 cleanText: finalizedText,
-                sourceUrl: url,
+                sourceUrl: response.url || url,
                 wordCount: Math.min(wordCount, this.MAX_WORD_LIMIT),
             };
         } catch (err: any) {

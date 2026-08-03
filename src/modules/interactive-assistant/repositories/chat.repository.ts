@@ -8,6 +8,7 @@ export interface AddMessageWithAttachmentsInput {
   content: string;
   tokenCount: number;
   interactionType?: InteractionType;
+  metadata?: any;
   attachments?: Array<{
     fileUrl: string;
     fileName: string;
@@ -183,7 +184,7 @@ export class ChatRepository {
    * Mampu menangani pembuatan pesan sekaligus metadata lampiran berkas/screenshots.
    */
   async addMessage(input: AddMessageWithAttachmentsInput): Promise<ChatMessage> {
-    const { sessionId, role, content, tokenCount, interactionType = InteractionType.MANUAL_INPUT, attachments = [] } = input;
+    const { sessionId, role, content, tokenCount, interactionType = InteractionType.MANUAL_INPUT, metadata, attachments = [] } = input;
 
     const message = await this.prisma.chatMessage.create({
       data: {
@@ -192,6 +193,7 @@ export class ChatRepository {
         content,
         tokenCount,
         interactionType,
+        metadata: metadata || undefined,
         attachments: {
           create: attachments.map((att) => ({
             fileUrl: att.fileUrl,

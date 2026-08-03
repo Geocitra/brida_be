@@ -87,21 +87,18 @@ export class ArticleGeneratorService {
     // Pendeteksian dan Scraping URL secara dinamis dari petunjuk awal pengguna
     const URL_REGEX = /https?:\/\/[^\s]+/gi;
     const foundUrls = (userInstruction || '').match(URL_REGEX) || [];
+    const scrapedUrls: Array<{ url: string; title: string; text: string }> = [];
 
     if (foundUrls.length > 0) {
       this.logger.log(`[generateArticle] Mendeteksi ${foundUrls.length} tautan eksternal untuk diekstraksi.`);
       for (const url of foundUrls) {
         try {
           const scraped = await this.urlScraperService.scrapeAndExtract(url);
-          const virtualDoc = await this.ingestionService.processScrapedWebDocument(
-            scraped.cleanText,
-            scraped.title,
-            scraped.sourceUrl,
-            'Referensi Web Scraping',
-            { method: 'DIRECT_URL_SCRAPE', sessionId: session.id }
-          );
-          validDocIds.push(virtualDoc.id);
-          await this.chatRepository.linkDocumentSource(session.id, virtualDoc.id);
+          scrapedUrls.push({
+            url: scraped.sourceUrl,
+            title: scraped.title,
+            text: scraped.cleanText,
+          });
         } catch (scrapeErr: any) {
           this.logger.error(`[generateArticle URL Scrape Failed] Gagal memproses URL ${url}: ${scrapeErr.message}`);
         }
@@ -186,9 +183,15 @@ ATURAN FORMATTING MUTLAK (COMMONMARK COMPLIANCE - ZERO RANDOM HTML):
 ${EDITORIAL_STYLE_GUIDE}
 `;
 
+    let scrapedContextText = '';
+    if (scrapedUrls.length > 0) {
+      scrapedContextText = `\n\n=== DOKUMEN PENDUKUNG (SITASI WEB LANGSUNG) ===\nBerikut adalah konten dari tautan web yang dimasukkan oleh pengguna. Gunakan sebagai acuan pendukung analitis. Gunakan tautan URL-nya secara langsung sebagai sitasi resmi:\n\n` +
+        scrapedUrls.map((page, idx) => `[SUMBER ${idx + 1}]:\nJudul: ${page.title}\nTautan: ${page.url}\nKonten:\n${page.text}`).join('\n\n');
+    }
+
     const userPromptMessage = validDocIds.length > 0
-      ? `Judul Artikel yang Diinginkan: "${normalizedTitle}"\n${promptUserInstruction}\n\nDOKUMEN ACUAN:\n${assembledDocsContext}`
-      : `Judul Artikel yang Diinginkan: "${normalizedTitle}"\n${promptUserInstruction}`;
+      ? `Judul Artikel yang Diinginkan: "${normalizedTitle}"\n${promptUserInstruction}\n\nDOKUMEN ACUAN:\n${assembledDocsContext}${scrapedContextText}`
+      : `Judul Artikel yang Diinginkan: "${normalizedTitle}"\n${promptUserInstruction}${scrapedContextText}`;
 
     // --- INTEGRASI TOKEN BUDGET CIRCUIT BREAKER (DEFENSIVE PROGRAMMING) [5, 7] ---
     const compiledPrompts = [systemPrompt, userPromptMessage];
@@ -204,6 +207,7 @@ ${EDITORIAL_STYLE_GUIDE}
       role: MessageRole.USER,
       content: `[JUDUL ARTIKEL]: ${normalizedTitle}\n[TONE]: ${tone}\n[PANJANG]: ${targetLength}\n${userInstruction || ''}`,
       tokenCount: this.tokenEstimator.estimateTokenCount(userPromptMessage),
+      metadata: scrapedUrls.length > 0 ? { scrapedUrls } : undefined,
     });
 
     // 3. Panggil LLM Adapter dengan parameter kreatif (temperature 0.7)

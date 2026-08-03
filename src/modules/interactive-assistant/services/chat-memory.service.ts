@@ -30,23 +30,25 @@ export class ChatMemoryService {
     return this.chatRepository.createSession(documentIds, title);
   }
 
-  async recordUserMessage(sessionId: string, content: string) {
+  async recordUserMessage(sessionId: string, content: string, metadata?: any) {
     const tokenCount = this.tokenEstimator.estimateTokenCount(content);
     return this.chatRepository.addMessage({
       sessionId,
       role: MessageRole.USER,
       content,
       tokenCount,
+      metadata,
     });
   }
 
-  async recordAssistantMessage(sessionId: string, content: string) {
+  async recordAssistantMessage(sessionId: string, content: string, metadata?: any) {
     const tokenCount = this.tokenEstimator.estimateTokenCount(content);
     return this.chatRepository.addMessage({
       sessionId,
       role: MessageRole.ASSISTANT,
       content,
       tokenCount,
+      metadata,
     });
   }
 
@@ -93,6 +95,7 @@ export class ChatMemoryService {
           content: msg.content,
           tokenCount: msgTokens,
           createdAt: msg.createdAt,
+          metadata: msg.metadata || undefined,
         });
         accumulatedTokens += msgTokens;
       } else {
@@ -188,6 +191,7 @@ export class ChatMemoryService {
       id: session.id,
       title: session.title,
       documentId: session.documentId,
+      documentIds: session.sources ? session.sources.map((s: any) => s.documentId).filter(Boolean) : [],
       documentTitle: session.document?.title || 'Dokumen Umum',
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,

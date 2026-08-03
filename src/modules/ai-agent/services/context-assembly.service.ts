@@ -18,6 +18,7 @@ export interface MultimodalAssembleOptions {
   topK?: number;
   similarityThreshold?: number;
   districts?: string[];
+  scrapedUrls?: Array<{ url: string; title: string; text: string }>;
 }
 
 export interface MultimodalPromptPayload {
@@ -77,12 +78,16 @@ export class ContextAssemblyService {
       topK = 10,
       similarityThreshold = 0.5,
       districts = [],
+      scrapedUrls = [],
     } = options;
 
     let contextPayloadText = '';
     const activeTone = tone.toLowerCase();
 
     // 1. Jalankan Penyaringan dan Partisi Dokumen Acuan (Standard vs External Scraped) [1.1.2]
+    let localContextText = '';
+    let externalContextText = '';
+
     if (documentIds.length > 0) {
       const docs = await Promise.all(documentIds.map((id) => this.repository.findById(id)));
       const validDocs = docs.filter((d): d is NonNullable<typeof d> => d !== null && d !== undefined);
@@ -91,9 +96,6 @@ export class ContextAssemblyService {
         // Partisi Dokumen Utama (Otoritas Lokal) dan Dokumen Pendukung (Eksternal / Scraped)
         const localDocs = validDocs.filter((d) => !(d.metadata as any)?.sourceUrl);
         const externalDocs = validDocs.filter((d) => !!(d.metadata as any)?.sourceUrl);
-
-        let localContextText = '';
-        let externalContextText = '';
 
         // Proses Partisi Dokumen Utama (Lokal BRIDA)
         if (localDocs.length > 0) {
@@ -128,19 +130,26 @@ export class ContextAssemblyService {
             );
           }
         }
-
-        // Susun payload teks terstruktur dengan header seksi yang tegas
-        const localSection = localContextText
-          ? `=== DOKUMEN UTAMA (OTORITAS LOKAL - GROUND TRUTH BRIDA MIMIKA) ===\n\nGunakan dokumen di bawah ini sebagai sumber kebenaran utama fakta daerah:\n\n${localContextText}`
-          : '';
-
-        const externalSection = externalContextText
-          ? `=== DOKUMEN PENDUKUNG (PENGAYAAN EKSTERNAL / KOMPARASI NASIONAL) ===\n\nGunakan dokumen di bawah ini secara proaktif untuk komparasi, dasar hukum pusat, atau pengayaan analisis:\n\n${externalContextText}`
-          : '';
-
-        contextPayloadText = [localSection, externalSection].filter(Boolean).join('\n\n');
       }
-    } else {
+    }
+
+    // Susun payload teks terstruktur dengan header seksi yang tegas
+    const localSection = localContextText
+      ? `=== DOKUMEN UTAMA (OTORITAS LOKAL - GROUND TRUTH BRIDA MIMIKA) ===\n\nGunakan dokumen di bawah ini sebagai sumber kebenaran utama fakta daerah:\n\n${localContextText}`
+      : '';
+
+    const externalSection = externalContextText
+      ? `=== DOKUMEN PENDUKUNG (PENGAYAAN EKSTERNAL / KOMPARASI NASIONAL) ===\n\nGunakan dokumen di bawah ini secara proaktif untuk komparasi, dasar hukum pusat, atau pengayaan analisis:\n\n${externalContextText}`
+      : '';
+
+    const scrapedSection = scrapedUrls.length > 0
+      ? `=== DOKUMEN PENDUKUNG (SITASI WEB LANGSUNG) ===\n\nBerikut adalah konten dari tautan web yang dimasukkan oleh pengguna atau hasil pencarian eksternal. Gunakan sebagai acuan pendukung analitis. Anda WAJIB menggunakan tautan URL aslinya secara langsung sebagai sitasi resmi (misalnya: [Judul Halaman](URL)):\n\n` +
+        scrapedUrls.map((page, idx) => `[SUMBER ${idx + 1}]:\nJudul: ${page.title}\nTautan: ${page.url}\nKonten:\n${page.text}`).join('\n\n')
+      : '';
+
+    contextPayloadText = [localSection, externalSection, scrapedSection].filter(Boolean).join('\n\n');
+
+    if (!contextPayloadText) {
       this.logger.log('[Zero-Reference Mode] Tidak ada dokumen acuan terdaftar. AI berfokus pada draf & ketikan pengguna.');
       contextPayloadText = 'Sistem berjalan dalam mode mandiri. Gunakan draf ketikan pengguna dan pengetahuan internal Anda untuk menulis naskah.';
     }

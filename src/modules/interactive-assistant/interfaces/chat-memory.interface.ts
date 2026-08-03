@@ -4,6 +4,7 @@ export interface ActiveChatMessage {
   content: string;
   tokenCount: number;
   createdAt: Date;
+  metadata?: any;
 }
 
 // Perbarui struktur ini agar mengamankan properti metadata artikel dari sesi

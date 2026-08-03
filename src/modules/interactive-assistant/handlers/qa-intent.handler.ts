@@ -86,8 +86,36 @@ export class QaIntentHandler implements IIntentHandler {
     // 1. Sanitasi prompt dari pola serangan Prompt Injection
     const sanitizedQuery = this.sanitizer.sanitize(payload.query);
 
-    // 2. Rekam pesan pengguna ke dalam database obrolan
-    await this.chatMemory.recordUserMessage(payload.sessionId, sanitizedQuery);
+    // Scraping URL proaktif jika ada tautan dalam query pengguna
+    const foundUrls = sanitizedQuery.match(this.URL_REGEX) || [];
+    const currentScrapedUrls: Array<{ url: string; title: string; text: string }> = [];
+
+    if (foundUrls.length > 0) {
+      this.logger.log(`[URL Interceptor] Mendeteksi ${foundUrls.length} tautan eksternal untuk diekstraksi.`);
+      const scrapeTasks = foundUrls.map(async (url: string) => {
+        try {
+          const scraped = await this.urlScraperService.scrapeAndExtract(url);
+          return {
+            url: scraped.sourceUrl,
+            title: scraped.title,
+            text: scraped.cleanText,
+          };
+        } catch (scrapeErr: any) {
+          this.logger.error(`[Parallel Scrape Failed] Gagal memproses URL ${url}: ${scrapeErr.message}`);
+          return null;
+        }
+      });
+
+      const scrapeResults = await Promise.all(scrapeTasks);
+      for (const res of scrapeResults) {
+        if (res) {
+          currentScrapedUrls.push(res);
+        }
+      }
+    }
+
+    // 2. Rekam pesan pengguna ke dalam database obrolan (dengan metadata scrapedUrls jika ada)
+    await this.chatMemory.recordUserMessage(payload.sessionId, sanitizedQuery, currentScrapedUrls.length > 0 ? { scrapedUrls: currentScrapedUrls } : undefined);
 
     // 3. Ambil sliding window memory sesi aktif
     const memory = await this.chatMemory.getActiveSlidingWindowMemory(payload.sessionId);
@@ -153,36 +181,9 @@ export class QaIntentHandler implements IIntentHandler {
     }
 
     // 5. PENANGANAN PROAKTIF EKSTERNAL (Web Scraping & Search) [1.1.2]
-    const foundUrls = sanitizedQuery.match(this.URL_REGEX) || [];
+    const proactiveScrapedUrls: Array<{ url: string; title: string; text: string }> = [];
+    let isProactiveSearch = false;
 
-    if (foundUrls.length > 0) {
-      // Skenario A: User menempelkan tautan eksternal secara langsung
-      this.logger.log(`[URL Interceptor] Mendeteksi ${foundUrls.length} tautan eksternal untuk diekstraksi.`);
-
-      const scrapeTasks = foundUrls.map(async (url) => {
-        try {
-          const scraped = await this.urlScraperService.scrapeAndExtract(url);
-          const virtualDoc = await this.ingestionService.processScrapedWebDocument(
-            scraped.cleanText,
-            scraped.title,
-            scraped.sourceUrl,
-            'Referensi Web Scraping',
-            { method: 'DIRECT_URL_SCRAPE', sessionId: payload.sessionId }
-          );
-          return virtualDoc.id;
-        } catch (scrapeErr: any) {
-          this.logger.error(`[Parallel Scrape Failed] Gagal memproses URL ${url}: ${scrapeErr.message}`);
-          return null;
-        }
-      });
-
-      const scrapedDocIds = (await Promise.all(scrapeTasks)).filter((id): id is string => id !== null);
-
-      for (const virtualDocId of scrapedDocIds) {
-        documentIds.push(virtualDocId);
-        await this.chatRepository.linkDocumentSource(payload.sessionId, virtualDocId);
-      }
-    } else {
       // Skenario B: Pencarian Proaktif (AI mencari suplemen kontekstual secara proaktif)
       const isAnalyticalQuery = sanitizedQuery.length > 12 &&
         !/^(halo|hi|hai|pagi|siang|sore|malam|terima kasih|thanks|p|tes|test)/i.test(sanitizedQuery);
@@ -193,33 +194,40 @@ export class QaIntentHandler implements IIntentHandler {
           const searchResults = await this.webSearchService.searchReputableWeb(sanitizedQuery, 2);
 
           if (searchResults && searchResults.length > 0) {
-            const compiledSearchText = searchResults
-              .map((res, i) => `=== ARTIKEL LUAR ${i + 1}: ${res.title} ===\nTautan: ${res.link}\nRingkasan Fakta: ${res.snippet}`)
-              .join('\n\n');
-
-            const virtualDoc = await this.ingestionService.processScrapedWebDocument(
-              compiledSearchText,
-              `Pengayaan Web: ${sanitizedQuery.slice(0, 30)}...`,
-              searchResults[0].link,
-              'Pengayaan Proaktif Web',
-              { queryUsed: sanitizedQuery, sessionId: payload.sessionId }
-            );
-
-            documentIds.push(virtualDoc.id);
-            await this.chatRepository.linkDocumentSource(payload.sessionId, virtualDoc.id);
-            this.logger.log(`[Proactive Search] Konteks eksternal tervalidasi berhasil diintegrasikan ke RAG pipeline.`);
+            isProactiveSearch = true;
+            searchResults.forEach((res, i) => {
+              proactiveScrapedUrls.push({
+                url: res.link,
+                title: res.title,
+                text: `=== ARTIKEL LUAR ${i + 1}: ${res.title} ===\nTautan: ${res.link}\nRingkasan Fakta: ${res.snippet}`,
+              });
+            });
+            this.logger.log(`[Proactive Search] Konteks eksternal tervalidasi berhasil diintegrasikan secara transien.`);
           }
         } catch (searchErr: any) {
           this.logger.error(`[Proactive Search Failed] Gagal mengayakan konteks eksternal: ${searchErr.message}`);
         }
       }
-    }
 
-    // Format riwayat obrolan jangka pendek untuk prompt
-    const historyMessages: MultimodalChatMessage[] = memory.activeMessages.map((m) => ({
-      role: m.role === 'USER' ? 'user' : 'assistant',
-      content: m.content,
-    }));
+    // Format riwayat obrolan jangka pendek untuk prompt, dan kumpulkan scrapedUrls yang ada di metadata
+    const scrapedUrlsFromHistory: Array<{ url: string; title: string; text: string }> = [];
+    const historyMessages: MultimodalChatMessage[] = memory.activeMessages.map((m) => {
+      const meta = m.metadata as any;
+      if (meta && Array.isArray(meta.scrapedUrls)) {
+        scrapedUrlsFromHistory.push(...meta.scrapedUrls);
+      }
+      return {
+        role: m.role === 'USER' ? 'user' : 'assistant',
+        content: m.content,
+      };
+    });
+
+    // Satukan seluruh scrapedUrls transien
+    const allScrapedUrls = [
+      ...scrapedUrlsFromHistory,
+      ...currentScrapedUrls,
+      ...proactiveScrapedUrls,
+    ];
 
     // 6. Rakit Prompt Payload Multimodal Terpadu via Context Broker
     const promptPayload = await this.contextAssembly.assemblePromptPayload({
@@ -230,6 +238,7 @@ export class QaIntentHandler implements IIntentHandler {
       tone: memory.tone || 'solutif',
       targetLength: memory.targetLength || 'MEDIUM',
       districts: payload.districts,
+      scrapedUrls: allScrapedUrls,
     });
 
     // Sisipkan sejarah obrolan dan ringkasan episodik jangka panjang ke dalam prompt payload
@@ -277,9 +286,13 @@ export class QaIntentHandler implements IIntentHandler {
       this.logger.log(`[State Sync] Draf naskah dan judul artikel aktif berhasil disinkronkan ke PostgreSQL.`);
     }
 
-    // 9. Simpan balasan AI Agent ke dalam riwayat obrolan
+    // 9. Simpan balasan AI Agent ke dalam riwayat obrolan (dengan metadata scrapedUrls jika ini adalah hasil proactive search)
     const assistantResponseContent = JSON.stringify(analysisResult);
-    await this.chatMemory.recordAssistantMessage(payload.sessionId, assistantResponseContent);
+    await this.chatMemory.recordAssistantMessage(
+      payload.sessionId,
+      assistantResponseContent,
+      isProactiveSearch && proactiveScrapedUrls.length > 0 ? { scrapedUrls: proactiveScrapedUrls } : undefined
+    );
 
     // 10. Kompresi Memori Latar Belakang (Asynchronous Compaction Guard)
     if (
