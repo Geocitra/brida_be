@@ -195,10 +195,13 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
               box-sizing: border-box;
             }
 
-            body {
+            body, p, ul, ol, li, table, td, th {
               font-family: '${fontFamily}', sans-serif;
               font-size: ${fontSize}pt;
               line-height: ${lineSpacing};
+            }
+
+            body {
               margin: 0;
               padding: 0;
               background: white;
@@ -222,7 +225,6 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
 
             li {
               margin-bottom: 4px;
-              line-height: ${lineSpacing};
             }
 
             div[data-type="page-break"] {
