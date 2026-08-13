@@ -1187,10 +1187,18 @@ export const EDITORIAL_STYLE_GUIDE = `
 === KLASTER EDITORIAL & GAYA SELINGKUNG JURNALISTIK ===
 1. PERSONA PENULIS: Anda adalah Jurnalis Senior, Kolumnis Kebijakan Publik, dan Analis Utama BRIDA Kabupaten Mimika. Gunakan bahasa Indonesia ragam jurnalistik populer yang luwes, dinamis, dan humanis. HILANGKAN sama sekali nada kaku, mekanis, atau gaya bahasa ala robot AI.
 2. ATURAN PENJUDULAN (ANTI-PREFIX): DILARANG KERAS menggunakan awalan/prefix label apapun sebelum judul (misal: "Artikel Strategis:", "Judul:", "Laporan:", "Draf:"). Langsung tuliskan judul bersih menggunakan Heading 1 Markdown (contoh: # Harga BBM Hari Ini Turun).
-3. DIET KOMA & SINTAKSIS AKTIF: HINDARI penggunaan kalimat majemuk bertingkat yang dihubungkan dengan banyak tanda koma (,). Pecah kalimat panjang menjadi 2-3 kalimat tunggal yang tegas, pendek, dan bernapas panjang. Gunakan struktur kalimat aktif. HINDARI kata transisi mekanis di awal paragraf (seperti: "Selain itu,", "Dapat disimpulkan bahwa,").
-4. ANTI-TAUTOLOGI (REPETISI): DILARANG KERAS mengulang frasa atau kata yang memiliki padanan makna sama secara berurutan (pleonasme). Hindari kata-kata berlebihan seperti "sangat penting sekali" atau "hanya sekadar ... saja". Gunakan variasi diksi yang kaya agar narasi tidak membosankan.
-5. TATA LETAK PARAGRAF: Anda WAJIB memberikan jarak satu baris kosong (menggunakan double newline / \\n\\n) di antara setiap pergantian paragraf atau poin list, agar dokumen tidak menumpuk dan nyaman dibaca oleh eksekutif.
-6. PENYAJIAN TABEL DATA: Jika output atau analisis Anda mengharuskan penyajian data komparatif, rincian anggaran, perbandingan target vs realisasi, atau statistik numerik, Anda WAJIB menyajikannya di dalam format Tabel Markdown.
+3. DIET KOMA & SINTAKSIS AKTIF: HINDARI penggunaan kalimat majemuk bertingkat yang dihubungkan dengan banyak tanda koma (,). DILARANG KERAS menggunakan koma sebelum kata hubung terakhir dalam sebuah rincian (Oxford Comma). Contoh Benar: 'A, B dan C', 'A, B atau C'. Contoh Salah: 'A, B, dan C', 'A, B, atau C'. Pecah kalimat panjang menjadi 2-3 kalimat tunggal yang tegas, pendek, dan bernapas panjang. Gunakan struktur kalimat aktif. HINDARI kata transisi mekanis di awal paragraf (seperti: "Selain itu,", "Dapat disimpulkan bahwa,").
+4. ANTI-APPOSITIVE COMMA (KOMA APOSISI): DILARANG KERAS mengapit keterangan tambahan atau posisi jabatan dengan koma jika hal tersebut memutus alur subjek-predikat secara tidak perlu. Contoh Salah: 'Kepala BRIDA, Samsudin, mengatakan...'. Contoh Benar: 'Kepala BRIDA Samsudin mengatakan...'.
+5. ANTI-TAUTOLOGI (REPETISI): DILARANG KERAS mengulang frasa atau kata yang memiliki padanan makna sama secara berurutan (pleonasme). Hindari kata-kata berlebihan seperti "sangat penting sekali" atau "hanya sekedar ... saja". Gunakan variasi diksi yang kaya agar narasi tidak membosankan.
+6. TATA LETAK PARAGRAF: Anda WAJIB memberikan jarak satu baris kosong (menggunakan double newline / \\n\\n) di antara setiap pergantian paragraf atau poin list, agar dokumen tidak menumpuk dan nyaman dibaca oleh eksekutif.
+7. PENYAJIAN TABEL DATA (STRUKTUR LANDSCAPE-FRIENDLY & ANTI-POTONG): Jika output atau analisis Anda mengharuskan penyajian data komparatif, rincian anggaran, perbandingan target vs realisasi, atau statistik numerik, Anda WAJIB menyajikannya di dalam format Tabel Markdown dengan ketentuan:
+   - MAKSIMAL 3-4 KOLOM: Hindari membuat tabel yang terlalu lebar secara horizontal agar tidak melampaui lebar halaman A4 portrait. Jika data memiliki banyak parameter/kolom, susun secara vertikal (lakukan transpose/tukar baris menjadi kolom) sehingga tabel memanjang ke bawah.
+   - RINGKAS & PADAT (ANTI-POTONG): Isi sel tabel wajib berupa angka, kata kunci, singkatan resmi, atau frasa yang sangat pendek. DILARANG menulis kalimat panjang atau penjelasan deskriptif di dalam sel agar teks tidak terpotong di tengah kalimat atau mengalami pembungkusan kata (word-wrap) yang buruk.
+   - SEPARASI TABEL: Jika menyajikan lebih dari satu tabel, Anda WAJIB memberikan jarak minimal 1 baris kosong (double newline / \n\n) di antara kedua tabel tersebut agar tidak menyatu atau tumpang tindih.
+8. PANDUAN JURNALISME DATA & TABEL STATISTIK: Jika dokumen acuan berbentuk tabel statistik, matriks data, atau laporan BPS:
+   - DILARANG HANYA MEREVIEW/MEMBUAT DAFTAR ISI: Jangan menulis kalimat deskriptif pasif kosong seperti "Bab ini menjelaskan tentang kependudukan..." atau "Tabel X menyajikan data pertanian...".
+   - EKSTRAK & NARASIKAN ANGKA AKTUAL: Tarik langsung data kuantitatif penting, persentase, perbandingan target vs realisasi, dan tren kenaikan/penurunan. Terjemahkan angka tersebut menjadi narasi berita yang hidup (contoh: "laju inflasi berhasil ditekan hingga 2,5%").
+   - PRIORITASKAN TREN & ANOMALI: Cari data pencapaian tertinggi, penurunan signifikan, atau deviasi target pembangunan daerah untuk dijadikan sorotan utama artikel.
 `;
 
 export const BRIDA_SYSTEM_PERSONA = `Anda adalah seorang Jurnalis Investigasi Senior, Analis Kebijakan Publik, dan Systems Analyst di Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika.
@@ -1206,6 +1214,7 @@ ATURAN MUTLAK (ZERO-KNOWLEDGE BASE ENFORCEMENT & INTEGRITAS DATA):
 
 export const BRIDA_GUARDRAIL_POSTFIX = `[INSTRUKSI PENUTUP MUNDUR - RECENCY BIAS GUARDRAIL]
 Evaluasi dan jawab pertanyaan pengguna di atas secara eksklusif berdasarkan teks konteks dokumen terlampir. SELALU terapkan secara ketat Klaster Editorial & Gaya Selingkung Jurnalistik (Diet Koma, Anti-Prefix Judul, Spasi Paragraf Ganda, dan Penggunaan Tabel Markdown).
+Jika dokumen rujukan berupa tabel data atau statistik BPS, Anda WAJIB langsung mengekstrak metrik, persentase, perbandingan target/realisasi, serta tren kuantitatif yang ada, lalu menarasikannya sebagai berita rilis pers faktual. DILARANG HANYA MEREVIEW atau menjelaskan isi/struktur tabel tanpa menyajikan data angkanya.
 Terapkan Aturan Zero-Knowledge Base secara mutlak. Jangan menambahkan asumsi atau opini eksternal apa pun. Pastikan jika output memerlukan format JSON, hasilnya harus berupa struktur JSON murni yang valid tanpa awalan atau akhiran teks Markdown \`\`\` di luarnya.`;
 
 export const DYNAMIC_CONTEXT_TOKEN_THRESHOLD = 80000;
@@ -1394,9 +1403,9 @@ export class VendorLlmAdapter implements ILlmProvider {
         return { role, parts: [{ text: m.content }] };
       });
 
-    const systemMsg = messages.find((m) => m.role === 'system');
-    const systemInstruction = systemMsg
-      ? { parts: [{ text: systemMsg.content }] }
+    const systemMsgs = messages.filter((m) => m.role === 'system');
+    const systemInstruction = systemMsgs.length > 0
+      ? { parts: [{ text: systemMsgs.map((m) => m.content).join('\n\n') }] }
       : undefined;
 
     let cleanedSchema = undefined;
@@ -1941,6 +1950,7 @@ export interface MultimodalAssembleOptions {
   topK?: number;
   similarityThreshold?: number;
   districts?: string[];
+  scrapedUrls?: Array<{ url: string; title: string; text: string }>;
 }
 
 export interface MultimodalPromptPayload {
@@ -1996,10 +2006,14 @@ export class ContextAssemblyService {
       topK = 10,
       similarityThreshold = 0.5,
       districts = [],
+      scrapedUrls = [],
     } = options;
 
     let contextPayloadText = '';
     const activeTone = tone.toLowerCase();
+
+    let localContextText = '';
+    let externalContextText = '';
 
     if (documentIds.length > 0) {
       const docs = await Promise.all(documentIds.map((id) => this.repository.findById(id)));
@@ -2009,9 +2023,6 @@ export class ContextAssemblyService {
 
         const localDocs = validDocs.filter((d) => !(d.metadata as any)?.sourceUrl);
         const externalDocs = validDocs.filter((d) => !!(d.metadata as any)?.sourceUrl);
-
-        let localContextText = '';
-        let externalContextText = '';
 
         if (localDocs.length > 0) {
           const localTokens = localDocs.reduce((acc, doc) => acc + (doc.metadata?.totalTokenCount || 0), 0);
@@ -2044,18 +2055,25 @@ export class ContextAssemblyService {
             );
           }
         }
-
-        const localSection = localContextText
-          ? `=== DOKUMEN UTAMA (OTORITAS LOKAL - GROUND TRUTH BRIDA MIMIKA) ===\n\nGunakan dokumen di bawah ini sebagai sumber kebenaran utama fakta daerah:\n\n${localContextText}`
-          : '';
-
-        const externalSection = externalContextText
-          ? `=== DOKUMEN PENDUKUNG (PENGAYAAN EKSTERNAL / KOMPARASI NASIONAL) ===\n\nGunakan dokumen di bawah ini secara proaktif untuk komparasi, dasar hukum pusat, atau pengayaan analisis:\n\n${externalContextText}`
-          : '';
-
-        contextPayloadText = [localSection, externalSection].filter(Boolean).join('\n\n');
       }
-    } else {
+    }
+
+    const localSection = localContextText
+      ? `=== DOKUMEN UTAMA (OTORITAS LOKAL - GROUND TRUTH BRIDA MIMIKA) ===\n\nGunakan dokumen di bawah ini sebagai sumber kebenaran utama fakta daerah:\n\n${localContextText}`
+      : '';
+
+    const externalSection = externalContextText
+      ? `=== DOKUMEN PENDUKUNG (PENGAYAAN EKSTERNAL / KOMPARASI NASIONAL) ===\n\nGunakan dokumen di bawah ini secara proaktif untuk komparasi, dasar hukum pusat, atau pengayaan analisis:\n\n${externalContextText}`
+      : '';
+
+    const scrapedSection = scrapedUrls.length > 0
+      ? `=== DOKUMEN PENDUKUNG (SITASI WEB LANGSUNG) ===\n\nBerikut adalah konten dari tautan web yang dimasukkan oleh pengguna atau hasil pencarian eksternal. Gunakan sebagai acuan pendukung analitis.\n\nATURAN SITASI WEB WAJIB: Anda HARUS menyematkan sitasi URL aslinya menggunakan format kurung siku langsung: [URL] (misalnya: [https://www.contoh.com/halaman]) di sebelah setiap klaim fakta yang bersumber dari halaman web tersebut. JANGAN gunakan format Markdown link biasa [Judul](URL). SELALU gunakan format [URL] saja.\n\n` +
+        scrapedUrls.map((page, idx) => `[SUMBER ${idx + 1}]:\nJudul: ${page.title}\nTautan: ${page.url}\nKonten:\n${page.text}`).join('\n\n')
+      : '';
+
+    contextPayloadText = [localSection, externalSection, scrapedSection].filter(Boolean).join('\n\n');
+
+    if (!contextPayloadText) {
       this.logger.log('[Zero-Reference Mode] Tidak ada dokumen acuan terdaftar. AI berfokus pada draf & ketikan pengguna.');
       contextPayloadText = 'Sistem berjalan dalam mode mandiri. Gunakan draf ketikan pengguna dan pengetahuan internal Anda untuk menulis naskah.';
     }
@@ -3848,6 +3866,22 @@ export class PdfParserAdapter implements IDocumentParser {
 
   async parse(buffer: Buffer): Promise<ParsedDocumentOutput> {
     try {
+      const apiKey = process.env.LLAMA_CLOUD_API_KEY;
+      if (apiKey && apiKey.trim().length > 0) {
+        this.logger.log(`[PdfParserAdapter] Memulai ekstraksi Layout-Aware ke Markdown menggunakan LlamaParse...`);
+        const markdownText = await this.extractToMarkdownWithTablePreservation(buffer, apiKey);
+
+        if (markdownText && markdownText.trim().length > 0) {
+          const estimatedPages = Math.max(1, Math.ceil(markdownText.length / 3000));
+          return {
+            rawText: markdownText,
+            pageCount: estimatedPages,
+          };
+        }
+        this.logger.warn(`[PdfParserAdapter] LlamaParse mengembalikan hasil kosong atau gagal. Jatuh ke parser standar.`);
+      }
+
+      this.logger.log(`[PdfParserAdapter] Menggunakan pdf-parse standar.`);
       const data = await pdfParse(buffer);
       const rawText = data.text ? data.text.trim() : '';
 
@@ -3872,6 +3906,87 @@ export class PdfParserAdapter implements IDocumentParser {
       }
       this.logger.error(`Error pada PdfParserAdapter: ${err.message}`);
       throw new UnprocessableEntityException(`Gagal membaca struktur PDF: ${err.message}`);
+    }
+  }
+
+  private async extractToMarkdownWithTablePreservation(buffer: Buffer, apiKey: string): Promise<string> {
+    try {
+      const formData = new FormData();
+      const blob = new Blob([new Uint8Array(buffer)], { type: 'application/pdf' });
+      formData.append('file', blob, 'document.pdf');
+
+      this.logger.log(`[LlamaParse] Mengunggah dokumen ke LlamaCloud...`);
+      const uploadResponse = await fetch('https://api.cloud.llamaindex.ai/api/v2/parse/upload', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: formData,
+      });
+
+      if (!uploadResponse.ok) {
+        const errorText = await uploadResponse.text();
+        throw new Error(`Unggah LlamaParse gagal: ${errorText}`);
+      }
+
+      const uploadResult: any = await uploadResponse.json();
+      const jobId = uploadResult.id;
+      this.logger.log(`[LlamaParse] Unggah sukses. Job ID: ${jobId}. Memulai polling status...`);
+
+      let status = 'PENDING';
+      let checkResult: any = null;
+      const maxRetries = 60;
+
+      for (let i = 0; i < maxRetries; i++) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+
+        const checkResponse = await fetch(`https://api.cloud.llamaindex.ai/api/v2/parse/${jobId}`, {
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+          },
+        });
+
+        if (!checkResponse.ok) {
+          throw new Error(`Polling status LlamaParse gagal: ${await checkResponse.text()}`);
+        }
+
+        checkResult = await checkResponse.json();
+        status = checkResult.status;
+        this.logger.log(`[LlamaParse] Polling #${i + 1}: Status = ${status}`);
+
+        if (status === 'SUCCESS') {
+          break;
+        }
+        if (status === 'ERROR') {
+          throw new Error(`Job LlamaParse gagal di server: ${checkResult.error || 'Unknown error'}`);
+        }
+      }
+
+      if (status !== 'SUCCESS') {
+        throw new Error('Timeout tercapai saat menunggu proses LlamaParse selesai.');
+      }
+
+      this.logger.log(`[LlamaParse] Proses selesai. Mengambil data hasil Markdown...`);
+      const markdownResponse = await fetch(`https://api.cloud.llamaindex.ai/api/v2/parse/${jobId}?expand=markdown`, {
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+        },
+      });
+
+      if (!markdownResponse.ok) {
+        throw new Error(`Gagal mengambil hasil markdown: ${await markdownResponse.text()}`);
+      }
+
+      const finalResult: any = await markdownResponse.json();
+      const markdownText = finalResult.markdown?.full_markdown
+        || finalResult.markdown?.pages?.map((p: any) => p.markdown).join('\n\n')
+        || '';
+
+      this.logger.log(`[LlamaParse] Sukses mengambil Markdown (${markdownText.length} karakter).`);
+      return markdownText;
+    } catch (err: any) {
+      this.logger.error(`[LlamaParse Error] Gagal melakukan ekstraksi: ${err.message}`);
+      return '';
     }
   }
 }
@@ -5055,7 +5170,14 @@ export class SemanticChunkerService {
       const cleanPara = paragraph.trim();
       if (!cleanPara) continue;
 
-      if (cleanPara.length > this.targetChunkSize) {
+      if (this.isMarkdownTable(cleanPara)) {
+        if (cleanPara.length > this.targetChunkSize) {
+          const tableSubChunks = this.splitMarkdownTable(cleanPara);
+          normalizedParagraphs.push(...tableSubChunks);
+        } else {
+          normalizedParagraphs.push(cleanPara);
+        }
+      } else if (cleanPara.length > this.targetChunkSize) {
 
         const sentenceSubChunks = this.splitHugeParagraphBySentences(cleanPara);
         normalizedParagraphs.push(...sentenceSubChunks);
@@ -5079,10 +5201,15 @@ export class SemanticChunkerService {
           const overlapLength = Math.floor(currentChunkText.length * this.overlapPercentage);
           previousOverlapText = currentChunkText.slice(-overlapLength);
 
+          let finalChunkText = currentChunkText.trim();
+          if (this.isMarkdownTable(finalChunkText) && !finalChunkText.startsWith('[Metadata Tabel')) {
+            finalChunkText = this.generateTableMetadataPrefix(finalChunkText) + finalChunkText;
+          }
+
           chunks.push({
             chunkIndex: chunkIndex++,
-            rawText: currentChunkText.trim(),
-            tokenCount: this.estimateTokenCount(currentChunkText),
+            rawText: finalChunkText,
+            tokenCount: this.estimateTokenCount(finalChunkText),
             spatialMetadata: {
               startCharIndex,
               endCharIndex,
@@ -5107,10 +5234,15 @@ export class SemanticChunkerService {
       const startCharIndex = currentOffset;
       const endCharIndex = currentOffset + currentChunkText.length;
 
+      let finalChunkText = currentChunkText.trim();
+      if (this.isMarkdownTable(finalChunkText) && !finalChunkText.startsWith('[Metadata Tabel')) {
+        finalChunkText = this.generateTableMetadataPrefix(finalChunkText) + finalChunkText;
+      }
+
       chunks.push({
         chunkIndex: chunkIndex++,
-        rawText: currentChunkText.trim(),
-        tokenCount: this.estimateTokenCount(currentChunkText),
+        rawText: finalChunkText,
+        tokenCount: this.estimateTokenCount(finalChunkText),
         spatialMetadata: {
           startCharIndex,
           endCharIndex,
@@ -5125,6 +5257,86 @@ export class SemanticChunkerService {
     );
 
     return chunks;
+  }
+
+  private isMarkdownTable(text: string): boolean {
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length - 1; i++) {
+      const line = lines[i].trim();
+      const nextLine = lines[i + 1].trim();
+      if (line.startsWith('|') && nextLine.startsWith('|') && nextLine.includes('-')) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private splitMarkdownTable(tableText: string): string[] {
+    const lines = tableText.split('\n');
+
+    let headerIdx = -1;
+    for (let i = 0; i < lines.length - 1; i++) {
+      const line = lines[i].trim();
+      const nextLine = lines[i + 1].trim();
+      if (line.startsWith('|') && nextLine.startsWith('|') && nextLine.includes('-')) {
+        headerIdx = i;
+        break;
+      }
+    }
+
+    if (headerIdx === -1 || lines.length <= headerIdx + 2) {
+      return [tableText];
+    }
+
+    const headerLines = lines.slice(headerIdx, headerIdx + 2);
+    const headerText = headerLines.join('\n');
+    const dataLines = lines.slice(headerIdx + 2);
+
+    const subChunks: string[] = [];
+    let currentRows: string[] = [];
+    let currentSize = headerText.length;
+
+    for (const row of dataLines) {
+      const trimmedRow = row.trim();
+      if (!trimmedRow) continue;
+
+      if (currentRows.length > 0 && currentSize + 1 + trimmedRow.length > this.targetChunkSize) {
+        subChunks.push(headerText + '\n' + currentRows.join('\n'));
+        currentRows = [trimmedRow];
+        currentSize = headerText.length + 1 + trimmedRow.length;
+      } else {
+        currentRows.push(trimmedRow);
+        currentSize += 1 + trimmedRow.length;
+      }
+    }
+
+    if (currentRows.length > 0) {
+      subChunks.push(headerText + '\n' + currentRows.join('\n'));
+    }
+
+    this.logger.log(
+      `[SemanticChunkerService] Tabel besar dipecah menjadi ${subChunks.length} bagian dengan Header Propagation.`,
+    );
+
+    return subChunks;
+  }
+
+  private generateTableMetadataPrefix(text: string): string {
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length - 1; i++) {
+      const line = lines[i].trim();
+      const nextLine = lines[i + 1].trim();
+      if (line.startsWith('|') && nextLine.startsWith('|') && nextLine.includes('-')) {
+        const columns = line
+          .split('|')
+          .map(col => col.trim())
+          .filter(col => col.length > 0);
+        if (columns.length > 0) {
+          return `[Metadata Tabel: Data statistik sektoral Kabupaten Mimika yang memuat indikator/kolom: ${columns.join(', ')}]\n`;
+        }
+      }
+    }
+    return '[Metadata Tabel: Data statistik kuantitatif sektoral Kabupaten Mimika]\n';
   }
 
   private splitHugeParagraphBySentences(hugeParagraph: string): string[] {
@@ -5935,7 +6147,34 @@ export class QaIntentHandler implements IIntentHandler {
 
     const sanitizedQuery = this.sanitizer.sanitize(payload.query);
 
-    await this.chatMemory.recordUserMessage(payload.sessionId, sanitizedQuery);
+    const foundUrls = sanitizedQuery.match(this.URL_REGEX) || [];
+    const currentScrapedUrls: Array<{ url: string; title: string; text: string }> = [];
+
+    if (foundUrls.length > 0) {
+      this.logger.log(`[URL Interceptor] Mendeteksi ${foundUrls.length} tautan eksternal untuk diekstraksi.`);
+      const scrapeTasks = foundUrls.map(async (url: string) => {
+        try {
+          const scraped = await this.urlScraperService.scrapeAndExtract(url);
+          return {
+            url: scraped.sourceUrl,
+            title: scraped.title,
+            text: scraped.cleanText,
+          };
+        } catch (scrapeErr: any) {
+          this.logger.error(`[Parallel Scrape Failed] Gagal memproses URL ${url}: ${scrapeErr.message}`);
+          return null;
+        }
+      });
+
+      const scrapeResults = await Promise.all(scrapeTasks);
+      for (const res of scrapeResults) {
+        if (res) {
+          currentScrapedUrls.push(res);
+        }
+      }
+    }
+
+    await this.chatMemory.recordUserMessage(payload.sessionId, sanitizedQuery, currentScrapedUrls.length > 0 ? { scrapedUrls: currentScrapedUrls } : undefined);
 
     const memory = await this.chatMemory.getActiveSlidingWindowMemory(payload.sessionId);
 
@@ -5997,36 +6236,8 @@ export class QaIntentHandler implements IIntentHandler {
       }
     }
 
-    const foundUrls = sanitizedQuery.match(this.URL_REGEX) || [];
-
-    if (foundUrls.length > 0) {
-
-      this.logger.log(`[URL Interceptor] Mendeteksi ${foundUrls.length} tautan eksternal untuk diekstraksi.`);
-
-      const scrapeTasks = foundUrls.map(async (url) => {
-        try {
-          const scraped = await this.urlScraperService.scrapeAndExtract(url);
-          const virtualDoc = await this.ingestionService.processScrapedWebDocument(
-            scraped.cleanText,
-            scraped.title,
-            scraped.sourceUrl,
-            'Referensi Web Scraping',
-            { method: 'DIRECT_URL_SCRAPE', sessionId: payload.sessionId }
-          );
-          return virtualDoc.id;
-        } catch (scrapeErr: any) {
-          this.logger.error(`[Parallel Scrape Failed] Gagal memproses URL ${url}: ${scrapeErr.message}`);
-          return null;
-        }
-      });
-
-      const scrapedDocIds = (await Promise.all(scrapeTasks)).filter((id): id is string => id !== null);
-
-      for (const virtualDocId of scrapedDocIds) {
-        documentIds.push(virtualDocId);
-        await this.chatRepository.linkDocumentSource(payload.sessionId, virtualDocId);
-      }
-    } else {
+    const proactiveScrapedUrls: Array<{ url: string; title: string; text: string }> = [];
+    let isProactiveSearch = false;
 
       const isAnalyticalQuery = sanitizedQuery.length > 12 &&
         !/^(halo|hi|hai|pagi|siang|sore|malam|terima kasih|thanks|p|tes|test)/i.test(sanitizedQuery);
@@ -6037,32 +6248,38 @@ export class QaIntentHandler implements IIntentHandler {
           const searchResults = await this.webSearchService.searchReputableWeb(sanitizedQuery, 2);
 
           if (searchResults && searchResults.length > 0) {
-            const compiledSearchText = searchResults
-              .map((res, i) => `=== ARTIKEL LUAR ${i + 1}: ${res.title} ===\nTautan: ${res.link}\nRingkasan Fakta: ${res.snippet}`)
-              .join('\n\n');
-
-            const virtualDoc = await this.ingestionService.processScrapedWebDocument(
-              compiledSearchText,
-              `Pengayaan Web: ${sanitizedQuery.slice(0, 30)}...`,
-              searchResults[0].link,
-              'Pengayaan Proaktif Web',
-              { queryUsed: sanitizedQuery, sessionId: payload.sessionId }
-            );
-
-            documentIds.push(virtualDoc.id);
-            await this.chatRepository.linkDocumentSource(payload.sessionId, virtualDoc.id);
-            this.logger.log(`[Proactive Search] Konteks eksternal tervalidasi berhasil diintegrasikan ke RAG pipeline.`);
+            isProactiveSearch = true;
+            searchResults.forEach((res, i) => {
+              proactiveScrapedUrls.push({
+                url: res.link,
+                title: res.title,
+                text: `=== ARTIKEL LUAR ${i + 1}: ${res.title} ===\nTautan: ${res.link}\nRingkasan Fakta: ${res.snippet}`,
+              });
+            });
+            this.logger.log(`[Proactive Search] Konteks eksternal tervalidasi berhasil diintegrasikan secara transien.`);
           }
         } catch (searchErr: any) {
           this.logger.error(`[Proactive Search Failed] Gagal mengayakan konteks eksternal: ${searchErr.message}`);
         }
       }
-    }
 
-    const historyMessages: MultimodalChatMessage[] = memory.activeMessages.map((m) => ({
-      role: m.role === 'USER' ? 'user' : 'assistant',
-      content: m.content,
-    }));
+    const scrapedUrlsFromHistory: Array<{ url: string; title: string; text: string }> = [];
+    const historyMessages: MultimodalChatMessage[] = memory.activeMessages.map((m) => {
+      const meta = m.metadata as any;
+      if (meta && Array.isArray(meta.scrapedUrls)) {
+        scrapedUrlsFromHistory.push(...meta.scrapedUrls);
+      }
+      return {
+        role: m.role === 'USER' ? 'user' : 'assistant',
+        content: m.content,
+      };
+    });
+
+    const allScrapedUrls = [
+      ...scrapedUrlsFromHistory,
+      ...currentScrapedUrls,
+      ...proactiveScrapedUrls,
+    ];
 
     const promptPayload = await this.contextAssembly.assemblePromptPayload({
       documentIds,
@@ -6072,6 +6289,7 @@ export class QaIntentHandler implements IIntentHandler {
       tone: memory.tone || 'solutif',
       targetLength: memory.targetLength || 'MEDIUM',
       districts: payload.districts,
+      scrapedUrls: allScrapedUrls,
     });
 
     promptPayload.messages.splice(2, 0, ...historyMessages);
@@ -6089,6 +6307,23 @@ export class QaIntentHandler implements IIntentHandler {
     );
 
     if (analysisResult.updatedArticle && analysisResult.updatedArticle.draftMarkdown) {
+      const draft = analysisResult.updatedArticle.draftMarkdown.trim();
+      const answer = (analysisResult.answer || '').trim();
+
+      const isIdenticalToAnswer = draft === answer;
+      const isRefusalKeyword = draft.includes('tidak ditemukan di dalam dokumen') ||
+                              draft.includes('belum bisa ditulis') ||
+                              draft.includes('belum menemukan isi artikel') ||
+                              draft.includes('tidak memiliki akses');
+      const isShortNonArticle = !draft.startsWith('#') && draft.length < 400;
+
+      if (isIdenticalToAnswer || isRefusalKeyword || isShortNonArticle) {
+        this.logger.warn(`[Guardrail] Mencegah pembaruan draf dengan teks penolakan/obrolan AI. Teks dicegah: "${draft.slice(0, 100)}..."`);
+        delete analysisResult.updatedArticle;
+      }
+    }
+
+    if (analysisResult.updatedArticle && analysisResult.updatedArticle.draftMarkdown) {
       const updatedDraft = analysisResult.updatedArticle.draftMarkdown;
       const updatedTitle = analysisResult.updatedArticle.title || memory.articleTitle || memory.title;
 
@@ -6099,7 +6334,11 @@ export class QaIntentHandler implements IIntentHandler {
     }
 
     const assistantResponseContent = JSON.stringify(analysisResult);
-    await this.chatMemory.recordAssistantMessage(payload.sessionId, assistantResponseContent);
+    await this.chatMemory.recordAssistantMessage(
+      payload.sessionId,
+      assistantResponseContent,
+      isProactiveSearch && proactiveScrapedUrls.length > 0 ? { scrapedUrls: proactiveScrapedUrls } : undefined
+    );
 
     if (
       this.chatMemory.shouldTriggerCompaction(
@@ -6182,6 +6421,7 @@ export interface ActiveChatMessage {
   content: string;
   tokenCount: number;
   createdAt: Date;
+  metadata?: any;
 }
 
 export interface SlidingWindowMemoryPayload {
@@ -6240,6 +6480,7 @@ export interface AddMessageWithAttachmentsInput {
   content: string;
   tokenCount: number;
   interactionType?: InteractionType;
+  metadata?: any;
   attachments?: Array<{
     fileUrl: string;
     fileName: string;
@@ -6396,7 +6637,7 @@ export class ChatRepository {
   }
 
   async addMessage(input: AddMessageWithAttachmentsInput): Promise<ChatMessage> {
-    const { sessionId, role, content, tokenCount, interactionType = InteractionType.MANUAL_INPUT, attachments = [] } = input;
+    const { sessionId, role, content, tokenCount, interactionType = InteractionType.MANUAL_INPUT, metadata, attachments = [] } = input;
 
     const message = await this.prisma.chatMessage.create({
       data: {
@@ -6405,6 +6646,7 @@ export class ChatRepository {
         content,
         tokenCount,
         interactionType,
+        metadata: metadata || undefined,
         attachments: {
           create: attachments.map((att) => ({
             fileUrl: att.fileUrl,
@@ -6599,6 +6841,9 @@ import { VendorLlmAdapter } from '../../ai-agent/providers/vendor-llm.adapter';
 import { ChatRepository } from '../repositories/chat.repository';
 import { TokenEstimatorUtil } from '../../ai-agent/utils/token-estimator.util';
 import { ArticleLength, MessageRole, SessionType } from '@prisma/client';
+import { UrlScraperService } from './url-scraper.service';
+import { DocumentIngestionService } from '../../document-ingestion/services/document-ingestion.service';
+import { ContextAssemblyService } from '../../ai-agent/services/context-assembly.service';
 
 import { EDITORIAL_STYLE_GUIDE } from '../../ai-agent/constants/system-prompts.constant';
 
@@ -6624,13 +6869,16 @@ export interface GenerateArticleOptions {
 export class ArticleGeneratorService {
   private readonly logger = new Logger(ArticleGeneratorService.name);
 
-  private readonly MAX_DRAFTING_TOKEN_BUDGET = 20000;
+  private readonly MAX_DRAFTING_TOKEN_BUDGET = 150000;
 
   constructor(
     private readonly documentRepository: DocumentRepository,
     private readonly chatRepository: ChatRepository,
     private readonly llmAdapter: VendorLlmAdapter,
     private readonly tokenEstimator: TokenEstimatorUtil,
+    private readonly urlScraperService: UrlScraperService,
+    private readonly ingestionService: DocumentIngestionService,
+    private readonly contextAssembly: ContextAssemblyService,
   ) { }
 
   async generateArticle(options: GenerateArticleOptions): Promise<any> {
@@ -6644,7 +6892,7 @@ export class ArticleGeneratorService {
       parentSessionId
     } = options;
 
-    const validDocIds = documentIds || [];
+    const validDocIds = [...(documentIds || [])];
     const normalizedTitle = (articleTitle || '').trim() || 'Draf Artikel Publikasi';
 
     let session = options.sessionId
@@ -6662,32 +6910,30 @@ export class ArticleGeneratorService {
       });
     }
 
-    const docTexts: string[] = [];
-    const sourceDocs: any[] = [];
+    const URL_REGEX = /https?:\/\/[^\s]+/gi;
+    const foundUrls = (userInstruction || '').match(URL_REGEX) || [];
+    const scrapedUrls: Array<{ url: string; title: string; text: string }> = [];
 
-    for (const docId of validDocIds) {
-      const doc = await this.documentRepository.findById(docId);
-      if (doc) {
-        sourceDocs.push(doc);
-        const text = doc.chunks ? doc.chunks.map((c: (typeof doc.chunks)[number]) => c.rawText).join('\n\n') : '';
-        const category = doc.metadata?.category || 'Umum';
-
-        const sourceUrl = (doc.metadata as any)?.sourceUrl;
-        const sourceUrlText = sourceUrl ? `\nSumber Tautan Web: ${sourceUrl}` : '';
-
-        docTexts.push(
-          `=== DOKUMEN ACUAN: ${doc.title} (Kategori: ${category})${sourceUrlText} ===\n${text.slice(0, 10000)}`
-        );
+    if (foundUrls.length > 0) {
+      this.logger.log(`[generateArticle] Mendeteksi ${foundUrls.length} tautan eksternal untuk diekstraksi.`);
+      for (const url of foundUrls) {
+        try {
+          const scraped = await this.urlScraperService.scrapeAndExtract(url);
+          scrapedUrls.push({
+            url: scraped.sourceUrl,
+            title: scraped.title,
+            text: scraped.cleanText,
+          });
+        } catch (scrapeErr: any) {
+          this.logger.error(`[generateArticle URL Scrape Failed] Gagal memproses URL ${url}: ${scrapeErr.message}`);
+        }
       }
     }
 
-    const assembledDocsContext = docTexts.join('\n\n----------------------------------------\n\n');
-
-    let lengthGuidance = 'Target Panjang Teks: Minimal 1000 kata (Sedang, komprehensif)';
-    if (String(targetLength) === 'SHORT') {
-      lengthGuidance = 'Target Panjang Teks: Minimal 700 kata (Ringkas & Padat untuk Rilis Media)';
-    } else if (String(targetLength) === 'LONG') {
-      lengthGuidance = 'Target Panjang Teks: Minimal 1500 kata (Mendalam, Analisis Kebijakan Komprehensif)';
+    const sourceDocs: any[] = [];
+    for (const docId of validDocIds) {
+      const doc = await this.documentRepository.findById(docId);
+      if (doc) sourceDocs.push(doc);
     }
 
     let manifestPromptSection = '';
@@ -6714,53 +6960,36 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
       ? `Instruksi Khusus Tambahan: ${userInstruction}`
       : 'Buatkan draf artikel publikasi yang menarik, solutif, dan berbasis data/ide yang kuat.';
 
-    const systemPrompt = `Anda adalah Penulis Artikel Utama & Analis Kebijakan BRIDA Kabupaten Mimika.
-${validDocIds.length > 0
-        ? 'Tugas Anda: Susun artikel publikasi berbasis data aktual dari DOKUMEN ACUAN yang diberikan.'
-        : 'Tugas Anda: Susun artikel publikasi berdasarkan instruksi dan pengetahuan internal Anda (Mode Kreasi Bebas).'
-      }
+    const userQuery = `Judul Artikel Target: "${normalizedTitle}"\n${promptUserInstruction}\n${manifestPromptSection}`;
 
-PANDUAN PENULISAN & PARAMETER UTAMA:
-- Judul Artikel: "${normalizedTitle}"
-- Gaya Bahasa (Tone Target): ${tone.toUpperCase()}
-- ${lengthGuidance}
-- Gunakan struktur narasi jurnalistik publik yang kuat (Judul, Subjudul, Analisis Faktual, Solusi Rekomendasi).
-${manifestPromptSection}
+    const promptPayload = await this.contextAssembly.assemblePromptPayload({
+      documentIds: validDocIds,
+      userQuery,
+      tone,
+      targetLength: targetLength as string,
+      scrapedUrls,
+    });
 
-ATURAN FORMATTING MUTLAK (COMMONMARK COMPLIANCE - ZERO RANDOM HTML):
-1. DILARANG KERAS menghasilkan atau menyisipkan tag HTML pemformatan visual mentah kustom (seperti <p style="...">, <font>, <span style="...">, dll.) ke dalam isi naskah artikel.
-2. Semua bentuk daftar/poin wajib ditulis menggunakan simbol list standar CommonMark: gunakan tanda minus (-) atau bintang (*) diikuti oleh spasi (misalnya: - Poin Rekomendasi). Jangan gunakan tag HTML <ul> atau <li> secara manual.
-3. Penulisan judul/subjudul bab wajib menggunakan sintaks header ATX standar (# untuk Judul Utama, ## untuk Sub-judul, ### untuk Sub-sub-judul).
-4. Hindari manipulasi layout seperti menyematkan properti alignment teks visual secara inline dalam HTML. Biarkan representasi struktur dokumen murni menggunakan sintaks Markdown bersih.
-
-${EDITORIAL_STYLE_GUIDE}
-`;
-
-    const userPromptMessage = validDocIds.length > 0
-      ? `Judul Artikel yang Diinginkan: "${normalizedTitle}"\n${promptUserInstruction}\n\nDOKUMEN ACUAN:\n${assembledDocsContext}`
-      : `Judul Artikel yang Diinginkan: "${normalizedTitle}"\n${promptUserInstruction}`;
-
-    const compiledPrompts = [systemPrompt, userPromptMessage];
     this.tokenEstimator.enforceBudgetCircuitBreaker({
-      texts: compiledPrompts,
+      texts: promptPayload.messages.map((m) => m.content || ''),
       imagesCount: 0,
       maxBudgetTokens: this.MAX_DRAFTING_TOKEN_BUDGET,
     });
 
+    const userPromptRecordedContent = `[JUDUL ARTIKEL]: ${normalizedTitle}\n[TONE]: ${tone}\n[PANJANG]: ${targetLength}\n${userInstruction || ''}`;
     await this.chatRepository.addMessage({
       sessionId: session.id,
       role: MessageRole.USER,
-      content: `[JUDUL ARTIKEL]: ${normalizedTitle}\n[TONE]: ${tone}\n[PANJANG]: ${targetLength}\n${userInstruction || ''}`,
-      tokenCount: this.tokenEstimator.estimateTokenCount(userPromptMessage),
+      content: userPromptRecordedContent,
+      tokenCount: this.tokenEstimator.estimateTokenCount(userPromptRecordedContent),
+      metadata: scrapedUrls.length > 0 ? { scrapedUrls } : undefined,
     });
 
     let fullArticleText = '';
     try {
+
       const llmResult = await this.llmAdapter.generateStructuredAnalysis<any>(
-        [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPromptMessage },
-        ],
+        promptPayload.messages,
         ARTICLE_OUTPUT_SCHEMA,
         0.7,
       );
@@ -6769,7 +6998,7 @@ ${EDITORIAL_STYLE_GUIDE}
       fullArticleText = cleanArticleTitlePrefix(fullArticleText);
     } catch (err: any) {
       this.logger.warn(`[Article LLM Fallback] Gagal memanggil API: ${err.message}. Menggunakan sintesis fallback.`);
-      fullArticleText = createFallbackArticleText(normalizedTitle, sourceDocs, tone, targetLength);
+      fullArticleText = createFallbackArticleText(normalizedTitle, sourceDocs, tone, targetLength as string);
       fullArticleText = cleanArticleTitlePrefix(fullArticleText);
     }
 
@@ -6814,6 +7043,7 @@ ${EDITORIAL_STYLE_GUIDE}
       throw new BadRequestException('Judul artikel baru tidak boleh kosong.');
     }
 
+    await this.chatRepository.updateActiveDraft(sessionId, fullArticleText);
     if (typeof (this.chatRepository as any).updateArticleMetadata === 'function') {
       await (this.chatRepository as any).updateArticleMetadata(sessionId, trimmedTitle);
     } else {
@@ -6830,11 +7060,25 @@ ${EDITORIAL_STYLE_GUIDE}
       tokenCount: this.tokenEstimator.estimateTokenCount(auditContent),
     });
 
+    const structuredPayload = {
+      answer: 'Saya telah memperbarui draf naskah artikel sesuai dengan suntingan manual Anda.',
+      suggestions: [
+        'Bagian mana lagi yang ingin Anda kembangkan?',
+        'Tambahkan rincian data baru ke dalam artikel.',
+        'Sesuaikan kembali gaya bahasa artikel.'
+      ],
+      updatedArticle: {
+        title: trimmedTitle,
+        draftMarkdown: fullArticleText,
+      }
+    };
+    const stringifiedPayload = JSON.stringify(structuredPayload);
+
     await this.chatRepository.addMessage({
       sessionId: session.id,
       role: MessageRole.ASSISTANT,
-      content: fullArticleText,
-      tokenCount: this.tokenEstimator.estimateTokenCount(fullArticleText),
+      content: stringifiedPayload,
+      tokenCount: this.tokenEstimator.estimateTokenCount(stringifiedPayload),
     });
 
     this.logger.log(
@@ -7101,23 +7345,25 @@ export class ChatMemoryService {
     return this.chatRepository.createSession(documentIds, title);
   }
 
-  async recordUserMessage(sessionId: string, content: string) {
+  async recordUserMessage(sessionId: string, content: string, metadata?: any) {
     const tokenCount = this.tokenEstimator.estimateTokenCount(content);
     return this.chatRepository.addMessage({
       sessionId,
       role: MessageRole.USER,
       content,
       tokenCount,
+      metadata,
     });
   }
 
-  async recordAssistantMessage(sessionId: string, content: string) {
+  async recordAssistantMessage(sessionId: string, content: string, metadata?: any) {
     const tokenCount = this.tokenEstimator.estimateTokenCount(content);
     return this.chatRepository.addMessage({
       sessionId,
       role: MessageRole.ASSISTANT,
       content,
       tokenCount,
+      metadata,
     });
   }
 
@@ -7142,6 +7388,10 @@ export class ChatMemoryService {
     let prunedCount = 0;
 
     for (const msg of rawMessages) {
+      if (msg.role === MessageRole.SYSTEM) {
+        continue;
+      }
+
       const msgTokens = msg.tokenCount || this.tokenEstimator.estimateTokenCount(msg.content);
 
       if (
@@ -7154,6 +7404,7 @@ export class ChatMemoryService {
           content: msg.content,
           tokenCount: msgTokens,
           createdAt: msg.createdAt,
+          metadata: msg.metadata || undefined,
         });
         accumulatedTokens += msgTokens;
       } else {
@@ -7237,6 +7488,7 @@ export class ChatMemoryService {
       id: session.id,
       title: session.title,
       documentId: session.documentId,
+      documentIds: session.sources ? session.sources.map((s: any) => s.documentId).filter(Boolean) : [],
       documentTitle: session.document?.title || 'Dokumen Umum',
       createdAt: session.createdAt,
       updatedAt: session.updatedAt,
@@ -7529,7 +7781,7 @@ export class UrlScraperService {
             return {
                 title: extractedTitle,
                 cleanText: finalizedText,
-                sourceUrl: url,
+                sourceUrl: response.url || url,
                 wordCount: Math.min(wordCount, this.MAX_WORD_LIMIT),
             };
         } catch (err: any) {
@@ -8179,15 +8431,20 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
               box-sizing: border-box;
             }
 
-            body {
+            body, p, ul, ol, li, table, td, th {
               font-family: '${fontFamily}', sans-serif;
               font-size: ${fontSize}pt;
               line-height: ${lineSpacing};
+            }
+
+            body {
               margin: 0;
               padding: 0;
               background: white;
               color: #000000;
               word-wrap: break-word;
+              white-space: pre-wrap;
+              tab-size: 48px;
             }
 
             p {
@@ -8204,7 +8461,6 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
 
             li {
               margin-bottom: 4px;
-              line-height: ${lineSpacing};
             }
 
             div[data-type="page-break"] {
@@ -8212,6 +8468,13 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
               break-after: page;
               height: 0;
               overflow: hidden;
+            }
+
+            img {
+              max-width: 100%;
+              height: auto;
+              display: block;
+              margin: 16px auto;
             }
 
             /* --- INJEKSI CSS TABEL --- */
@@ -8243,6 +8506,19 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
       page = await browser.newPage();
 
       await page.setContent(fullHtmlContent, { waitUntil: 'domcontentloaded' as any });
+
+      await page.evaluate(async () => {
+        const images = Array.from(document.querySelectorAll('img'));
+        await Promise.all(
+          images.map((img) => {
+            if (img.complete) return;
+            return new Promise((resolve) => {
+              img.onload = resolve;
+              img.onerror = resolve;
+            });
+          })
+        );
+      });
 
       const marginPoints = `${marginCm}cm`;
       const pdfBuffer = await page.pdf({

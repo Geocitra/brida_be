@@ -12,6 +12,7 @@ import { TokenEstimatorUtil } from '../../ai-agent/utils/token-estimator.util';
 import { ArticleLength, MessageRole, SessionType } from '@prisma/client';
 import { UrlScraperService } from './url-scraper.service';
 import { DocumentIngestionService } from '../../document-ingestion/services/document-ingestion.service';
+import { ContextAssemblyService } from '../../ai-agent/services/context-assembly.service';
 
 // --- Impor Style Guide Global ---
 import { EDITORIAL_STYLE_GUIDE } from '../../ai-agent/constants/system-prompts.constant';
@@ -38,8 +39,8 @@ export interface GenerateArticleOptions {
 export class ArticleGeneratorService {
   private readonly logger = new Logger(ArticleGeneratorService.name);
 
-  // Anggaran token keras maksimum untuk sintesis draf artikel (20.000 token)
-  private readonly MAX_DRAFTING_TOKEN_BUDGET = 20000;
+  // Anggaran token keras maksimum untuk sintesis draf artikel (150.000 token untuk laporan BPS tebal)
+  private readonly MAX_DRAFTING_TOKEN_BUDGET = 150000;
 
   constructor(
     private readonly documentRepository: DocumentRepository,
@@ -48,6 +49,7 @@ export class ArticleGeneratorService {
     private readonly tokenEstimator: TokenEstimatorUtil,
     private readonly urlScraperService: UrlScraperService,
     private readonly ingestionService: DocumentIngestionService,
+    private readonly contextAssembly: ContextAssemblyService,
   ) { }
 
   /**
@@ -68,7 +70,6 @@ export class ArticleGeneratorService {
     const validDocIds = [...(documentIds || [])];
     const normalizedTitle = (articleTitle || '').trim() || 'Draf Artikel Publikasi';
 
-    // 1. Ambil atau buat ChatSession baru untuk Article Generator
     let session = options.sessionId
       ? await this.chatRepository.findSessionById(options.sessionId)
       : null;
@@ -84,7 +85,6 @@ export class ArticleGeneratorService {
       });
     }
 
-    // Pendeteksian dan Scraping URL secara dinamis dari petunjuk awal pengguna
     const URL_REGEX = /https?:\/\/[^\s]+/gi;
     const foundUrls = (userInstruction || '').match(URL_REGEX) || [];
     const scrapedUrls: Array<{ url: string; title: string; text: string }> = [];
@@ -105,37 +105,14 @@ export class ArticleGeneratorService {
       }
     }
 
-    // 2. Ekstraksi konteks dari seluruh dokumen acuan terpilih (Hibrida Lokal & Eksternal)
-    const docTexts: string[] = [];
+    // Hanya ambil metadata untuk kebutuhan fallback (tidak lagi menggabungkan raw text manual)
     const sourceDocs: any[] = [];
-
     for (const docId of validDocIds) {
       const doc = await this.documentRepository.findById(docId);
-      if (doc) {
-        sourceDocs.push(doc);
-        const text = doc.chunks ? doc.chunks.map((c: (typeof doc.chunks)[number]) => c.rawText).join('\n\n') : '';
-        const category = doc.metadata?.category || 'Umum';
-
-        // Asersi tipe dinamis yang aman untuk menghindari kegagalan kompilasi jika Prisma client belum di-generate ulang
-        const sourceUrl = (doc.metadata as any)?.sourceUrl;
-        const sourceUrlText = sourceUrl ? `\nSumber Tautan Web: ${sourceUrl}` : '';
-
-        docTexts.push(
-          `=== DOKUMEN ACUAN: ${doc.title} (Kategori: ${category})${sourceUrlText} ===\n${text.slice(0, 10000)}`
-        );
-      }
+      if (doc) sourceDocs.push(doc);
     }
 
-    const assembledDocsContext = docTexts.join('\n\n----------------------------------------\n\n');
-
-    let lengthGuidance = 'Target Panjang Teks: Minimal 1000 kata (Sedang, komprehensif)';
-    if (String(targetLength) === 'SHORT') {
-      lengthGuidance = 'Target Panjang Teks: Minimal 700 kata (Ringkas & Padat untuk Rilis Media)';
-    } else if (String(targetLength) === 'LONG') {
-      lengthGuidance = 'Target Panjang Teks: Minimal 1500 kata (Mendalam, Analisis Kebijakan Komprehensif)';
-    }
-
-    // Bangun seksi prompt berbasis Of-Record manifest diskusi (SSM) jika ada [Two-Pass Pipeline]
+    // SIAPKAN INSTRUKSI TAMBAHAN (MANIFEST + USER PROMPT)
     let manifestPromptSection = '';
     if (synthesizedManifest) {
       const argumenList = Array.isArray(synthesizedManifest.argumenKunci)
@@ -159,65 +136,41 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
     const promptUserInstruction = userInstruction
       ? `Instruksi Khusus Tambahan: ${userInstruction}`
       : 'Buatkan draf artikel publikasi yang menarik, solutif, dan berbasis data/ide yang kuat.';
+    
+    // Gabungkan query untuk dikirim ke Context Assembly
+    const userQuery = `Judul Artikel Target: "${normalizedTitle}"\n${promptUserInstruction}\n${manifestPromptSection}`;
 
-    // SYSTEM PROMPT: Mengintegrasikan Style Guide & CommonMark Compliance
-    const systemPrompt = `Anda adalah Penulis Artikel Utama & Analis Kebijakan BRIDA Kabupaten Mimika.
-${validDocIds.length > 0
-        ? 'Tugas Anda: Susun artikel publikasi berbasis data aktual dari DOKUMEN ACUAN yang diberikan.'
-        : 'Tugas Anda: Susun artikel publikasi berdasarkan instruksi dan pengetahuan internal Anda (Mode Kreasi Bebas).'
-      }
+    // DELEGASI KE INFORMATION EXPERT: Biarkan ContextAssemblyService yang menyusun konteks (Dynamic RAG / Stuffing)
+    const promptPayload = await this.contextAssembly.assemblePromptPayload({
+      documentIds: validDocIds,
+      userQuery,
+      tone,
+      targetLength: targetLength as string,
+      scrapedUrls,
+    });
 
-PANDUAN PENULISAN & PARAMETER UTAMA:
-- Judul Artikel: "${normalizedTitle}"
-- Gaya Bahasa (Tone Target): ${tone.toUpperCase()}
-- ${lengthGuidance}
-- Gunakan struktur narasi jurnalistik publik yang kuat (Judul, Subjudul, Analisis Faktual, Solusi Rekomendasi).
-${manifestPromptSection}
-
-ATURAN FORMATTING MUTLAK (COMMONMARK COMPLIANCE - ZERO RANDOM HTML):
-1. DILARANG KERAS menghasilkan atau menyisipkan tag HTML pemformatan visual mentah kustom (seperti <p style="...">, <font>, <span style="...">, dll.) ke dalam isi naskah artikel.
-2. Semua bentuk daftar/poin wajib ditulis menggunakan simbol list standar CommonMark: gunakan tanda minus (-) atau bintang (*) diikuti oleh spasi (misalnya: - Poin Rekomendasi). Jangan gunakan tag HTML <ul> atau <li> secara manual.
-3. Penulisan judul/subjudul bab wajib menggunakan sintaks header ATX standar (# untuk Judul Utama, ## untuk Sub-judul, ### untuk Sub-sub-judul).
-4. Hindari manipulasi layout seperti menyematkan properti alignment teks visual secara inline dalam HTML. Biarkan representasi struktur dokumen murni menggunakan sintaks Markdown bersih.
-
-${EDITORIAL_STYLE_GUIDE}
-`;
-
-    let scrapedContextText = '';
-    if (scrapedUrls.length > 0) {
-      scrapedContextText = `\n\n=== DOKUMEN PENDUKUNG (SITASI WEB LANGSUNG) ===\nBerikut adalah konten dari tautan web yang dimasukkan oleh pengguna. Gunakan sebagai acuan pendukung analitis. Gunakan tautan URL-nya secara langsung sebagai sitasi resmi:\n\n` +
-        scrapedUrls.map((page, idx) => `[SUMBER ${idx + 1}]:\nJudul: ${page.title}\nTautan: ${page.url}\nKonten:\n${page.text}`).join('\n\n');
-    }
-
-    const userPromptMessage = validDocIds.length > 0
-      ? `Judul Artikel yang Diinginkan: "${normalizedTitle}"\n${promptUserInstruction}\n\nDOKUMEN ACUAN:\n${assembledDocsContext}${scrapedContextText}`
-      : `Judul Artikel yang Diinginkan: "${normalizedTitle}"\n${promptUserInstruction}${scrapedContextText}`;
-
-    // --- INTEGRASI TOKEN BUDGET CIRCUIT BREAKER (DEFENSIVE PROGRAMMING) [5, 7] ---
-    const compiledPrompts = [systemPrompt, userPromptMessage];
+    // ENFORCE BUDGET (Pastikan MAX_DRAFTING_TOKEN_BUDGET sudah dinaikkan)
     this.tokenEstimator.enforceBudgetCircuitBreaker({
-      texts: compiledPrompts,
+      texts: promptPayload.messages.map((m) => m.content || ''),
       imagesCount: 0,
       maxBudgetTokens: this.MAX_DRAFTING_TOKEN_BUDGET,
     });
 
-    // Rekam pesan prompt pengguna ke database PostgreSQL
+    // SIMPAN HISTORY USER KE DB
+    const userPromptRecordedContent = `[JUDUL ARTIKEL]: ${normalizedTitle}\n[TONE]: ${tone}\n[PANJANG]: ${targetLength}\n${userInstruction || ''}`;
     await this.chatRepository.addMessage({
       sessionId: session.id,
       role: MessageRole.USER,
-      content: `[JUDUL ARTIKEL]: ${normalizedTitle}\n[TONE]: ${tone}\n[PANJANG]: ${targetLength}\n${userInstruction || ''}`,
-      tokenCount: this.tokenEstimator.estimateTokenCount(userPromptMessage),
+      content: userPromptRecordedContent,
+      tokenCount: this.tokenEstimator.estimateTokenCount(userPromptRecordedContent),
       metadata: scrapedUrls.length > 0 ? { scrapedUrls } : undefined,
     });
 
-    // 3. Panggil LLM Adapter dengan parameter kreatif (temperature 0.7)
     let fullArticleText = '';
     try {
+      // EKSEKUSI LLM: Gunakan 'promptPayload.messages' secara langsung!
       const llmResult = await this.llmAdapter.generateStructuredAnalysis<any>(
-        [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPromptMessage },
-        ],
+        promptPayload.messages,
         ARTICLE_OUTPUT_SCHEMA,
         0.7,
       );
@@ -226,11 +179,11 @@ ${EDITORIAL_STYLE_GUIDE}
       fullArticleText = cleanArticleTitlePrefix(fullArticleText);
     } catch (err: any) {
       this.logger.warn(`[Article LLM Fallback] Gagal memanggil API: ${err.message}. Menggunakan sintesis fallback.`);
-      fullArticleText = createFallbackArticleText(normalizedTitle, sourceDocs, tone, targetLength);
+      fullArticleText = createFallbackArticleText(normalizedTitle, sourceDocs, tone, targetLength as string);
       fullArticleText = cleanArticleTitlePrefix(fullArticleText);
     }
 
-    // Rekam draf artikel yang berhasil disintesis asisten ke DB
+    // SIMPAN HISTORY AI KE DB
     await this.chatRepository.addMessage({
       sessionId: session.id,
       role: MessageRole.ASSISTANT,

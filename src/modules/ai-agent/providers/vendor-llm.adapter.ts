@@ -126,9 +126,10 @@ export class VendorLlmAdapter implements ILlmProvider {
       });
 
     // Gemini mendukung system instruction terpisah (systemInstruction field)
-    const systemMsg = messages.find((m) => m.role === 'system');
-    const systemInstruction = systemMsg
-      ? { parts: [{ text: systemMsg.content }] }
+    // Gabungkan seluruh pesan bertipe 'system' untuk mencegah hilangnya konteks RAG
+    const systemMsgs = messages.filter((m) => m.role === 'system');
+    const systemInstruction = systemMsgs.length > 0
+      ? { parts: [{ text: systemMsgs.map((m) => m.content).join('\n\n') }] }
       : undefined;
 
     // Sanitasi JSON Schema untuk mencegah penolakan API struktural Gemini
