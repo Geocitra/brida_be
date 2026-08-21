@@ -117,7 +117,10 @@ export class ChatRepository {
             attachments: true,
           },
         },
-      },
+        mediaAssets: {
+          orderBy: { createdAt: 'desc' },
+        },
+      } as any,
     });
   }
 
@@ -269,6 +272,26 @@ export class ChatRepository {
   }
 
   /**
+   * Merekam media asset (gambar yang di-paste/drop) ke dalam sesi
+   */
+  async createMediaAsset(sessionId: string, assetData: {
+    fileUrl: string;
+    fileName: string;
+    mimeType: string;
+    fileSizeBytes: bigint;
+  }): Promise<any> {
+    return (this.prisma as any).sessionMediaAsset.create({
+      data: {
+        sessionId,
+        fileUrl: assetData.fileUrl,
+        fileName: assetData.fileName,
+        mimeType: assetData.mimeType,
+        fileSizeBytes: assetData.fileSizeBytes,
+      },
+    });
+  }
+
+  /**
    * Memperbarui draf teks Markdown naskah artikel aktif (Pane Kanan)
    */
   async updateActiveDraft(sessionId: string, currentDraft: string): Promise<ChatSession> {
@@ -278,6 +301,34 @@ export class ChatRepository {
         currentDraft,
         updatedAt: new Date(),
       },
+    });
+  }
+
+  /**
+   * Memperbarui state naskah dokumen editorial visual (HTML murni / ProseMirror)
+   * Menyimpan langsung format editorial tanpa konversi penurunan mutu ke Markdown
+   */
+  async updateEditorDocumentState(
+    sessionId: string,
+    editorDocumentState: string,
+    articleTitle?: string,
+    currentDraft?: string,
+  ): Promise<ChatSession> {
+    const data: any = {
+      editorDocumentState,
+      updatedAt: new Date(),
+    };
+    if (articleTitle) {
+      data.articleTitle = articleTitle;
+      data.title = articleTitle;
+    }
+    if (currentDraft) {
+      data.currentDraft = currentDraft;
+    }
+
+    return this.prisma.chatSession.update({
+      where: { id: sessionId },
+      data,
     });
   }
 

@@ -142,6 +142,32 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
+   * Mengonversi referensi gambar lokal /uploads/media/ menjadi data URI Base64 langsung dari disk server
+   * Menjamin pemuatan 100% instan dan deterministik di dalam container Docker tanpa loopback HTTP.
+   */
+  private resolveLocalImagesToInline(html: string): string {
+    if (!html) return '';
+
+    return html.replace(
+      /(<img\s+[^>]*?src=["'])(?:https?:\/\/[^\/]+)?\/uploads\/media\/([^"'\s>]+)(["'][^>]*?>)/gi,
+      (match, prefix, filename, suffix) => {
+        try {
+          const filePath = join(process.cwd(), 'uploads', 'media', filename);
+          if (existsSync(filePath)) {
+            const ext = filename.split('.').pop()?.toLowerCase() || 'png';
+            const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : ext === 'svg' ? 'image/svg+xml' : 'image/png';
+            const base64Data = readFileSync(filePath).toString('base64');
+            return `${prefix}data:${mime};base64,${base64Data}${suffix}`;
+          }
+        } catch (err: any) {
+          this.logger.warn(`[PdfService] Gagal membaca gambar lokal '${filename}': ${err.message}`);
+        }
+        return match;
+      }
+    );
+  }
+
+  /**
    * Core generator PDF menggunakan Puppeteer dengan Singleton Browser
    */
   async generatePdf(dto: GeneratePdfDto): Promise<Buffer> {
@@ -159,7 +185,10 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
       const fontItalic = this.getFontBase64(selectedFonts.italic);
       const fontBoldItalic = this.getFontBase64(selectedFonts.boldItalic);
 
-      // 2. Susun HTML dengan stylesheet @font-face base64
+      // 2. Resolusi gambar lokal langsung dari disk untuk keandalan Docker
+      const resolvedHtmlContent = this.resolveLocalImagesToInline(htmlContent);
+
+      // 3. Susun HTML dengan stylesheet @font-face base64
       const fullHtmlContent = `
         <!DOCTYPE html>
         <html>
@@ -234,11 +263,55 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
               overflow: hidden;
             }
 
+            div[data-auto-page-spacer], .no-print {
+              display: none !important;
+              height: 0 !important;
+              margin: 0 !important;
+              padding: 0 !important;
+            }
+
             img {
               max-width: 100%;
               height: auto;
-              display: block;
-              margin: 16px auto;
+            }
+
+            img[data-align="float-left"] {
+              float: left !important;
+              margin: 8px 24px 12px 0 !important;
+              display: inline-block !important;
+            }
+
+            img[data-align="float-right"] {
+              float: right !important;
+              margin: 8px 0 12px 24px !important;
+              display: inline-block !important;
+            }
+
+            img[data-align="left"] {
+              display: block !important;
+              margin: 16px auto 16px 0 !important;
+              clear: both !important;
+            }
+
+            img[data-align="right"] {
+              display: block !important;
+              margin: 16px 0 16px auto !important;
+              clear: both !important;
+            }
+
+            img[data-align="center"] {
+              display: block !important;
+              margin: 16px auto !important;
+              clear: both !important;
+            }
+
+            figcaption, .img-caption {
+              text-align: center;
+              font-size: 9pt;
+              font-style: italic;
+              color: #475569;
+              margin-top: 6px;
+              margin-bottom: 12px;
             }
 
             /* --- INJEKSI CSS TABEL --- */
@@ -261,7 +334,7 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
           </style>
         </head>
         <body>
-          ${htmlContent}
+          ${resolvedHtmlContent}
         </body>
         </html>
       `;

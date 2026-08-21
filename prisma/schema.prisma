@@ -161,21 +161,40 @@ model ChatSession {
   runningSummary  String?                @db.Text
   
   // Bidang Baru: State Synchronization Cache untuk Lembar Kerja Kanan (Pane Kanan)
-  currentDraft    String?                @db.Text 
+  currentDraft       String?                @db.Text 
   
-  createdAt       DateTime               @default(now())
-  updatedAt       DateTime               @updatedAt
+  // Bidang Baru: State Dokumen Editorial Visual (Native Semantic HTML / ProseMirror Canvas)
+  editorDocumentState String?               @db.Text
+
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
 
   // Hubungan Mandiri (Self-Referencing Relation) untuk Transisi Sesi
-  parentSessionId String?                @db.Uuid
-  parentSession   ChatSession?           @relation("SessionTransition", fields: [parentSessionId], references: [id], onDelete: SetNull)
-  derivedSessions ChatSession[]          @relation("SessionTransition")
+  parentSessionId    String?                @db.Uuid
+  parentSession      ChatSession?           @relation("SessionTransition", fields: [parentSessionId], references: [id], onDelete: SetNull)
+  derivedSessions    ChatSession[]          @relation("SessionTransition")
 
-  document        ReportDocument?        @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  messages        ChatMessage[]
-  sources         ChatSessionSourceRef[]
+  document           ReportDocument?        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  messages           ChatMessage[]
+  sources            ChatSessionSourceRef[]
+  mediaAssets        SessionMediaAsset[]
 
   @@map("chat_sessions")
+}
+
+model SessionMediaAsset {
+  id            String      @id @default(uuid()) @db.Uuid
+  sessionId     String      @db.Uuid
+  fileUrl       String      // Path fisik/publik: /uploads/media/...
+  fileName      String
+  mimeType      String
+  fileSizeBytes BigInt
+  createdAt     DateTime    @default(now())
+
+  session       ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@map("session_media_assets")
 }
 
 model ChatSessionSourceRef {

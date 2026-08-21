@@ -1,5 +1,8 @@
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
+import { NestExpressApplication } from '@nestjs/platform-express';
+import { join } from 'path';
+import { existsSync, mkdirSync } from 'fs';
 import { AppModule } from './app.module';
 import { GlobalHttpExceptionFilter } from './common/filters/http-exception.filter';
 
@@ -10,7 +13,20 @@ import { GlobalHttpExceptionFilter } from './common/filters/http-exception.filte
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
-  const app = await NestFactory.create(AppModule);
+
+  // Pastikan folder uploads/media tersedia
+  const mediaUploadDir = join(process.cwd(), 'uploads', 'media');
+  if (!existsSync(mediaUploadDir)) {
+    mkdirSync(mediaUploadDir, { recursive: true });
+    logger.log(`Membuat direktori penyimpanan media lokal: ${mediaUploadDir}`);
+  }
+
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  // Serve static assets for uploaded media
+  app.useStaticAssets(join(process.cwd(), 'uploads'), {
+    prefix: '/uploads',
+  });
 
   // Enable CORS for PWA Frontend
   app.enableCors({

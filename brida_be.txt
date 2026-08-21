@@ -179,7 +179,9 @@ CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/main"]
     "noImplicitAny": true,
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true
-  }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "prisma"]
 }
 
 --- FILE: prisma\schema.prisma ---
@@ -346,21 +348,40 @@ model ChatSession {
   runningSummary  String?                @db.Text
 
   // Bidang Baru: State Synchronization Cache untuk Lembar Kerja Kanan (Pane Kanan)
-  currentDraft    String?                @db.Text
+  currentDraft       String?                @db.Text
 
-  createdAt       DateTime               @default(now())
-  updatedAt       DateTime               @updatedAt
+  // Bidang Baru: State Dokumen Editorial Visual (Native Semantic HTML / ProseMirror Canvas)
+  editorDocumentState String?               @db.Text
+
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
 
   // Hubungan Mandiri (Self-Referencing Relation) untuk Transisi Sesi
-  parentSessionId String?                @db.Uuid
-  parentSession   ChatSession?           @relation("SessionTransition", fields: [parentSessionId], references: [id], onDelete: SetNull)
-  derivedSessions ChatSession[]          @relation("SessionTransition")
+  parentSessionId    String?                @db.Uuid
+  parentSession      ChatSession?           @relation("SessionTransition", fields: [parentSessionId], references: [id], onDelete: SetNull)
+  derivedSessions    ChatSession[]          @relation("SessionTransition")
 
-  document        ReportDocument?        @relation(fields: [documentId], references: [id], onDelete: Cascade)
-  messages        ChatMessage[]
-  sources         ChatSessionSourceRef[]
+  document           ReportDocument?        @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  messages           ChatMessage[]
+  sources            ChatSessionSourceRef[]
+  mediaAssets        SessionMediaAsset[]
 
   @@map("chat_sessions")
+}
+
+model SessionMediaAsset {
+  id            String      @id @default(uuid()) @db.Uuid
+  sessionId     String      @db.Uuid
+  fileUrl       String      // Path fisik/publik: /uploads/media/...
+  fileName      String
+  mimeType      String
+  fileSizeBytes BigInt
+  createdAt     DateTime    @default(now())
+
+  session       ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@map("session_media_assets")
 }
 
 model ChatSessionSourceRef {
@@ -909,6 +930,9 @@ export class AppModule {}
 --- FILE: src\main.ts ---
 import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, Logger } from '@nestjs/common';
+import { NestExpressApplication } from '@nestjs/platform-express';
+import { join } from 'path';
+import { existsSync, mkdirSync } from 'fs';
 import { AppModule } from './app.module';
 import { GlobalHttpExceptionFilter } from './common/filters/http-exception.filter';
 
@@ -918,7 +942,18 @@ import { GlobalHttpExceptionFilter } from './common/filters/http-exception.filte
 
 async function bootstrap() {
   const logger = new Logger('Bootstrap');
-  const app = await NestFactory.create(AppModule);
+
+  const mediaUploadDir = join(process.cwd(), 'uploads', 'media');
+  if (!existsSync(mediaUploadDir)) {
+    mkdirSync(mediaUploadDir, { recursive: true });
+    logger.log(`Membuat direktori penyimpanan media lokal: ${mediaUploadDir}`);
+  }
+
+  const app = await NestFactory.create<NestExpressApplication>(AppModule);
+
+  app.useStaticAssets(join(process.cwd(), 'uploads'), {
+    prefix: '/uploads',
+  });
 
   app.enableCors({
     origin: true,
@@ -5723,8 +5758,11 @@ import {
   ParseUUIDPipe,
   UseInterceptors,
   UploadedFile,
+  NotFoundException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { join } from 'path';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { IntentRouterService } from '../services/intent-router.service';
 import { ChatMemoryService } from '../services/chat-memory.service';
 import { ArticleGeneratorService } from '../services/article-generator.service';
@@ -5735,6 +5773,20 @@ import { ArticleLength, SessionType } from '@prisma/client';
 
 import { IsString, IsNotEmpty, IsUUID, MinLength, IsOptional, IsArray, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
+
+export class UpdateArticleContentDto {
+  @IsString({ message: 'Judul artikel harus berupa teks' })
+  @IsNotEmpty({ message: 'Judul artikel tidak boleh kosong' })
+  articleTitle!: string;
+
+  @IsOptional()
+  @IsString()
+  editorState?: string;
+
+  @IsOptional()
+  @IsString()
+  fullArticleText?: string;
+}
 
 export class AttachmentItemDto {
   @IsUUID('4', { message: 'fileId harus berupa format UUID v4 yang valid' })
@@ -5959,20 +6011,68 @@ export class AssistantController {
     };
   }
 
+  @Post('sessions/:id/media')
+  @HttpCode(HttpStatus.CREATED)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: {
+        fileSize: 5 * 1024 * 1024,
+      },
+    }),
+  )
+  async uploadEditorMedia(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @UploadedFile(new ChatAttachmentSignatureValidationPipe()) file: Express.Multer.File,
+  ) {
+    const session = await this.articleGeneratorService.getArticleSessionById(id).catch(() => null)
+      || await this.memoryService.getQaSessionDetails(id).catch(() => null);
+
+    if (!session) {
+      throw new NotFoundException(`Sesi dengan ID '${id}' tidak ditemukan.`);
+    }
+
+    const extMatch = (file.originalname || '').match(/\.([a-zA-Z0-9]+)$/);
+    const ext = extMatch ? extMatch[1].toLowerCase() : (file.mimetype.split('/')[1] || 'png');
+    const safeExt = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext) ? ext : 'png';
+    const filename = `${id}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${safeExt}`;
+
+    const mediaDir = join(process.cwd(), 'uploads', 'media');
+    if (!existsSync(mediaDir)) {
+      mkdirSync(mediaDir, { recursive: true });
+    }
+    const targetFilePath = join(mediaDir, filename);
+    writeFileSync(targetFilePath, file.buffer);
+
+    const relativeUrl = `/uploads/media/${filename}`;
+    const asset = await (this.articleGeneratorService as any).chatRepository.createMediaAsset(id, {
+      fileUrl: relativeUrl,
+      fileName: file.originalname || filename,
+      mimeType: file.mimetype || `image/${safeExt}`,
+      fileSizeBytes: BigInt(file.size || file.buffer.length),
+    });
+
+    return {
+      success: true,
+      data: {
+        assetId: asset.id,
+        url: relativeUrl,
+        fileName: file.originalname || filename,
+        fileSizeBytes: file.size || file.buffer.length,
+      },
+    };
+  }
+
   @Patch('article/sessions/:id/content')
   @HttpCode(HttpStatus.OK)
   async updateArticleContent(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
-    @Body()
-    body: {
-      articleTitle: string;
-      fullArticleText: string;
-    },
+    @Body() body: UpdateArticleContentDto,
   ) {
     const result = await this.articleGeneratorService.updateArticleContent(
       id,
       body.articleTitle,
       body.fullArticleText,
+      body.editorState,
     );
     return {
       success: true,
@@ -5996,7 +6096,7 @@ export class AssistantController {
       success: true,
       data: {
         title: data.articleTitle,
-        content: data.fullArticleText,
+        content: data.editorDocumentState || data.fullArticleText,
         tone: data.tone,
         generatedAt: data.updatedAt,
       },
@@ -6580,7 +6680,10 @@ export class ChatRepository {
             attachments: true,
           },
         },
-      },
+        mediaAssets: {
+          orderBy: { createdAt: 'desc' },
+        },
+      } as any,
     });
   }
 
@@ -6711,6 +6814,23 @@ export class ChatRepository {
     this.logger.log(`[Sync Session Sources] Sesi ID: ${sessionId} -> Berhasil disinkronkan ke ${documentIds.length} dokumen.`);
   }
 
+  async createMediaAsset(sessionId: string, assetData: {
+    fileUrl: string;
+    fileName: string;
+    mimeType: string;
+    fileSizeBytes: bigint;
+  }): Promise<any> {
+    return (this.prisma as any).sessionMediaAsset.create({
+      data: {
+        sessionId,
+        fileUrl: assetData.fileUrl,
+        fileName: assetData.fileName,
+        mimeType: assetData.mimeType,
+        fileSizeBytes: assetData.fileSizeBytes,
+      },
+    });
+  }
+
   async updateActiveDraft(sessionId: string, currentDraft: string): Promise<ChatSession> {
     return this.prisma.chatSession.update({
       where: { id: sessionId },
@@ -6718,6 +6838,30 @@ export class ChatRepository {
         currentDraft,
         updatedAt: new Date(),
       },
+    });
+  }
+
+  async updateEditorDocumentState(
+    sessionId: string,
+    editorDocumentState: string,
+    articleTitle?: string,
+    currentDraft?: string,
+  ): Promise<ChatSession> {
+    const data: any = {
+      editorDocumentState,
+      updatedAt: new Date(),
+    };
+    if (articleTitle) {
+      data.articleTitle = articleTitle;
+      data.title = articleTitle;
+    }
+    if (currentDraft) {
+      data.currentDraft = currentDraft;
+    }
+
+    return this.prisma.chatSession.update({
+      where: { id: sessionId },
+      data,
     });
   }
 
@@ -7027,7 +7171,8 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
   async updateArticleContent(
     sessionId: string,
     articleTitle: string,
-    fullArticleText: string,
+    fullArticleText?: string,
+    editorState?: string,
   ): Promise<any> {
     const session = await this.chatRepository.findSessionById(sessionId);
     if (!session) {
@@ -7043,13 +7188,18 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
       throw new BadRequestException('Judul artikel baru tidak boleh kosong.');
     }
 
-    await this.chatRepository.updateActiveDraft(sessionId, fullArticleText);
-    if (typeof (this.chatRepository as any).updateArticleMetadata === 'function') {
-      await (this.chatRepository as any).updateArticleMetadata(sessionId, trimmedTitle);
-    } else {
-      this.logger.warn(
-        `[Integrasi Repository] 'updateArticleMetadata' belum terimplementasi pada ChatRepository.`,
+    if (editorState) {
+      await this.chatRepository.updateEditorDocumentState(
+        sessionId,
+        editorState,
+        trimmedTitle,
+        fullArticleText || session.currentDraft || '',
       );
+    } else if (fullArticleText) {
+      await this.chatRepository.updateActiveDraft(sessionId, fullArticleText);
+      await this.chatRepository.updateArticleMetadata(sessionId, trimmedTitle);
+    } else {
+      await this.chatRepository.updateArticleMetadata(sessionId, trimmedTitle);
     }
 
     const auditContent = 'Naskah diperbarui secara manual oleh editor.';
@@ -7069,7 +7219,8 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
       ],
       updatedArticle: {
         title: trimmedTitle,
-        draftMarkdown: fullArticleText,
+        draftMarkdown: fullArticleText || session.currentDraft || 'Naskah editorial diperbarui.',
+        editorDocumentState: editorState,
       }
     };
     const stringifiedPayload = JSON.stringify(structuredPayload);
@@ -7082,7 +7233,7 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
     });
 
     this.logger.log(
-      `[Draft Manual Sync] Berhasil melakukan pembaruan naskah manual untuk Sesi ID: ${sessionId}`,
+      `[Draft Manual Sync] Berhasil melakukan pembaruan naskah manual untuk Sesi ID: ${sessionId} (Visual State: ${Boolean(editorState)})`,
     );
 
     const updatedSession = await this.chatRepository.findSessionById(sessionId);
@@ -7094,7 +7245,8 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
       articleTitle: trimmedTitle,
       tone: updatedSession.tone,
       targetLength: updatedSession.targetLength,
-      fullArticleText: fullArticleText,
+      fullArticleText: updatedSession.currentDraft || fullArticleText || '',
+      editorDocumentState: updatedSession.editorDocumentState || null,
       sources: sanitizeSources(updatedSession.sources),
       messages: updatedSession.messages,
     };
@@ -7187,6 +7339,7 @@ ${EDITORIAL_STYLE_GUIDE}
       targetLength: s.targetLength,
       createdAt: s.createdAt,
       updatedAt: s.updatedAt,
+      editorDocumentState: s.editorDocumentState || null,
       sourcesCount: s.sources?.length || 0,
       sources: sanitizeSources(s.sources),
       lastMessage: s.messages && s.messages.length > 0 ? s.messages[s.messages.length - 1].content : null,
@@ -7202,12 +7355,21 @@ ${EDITORIAL_STYLE_GUIDE}
     const lastAssistantMsg = [...session.messages].reverse().find((m: any) => m.role === MessageRole.ASSISTANT);
 
     let fullArticleText = '';
+    let editorDocumentState = session.editorDocumentState || null;
+
     if (lastAssistantMsg) {
       try {
         const parsed = JSON.parse(lastAssistantMsg.content);
         if (parsed && typeof parsed === 'object') {
-          if (parsed.updatedArticle && parsed.updatedArticle.draftMarkdown) {
-            fullArticleText = parsed.updatedArticle.draftMarkdown;
+          if (parsed.updatedArticle) {
+            if (parsed.updatedArticle.editorDocumentState && !editorDocumentState) {
+              editorDocumentState = parsed.updatedArticle.editorDocumentState;
+            }
+            if (parsed.updatedArticle.draftMarkdown) {
+              fullArticleText = parsed.updatedArticle.draftMarkdown;
+            } else {
+              fullArticleText = parsed.answer || parsed.fullArticleText || lastAssistantMsg.content;
+            }
           } else {
             fullArticleText = parsed.answer || parsed.fullArticleText || lastAssistantMsg.content;
           }
@@ -7229,7 +7391,9 @@ ${EDITORIAL_STYLE_GUIDE}
       updatedAt: session.updatedAt,
       sources: sanitizeSources(session.sources),
       messages: session.messages,
-      fullArticleText,
+      mediaAssets: session.mediaAssets || [],
+      fullArticleText: session.currentDraft || fullArticleText,
+      editorDocumentState,
     };
   }
 
@@ -8381,6 +8545,28 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
     return readFileSync(filePath).toString('base64');
   }
 
+  private resolveLocalImagesToInline(html: string): string {
+    if (!html) return '';
+
+    return html.replace(
+      /(<img\s+[^>]*?src=["'])(?:https?:\/\/[^\/]+)?\/uploads\/media\/([^"'\s>]+)(["'][^>]*?>)/gi,
+      (match, prefix, filename, suffix) => {
+        try {
+          const filePath = join(process.cwd(), 'uploads', 'media', filename);
+          if (existsSync(filePath)) {
+            const ext = filename.split('.').pop()?.toLowerCase() || 'png';
+            const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : ext === 'svg' ? 'image/svg+xml' : 'image/png';
+            const base64Data = readFileSync(filePath).toString('base64');
+            return `${prefix}data:${mime};base64,${base64Data}${suffix}`;
+          }
+        } catch (err: any) {
+          this.logger.warn(`[PdfService] Gagal membaca gambar lokal '${filename}': ${err.message}`);
+        }
+        return match;
+      }
+    );
+  }
+
   async generatePdf(dto: GeneratePdfDto): Promise<Buffer> {
     const { htmlContent, fontFamily, fontSize, lineSpacing, marginCm } = dto;
     const selectedFonts = this.fontFileMap[fontFamily as keyof typeof this.fontFileMap] || this.fontFileMap['Calibri'];
@@ -8395,6 +8581,8 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
       const fontBold = this.getFontBase64(selectedFonts.bold);
       const fontItalic = this.getFontBase64(selectedFonts.italic);
       const fontBoldItalic = this.getFontBase64(selectedFonts.boldItalic);
+
+      const resolvedHtmlContent = this.resolveLocalImagesToInline(htmlContent);
 
       const fullHtmlContent = `
         <!DOCTYPE html>
@@ -8473,8 +8661,45 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
             img {
               max-width: 100%;
               height: auto;
-              display: block;
-              margin: 16px auto;
+            }
+
+            img[data-align="float-left"] {
+              float: left !important;
+              margin: 8px 24px 12px 0 !important;
+              display: inline-block !important;
+            }
+
+            img[data-align="float-right"] {
+              float: right !important;
+              margin: 8px 0 12px 24px !important;
+              display: inline-block !important;
+            }
+
+            img[data-align="left"] {
+              display: block !important;
+              margin: 16px auto 16px 0 !important;
+              clear: both !important;
+            }
+
+            img[data-align="right"] {
+              display: block !important;
+              margin: 16px 0 16px auto !important;
+              clear: both !important;
+            }
+
+            img[data-align="center"] {
+              display: block !important;
+              margin: 16px auto !important;
+              clear: both !important;
+            }
+
+            figcaption, .img-caption {
+              text-align: center;
+              font-size: 9pt;
+              font-style: italic;
+              color: #475569;
+              margin-top: 6px;
+              margin-bottom: 12px;
             }
 
             /* --- INJEKSI CSS TABEL --- */
@@ -8497,7 +8722,7 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
           </style>
         </head>
         <body>
-          ${htmlContent}
+          ${resolvedHtmlContent}
         </body>
         </html>
       `;

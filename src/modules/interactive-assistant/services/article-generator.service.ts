@@ -208,12 +208,13 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
 
   /**
    * Memperbarui konten draf naskah artikel secara manual berdasarkan suntingan editor (Two-Way Sync).
-   * Mengintegrasikan audit log ke dalam riwayat percakapan tanpa mengubah struktur tabel database.
+   * Mendukung penyimpanan editorState (HTML visual murni) dan teks naratif tanpa degradasi serialisasi.
    */
   async updateArticleContent(
     sessionId: string,
     articleTitle: string,
-    fullArticleText: string,
+    fullArticleText?: string,
+    editorState?: string,
   ): Promise<any> {
     const session = await this.chatRepository.findSessionById(sessionId);
     if (!session) {
@@ -229,14 +230,19 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
       throw new BadRequestException('Judul artikel baru tidak boleh kosong.');
     }
 
-    // 1. Sinkronisasi judul draf pada metadata sesi obrolan di database dan update draf aktif
-    await this.chatRepository.updateActiveDraft(sessionId, fullArticleText);
-    if (typeof (this.chatRepository as any).updateArticleMetadata === 'function') {
-      await (this.chatRepository as any).updateArticleMetadata(sessionId, trimmedTitle);
-    } else {
-      this.logger.warn(
-        `[Integrasi Repository] 'updateArticleMetadata' belum terimplementasi pada ChatRepository.`,
+    // 1. Simpan editorDocumentState dan perbarui metadata judul di database
+    if (editorState) {
+      await this.chatRepository.updateEditorDocumentState(
+        sessionId,
+        editorState,
+        trimmedTitle,
+        fullArticleText || session.currentDraft || '',
       );
+    } else if (fullArticleText) {
+      await this.chatRepository.updateActiveDraft(sessionId, fullArticleText);
+      await this.chatRepository.updateArticleMetadata(sessionId, trimmedTitle);
+    } else {
+      await this.chatRepository.updateArticleMetadata(sessionId, trimmedTitle);
     }
 
     // 2. Tambah Jejak Audit (Audit Trail Log) sebagai pesan sistem otomatis ke DB
@@ -258,7 +264,8 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
       ],
       updatedArticle: {
         title: trimmedTitle,
-        draftMarkdown: fullArticleText,
+        draftMarkdown: fullArticleText || session.currentDraft || 'Naskah editorial diperbarui.',
+        editorDocumentState: editorState,
       }
     };
     const stringifiedPayload = JSON.stringify(structuredPayload);
@@ -271,7 +278,7 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
     });
 
     this.logger.log(
-      `[Draft Manual Sync] Berhasil melakukan pembaruan naskah manual untuk Sesi ID: ${sessionId}`,
+      `[Draft Manual Sync] Berhasil melakukan pembaruan naskah manual untuk Sesi ID: ${sessionId} (Visual State: ${Boolean(editorState)})`,
     );
 
     const updatedSession = await this.chatRepository.findSessionById(sessionId);
@@ -283,7 +290,8 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
       articleTitle: trimmedTitle,
       tone: updatedSession.tone,
       targetLength: updatedSession.targetLength,
-      fullArticleText: fullArticleText,
+      fullArticleText: updatedSession.currentDraft || fullArticleText || '',
+      editorDocumentState: updatedSession.editorDocumentState || null,
       sources: sanitizeSources(updatedSession.sources),
       messages: updatedSession.messages,
     };
@@ -385,6 +393,7 @@ ${EDITORIAL_STYLE_GUIDE}
       targetLength: s.targetLength,
       createdAt: s.createdAt,
       updatedAt: s.updatedAt,
+      editorDocumentState: s.editorDocumentState || null,
       sourcesCount: s.sources?.length || 0,
       sources: sanitizeSources(s.sources),
       lastMessage: s.messages && s.messages.length > 0 ? s.messages[s.messages.length - 1].content : null,
@@ -400,12 +409,21 @@ ${EDITORIAL_STYLE_GUIDE}
     const lastAssistantMsg = [...session.messages].reverse().find((m: any) => m.role === MessageRole.ASSISTANT);
 
     let fullArticleText = '';
+    let editorDocumentState = session.editorDocumentState || null;
+
     if (lastAssistantMsg) {
       try {
         const parsed = JSON.parse(lastAssistantMsg.content);
         if (parsed && typeof parsed === 'object') {
-          if (parsed.updatedArticle && parsed.updatedArticle.draftMarkdown) {
-            fullArticleText = parsed.updatedArticle.draftMarkdown;
+          if (parsed.updatedArticle) {
+            if (parsed.updatedArticle.editorDocumentState && !editorDocumentState) {
+              editorDocumentState = parsed.updatedArticle.editorDocumentState;
+            }
+            if (parsed.updatedArticle.draftMarkdown) {
+              fullArticleText = parsed.updatedArticle.draftMarkdown;
+            } else {
+              fullArticleText = parsed.answer || parsed.fullArticleText || lastAssistantMsg.content;
+            }
           } else {
             fullArticleText = parsed.answer || parsed.fullArticleText || lastAssistantMsg.content;
           }
@@ -427,7 +445,9 @@ ${EDITORIAL_STYLE_GUIDE}
       updatedAt: session.updatedAt,
       sources: sanitizeSources(session.sources),
       messages: session.messages,
-      fullArticleText,
+      mediaAssets: session.mediaAssets || [],
+      fullArticleText: session.currentDraft || fullArticleText,
+      editorDocumentState,
     };
   }
 

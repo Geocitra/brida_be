@@ -11,8 +11,11 @@ import {
   ParseUUIDPipe,
   UseInterceptors,
   UploadedFile,
+  NotFoundException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { join } from 'path';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
 import { IntentRouterService } from '../services/intent-router.service';
 import { ChatMemoryService } from '../services/chat-memory.service';
 import { ArticleGeneratorService } from '../services/article-generator.service';
@@ -24,6 +27,20 @@ import { ArticleLength, SessionType } from '@prisma/client';
 // Impor DTO tervalidasi ketat untuk mendukung muatan kolaboratif multimodal
 import { IsString, IsNotEmpty, IsUUID, MinLength, IsOptional, IsArray, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
+
+export class UpdateArticleContentDto {
+  @IsString({ message: 'Judul artikel harus berupa teks' })
+  @IsNotEmpty({ message: 'Judul artikel tidak boleh kosong' })
+  articleTitle!: string;
+
+  @IsOptional()
+  @IsString()
+  editorState?: string; // HTML naskah visual editorial dari TipTap
+
+  @IsOptional()
+  @IsString()
+  fullArticleText?: string; // Teks Markdown cadangan
+}
 
 export class AttachmentItemDto {
   @IsUUID('4', { message: 'fileId harus berupa format UUID v4 yang valid' })
@@ -261,23 +278,76 @@ export class AssistantController {
   }
 
   /**
+   * Endpoint Baru: POST /assistant/sessions/:id/media
+   * Menerima unggahan gambar editorial (paste/drop di TipTap).
+   * Menyimpan berkas fisik ke /uploads/media/ dan mengembalikan URL kanonikal publik yang ringan.
+   */
+  @Post('sessions/:id/media')
+  @HttpCode(HttpStatus.CREATED)
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: {
+        fileSize: 5 * 1024 * 1024, // Maksimal 5MB per berkas gambar
+      },
+    }),
+  )
+  async uploadEditorMedia(
+    @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @UploadedFile(new ChatAttachmentSignatureValidationPipe()) file: Express.Multer.File,
+  ) {
+    const session = await this.articleGeneratorService.getArticleSessionById(id).catch(() => null)
+      || await this.memoryService.getQaSessionDetails(id).catch(() => null);
+
+    if (!session) {
+      throw new NotFoundException(`Sesi dengan ID '${id}' tidak ditemukan.`);
+    }
+
+    const extMatch = (file.originalname || '').match(/\.([a-zA-Z0-9]+)$/);
+    const ext = extMatch ? extMatch[1].toLowerCase() : (file.mimetype.split('/')[1] || 'png');
+    const safeExt = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext) ? ext : 'png';
+    const filename = `${id}_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${safeExt}`;
+
+    const mediaDir = join(process.cwd(), 'uploads', 'media');
+    if (!existsSync(mediaDir)) {
+      mkdirSync(mediaDir, { recursive: true });
+    }
+    const targetFilePath = join(mediaDir, filename);
+    writeFileSync(targetFilePath, file.buffer);
+
+    const relativeUrl = `/uploads/media/${filename}`;
+    const asset = await (this.articleGeneratorService as any).chatRepository.createMediaAsset(id, {
+      fileUrl: relativeUrl,
+      fileName: file.originalname || filename,
+      mimeType: file.mimetype || `image/${safeExt}`,
+      fileSizeBytes: BigInt(file.size || file.buffer.length),
+    });
+
+    return {
+      success: true,
+      data: {
+        assetId: asset.id,
+        url: relativeUrl,
+        fileName: file.originalname || filename,
+        fileSizeBytes: file.size || file.buffer.length,
+      },
+    };
+  }
+
+  /**
    * Endpoint PATCH untuk pembaruan manual naskah draf artikel (Two-Way Sync)
-   * Menyimpan draf mentah hasil suntingan manual pengguna dari Pane Kanan ke database.
+   * Menyimpan editorState (HTML visual murni) langsung ke database tanpa degradasi serialisasi.
    */
   @Patch('article/sessions/:id/content')
   @HttpCode(HttpStatus.OK)
   async updateArticleContent(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
-    @Body()
-    body: {
-      articleTitle: string;
-      fullArticleText: string;
-    },
+    @Body() body: UpdateArticleContentDto,
   ) {
     const result = await this.articleGeneratorService.updateArticleContent(
       id,
       body.articleTitle,
       body.fullArticleText,
+      body.editorState,
     );
     return {
       success: true,
@@ -301,7 +371,7 @@ export class AssistantController {
       success: true,
       data: {
         title: data.articleTitle,
-        content: data.fullArticleText,
+        content: data.editorDocumentState || data.fullArticleText,
         tone: data.tone,
         generatedAt: data.updatedAt,
       },
