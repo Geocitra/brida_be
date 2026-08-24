@@ -70,9 +70,12 @@ export class UrlScraperService {
 
             this.logger.log(`[UrlScraper] Berhasil mengunduh & men-sanitasi '${extractedTitle}' (${wordCount} kata).`);
 
+            const safeTitle = extractedTitle.replace(/\u0000/g, '').replace(/\x00/g, '');
+            const safeText = finalizedText.replace(/\u0000/g, '').replace(/\x00/g, '');
+
             return {
-                title: extractedTitle,
-                cleanText: finalizedText,
+                title: safeTitle,
+                cleanText: safeText,
                 sourceUrl: response.url || url,
                 wordCount: Math.min(wordCount, this.MAX_WORD_LIMIT),
             };

@@ -13,6 +13,7 @@ import { ArticleLength, MessageRole, SessionType } from '@prisma/client';
 import { UrlScraperService } from './url-scraper.service';
 import { DocumentIngestionService } from '../../document-ingestion/services/document-ingestion.service';
 import { ContextAssemblyService } from '../../ai-agent/services/context-assembly.service';
+import { WebSearchService } from './web-search.service';
 
 // --- Impor Style Guide Global ---
 import { EDITORIAL_STYLE_GUIDE } from '../../ai-agent/constants/system-prompts.constant';
@@ -50,6 +51,7 @@ export class ArticleGeneratorService {
     private readonly urlScraperService: UrlScraperService,
     private readonly ingestionService: DocumentIngestionService,
     private readonly contextAssembly: ContextAssemblyService,
+    private readonly webSearchService: WebSearchService,
   ) { }
 
   /**
@@ -102,6 +104,34 @@ export class ArticleGeneratorService {
         } catch (scrapeErr: any) {
           this.logger.error(`[generateArticle URL Scrape Failed] Gagal memproses URL ${url}: ${scrapeErr.message}`);
         }
+      }
+    }
+
+    // Proactive web search jika kueri valid untuk memperkaya artikel (baik dengan atau tanpa dokumen acuan)
+    const queryForSearch = (articleTitle || userInstruction || '').trim();
+    const cleanedSearchQuery = queryForSearch
+      .replace(/https?:\/\/[^\s]+/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (cleanedSearchQuery.length > 5) {
+      try {
+        this.logger.log(`[generateArticle] Melakukan pencarian proaktif untuk subjek: "${cleanedSearchQuery}"...`);
+        const searchResults = await this.webSearchService.searchReputableWeb(cleanedSearchQuery, 5);
+        if (searchResults && searchResults.length > 0) {
+          searchResults.forEach((res, i) => {
+            scrapedUrls.push({
+              url: res.link,
+              title: res.title,
+              text: res.scrapedText
+                ? `=== ARTIKEL LUAR ${i + 1}: ${res.title} ===\nTautan: ${res.link}\nKonten Halaman:\n${res.scrapedText}`
+                : `=== ARTIKEL LUAR ${i + 1}: ${res.title} ===\nTautan: ${res.link}\nRingkasan Fakta: ${res.snippet}`,
+            });
+          });
+          this.logger.log(`[generateArticle] Berhasil mengintegrasikan ${searchResults.length} referensi eksternal transien.`);
+        }
+      } catch (searchErr: any) {
+        this.logger.error(`[generateArticle Proactive Search Failed] Gagal melakukan pencarian eksternal: ${searchErr.message}`);
       }
     }
 

@@ -191,7 +191,7 @@ export class QaIntentHandler implements IIntentHandler {
       if (isAnalyticalQuery) {
         try {
           this.logger.log(`[Proactive Search] Kueri analitis terdeteksi. Melakukan pengayaan eksternal secara proaktif...`);
-          const searchResults = await this.webSearchService.searchReputableWeb(sanitizedQuery, 2);
+          const searchResults = await this.webSearchService.searchReputableWeb(sanitizedQuery, 5);
 
           if (searchResults && searchResults.length > 0) {
             isProactiveSearch = true;
@@ -199,7 +199,9 @@ export class QaIntentHandler implements IIntentHandler {
               proactiveScrapedUrls.push({
                 url: res.link,
                 title: res.title,
-                text: `=== ARTIKEL LUAR ${i + 1}: ${res.title} ===\nTautan: ${res.link}\nRingkasan Fakta: ${res.snippet}`,
+                text: res.scrapedText
+                  ? `=== ARTIKEL LUAR ${i + 1}: ${res.title} ===\nTautan: ${res.link}\nKonten Halaman:\n${res.scrapedText}`
+                  : `=== ARTIKEL LUAR ${i + 1}: ${res.title} ===\nTautan: ${res.link}\nRingkasan Fakta: ${res.snippet}`,
               });
             });
             this.logger.log(`[Proactive Search] Konteks eksternal tervalidasi berhasil diintegrasikan secara transien.`);
