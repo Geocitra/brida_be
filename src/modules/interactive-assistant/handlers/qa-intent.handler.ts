@@ -259,6 +259,13 @@ export class QaIntentHandler implements IIntentHandler {
       0.5,
     );
 
+    if (analysisResult.answer) {
+      analysisResult.answer = cleanCitationsText(analysisResult.answer, allScrapedUrls);
+    }
+    if (analysisResult.updatedArticle && analysisResult.updatedArticle.draftMarkdown) {
+      analysisResult.updatedArticle.draftMarkdown = cleanCitationsText(analysisResult.updatedArticle.draftMarkdown, allScrapedUrls);
+    }
+
     // 8. Proteksi Guardrail: Mencegah teks penolakan/obrolan AI menimpa draf artikel asli
     if (analysisResult.updatedArticle && analysisResult.updatedArticle.draftMarkdown) {
       const draft = analysisResult.updatedArticle.draftMarkdown.trim();
@@ -370,3 +377,34 @@ WAJIB patuhi gaya bahasa berikut saat meringkas:\n${EDITORIAL_STYLE_GUIDE}`,
     });
   }
 }
+
+/**
+ * Normalizer & Verifier Sitasi Eksternal
+ * Memastikan tautan dalam jawaban Q&A tidak mengandung endpoint download yang rusak.
+ */
+function cleanCitationsText(text: string, validScrapedUrls: Array<{ url: string; title: string }>): string {
+  if (!text) return '';
+
+  const validUrlMap = new Map<string, string>();
+  validScrapedUrls.forEach((item) => {
+    validUrlMap.set(item.url.trim(), item.title);
+  });
+
+  return text.replace(/\[(https?:\/\/[^\]\s]+)\]/g, (match, url) => {
+    const cleanUrl = url.trim();
+
+    if (/download\.php/i.test(cleanUrl) || /web-api\.bps\.go\.id/i.test(cleanUrl)) {
+      return `[https://mimikakab.bps.go.id]`;
+    }
+
+    if (validUrlMap.has(cleanUrl)) {
+      return match;
+    }
+
+    if (/\.(go\.id|antaranews\.com|bps\.go\.id|kompas\.com|tempo\.co|cnbcindonesia\.com|bisnis\.com|kontan\.co\.id|katadata\.co\.id)/i.test(cleanUrl)) {
+      return match;
+    }
+
+    return `[https://mimikakab.bps.go.id]`;
+  });
+}

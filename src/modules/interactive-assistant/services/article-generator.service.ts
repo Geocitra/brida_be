@@ -207,10 +207,12 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
 
       fullArticleText = llmResult.fullText || formatArticleFromLlm(llmResult, normalizedTitle);
       fullArticleText = cleanArticleTitlePrefix(fullArticleText);
+      fullArticleText = verifyAndCleanCitations(fullArticleText, scrapedUrls);
     } catch (err: any) {
       this.logger.warn(`[Article LLM Fallback] Gagal memanggil API: ${err.message}. Menggunakan sintesis fallback.`);
       fullArticleText = createFallbackArticleText(normalizedTitle, sourceDocs, tone, targetLength as string);
       fullArticleText = cleanArticleTitlePrefix(fullArticleText);
+      fullArticleText = verifyAndCleanCitations(fullArticleText, scrapedUrls);
     }
 
     // SIMPAN HISTORY AI KE DB
@@ -563,3 +565,40 @@ function cleanArticleTitlePrefix(text: string): string {
   cleaned = cleaned.replace(/^(?:Artikel\s+Strategis|Laporan\s+Strategis|Draft|Draf|Analisis\s+Strategis|Rilis\s+Pers):\s*/i, '');
   return cleaned;
 }
+
+/**
+ * Post-Generation Citation Verifier
+ * Memvalidasi dan menormalkan seluruh sitasi URL di dalam naskah artikel.
+ * Menghilangkan tautan download internal yang rusak dan menggantinya dengan portal publik resmi BPS.
+ */
+function verifyAndCleanCitations(articleText: string, validScrapedUrls: Array<{ url: string; title: string }>): string {
+  if (!articleText) return '';
+
+  const validUrlMap = new Map<string, string>();
+  validScrapedUrls.forEach((item) => {
+    validUrlMap.set(item.url.trim(), item.title);
+  });
+
+  // Ganti atau normalkan URL yang tidak valid / URL download error
+  return articleText.replace(/\[(https?:\/\/[^\]\s]+)\]/g, (match, url) => {
+    const cleanUrl = url.trim();
+
+    // 1. Jika URL cocok dengan pola download yang rusak, ganti dengan canonical landing page BPS
+    if (/download\.php/i.test(cleanUrl) || /web-api\.bps\.go\.id/i.test(cleanUrl)) {
+      return `[https://mimikakab.bps.go.id]`;
+    }
+
+    // 2. Jika URL ada dalam daftar terverifikasi, pertahankan
+    if (validUrlMap.has(cleanUrl)) {
+      return match;
+    }
+
+    // 3. Jika domain terpercaya (.go.id / media berita nasional), pertahankan
+    if (/\.(go\.id|antaranews\.com|bps\.go\.id|kompas\.com|tempo\.co|cnbcindonesia\.com|bisnis\.com|kontan\.co\.id|katadata\.co\.id)/i.test(cleanUrl)) {
+      return match;
+    }
+
+    // 4. Jika URL tidak dikenal / terindikasi halusinasi, normalkan ke portal BPS Mimika
+    return `[https://mimikakab.bps.go.id]`;
+  });
+}
