@@ -2,8 +2,6 @@
 
 
 --- FILE: docker-compose.yml ---
-version: '3.8'
-
 services:
   brida-db:
     build:
@@ -79,7 +77,7 @@ COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
 
 EXPOSE 3000
-CMD ["sh", "-c", "npx prisma migrate deploy && node dist/src/main"]
+CMD ["sh", "-c", "npx prisma migrate deploy && node dist/main"]
 
 --- FILE: nest-cli.json ---
 {
@@ -898,6 +896,33 @@ CREATE UNIQUE INDEX "executive_users_nip_key" ON "executive_users"("nip");
 ALTER TABLE "document_metadata" ADD COLUMN     "external_metadata" JSONB DEFAULT '{}',
 ADD COLUMN     "source_url" VARCHAR(2048);
 
+--- FILE: prisma\migrations\20260821072000_add_editor_document_state_and_media_assets\migration.sql ---
+-- AlterTable
+ALTER TABLE "chat_sessions" ADD COLUMN     "editorDocumentState" TEXT,
+ADD COLUMN     "parentSessionId" UUID;
+
+-- CreateTable
+CREATE TABLE "session_media_assets" (
+    "id" UUID NOT NULL,
+    "sessionId" UUID NOT NULL,
+    "fileUrl" TEXT NOT NULL,
+    "fileName" TEXT NOT NULL,
+    "mimeType" TEXT NOT NULL,
+    "fileSizeBytes" BIGINT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT "session_media_assets_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateIndex
+CREATE INDEX "session_media_assets_sessionId_idx" ON "session_media_assets"("sessionId");
+
+-- AddForeignKey
+ALTER TABLE "chat_sessions" ADD CONSTRAINT "chat_sessions_parentSessionId_fkey" FOREIGN KEY ("parentSessionId") REFERENCES "chat_sessions"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "session_media_assets" ADD CONSTRAINT "session_media_assets_sessionId_fkey" FOREIGN KEY ("sessionId") REFERENCES "chat_sessions"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+
 --- FILE: src\app.module.ts ---
 import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
@@ -1234,23 +1259,37 @@ export const EDITORIAL_STYLE_GUIDE = `
    - DILARANG HANYA MEREVIEW/MEMBUAT DAFTAR ISI: Jangan menulis kalimat deskriptif pasif kosong seperti "Bab ini menjelaskan tentang kependudukan..." atau "Tabel X menyajikan data pertanian...".
    - EKSTRAK & NARASIKAN ANGKA AKTUAL: Tarik langsung data kuantitatif penting, persentase, perbandingan target vs realisasi, dan tren kenaikan/penurunan. Terjemahkan angka tersebut menjadi narasi berita yang hidup (contoh: "laju inflasi berhasil ditekan hingga 2,5%").
    - PRIORITASKAN TREN & ANOMALI: Cari data pencapaian tertinggi, penurunan signifikan, atau deviasi target pembangunan daerah untuk dijadikan sorotan utama artikel.
+9. HINDARI NALURI DEFENSIVE & METANARASI KETERBATASAN: Naskah/artikel wajib memposisikan diri sepenuhnya sebagai penulis laporan/kebijakan eksekutif yang lugas dan berwibawa. DILARANG KERAS menyisipkan kalimat yang merujuk pada keterbatasan sistem, ketiadaan dokumen acuan, atau keluhan teknis seperti "karena dokumen acuan belum lengkap...", "sesi ini tidak menyediakan penelusuran aktif...", "saya tidak dapat menemukan...", atau sejenisnya. Jika data belum tersedia, tuliskan kebutuhan datanya secara objektif dan profesional sebagai bagian dari rekomendasi (contoh: "Diperlukan koordinasi integrasi data dasar...") tanpa menyebutkan kegagalan pencarian atau keterbatasan AI.
+10. FOKUS PADA HASIL ANALISIS & PROYEKSI (ANTI-TEORETIS / DIRECT WRITING): AI wajib menyajikan hasil analisis, angka, tabel, dan rekomendasi secara langsung dan lugas. DILARANG KERAS bertele-tele membahas rumus matematika secara teoretis, menjabarkan cara menghitung secara akademis, atau membuat pembelaan/pernyataan bahwa angka tersebut tidak bisa dihitung. Jika data masa depan (seperti tahun 2030) belum pasti atau data primer tidak lengkap, Anda WAJIB membuat proyeksi, estimasi ilmiah, atau skenario numerik yang logis (ceteris paribus) berdasarkan tren data historis yang tersedia (misalnya laju pertumbuhan rata-rata), lalu sajikan angka proyeksi tersebut secara tegas sebagai hasil analisis kebijakan, bukan sebagai spekulasi kosong.
+11. ANTI-META-DOKUMENTASI (LARANGAN ABSOLUT KOMENTAR TENTANG DOKUMEN ACUAN): DILARANG KERAS menulis kalimat apapun yang mengumumkan, mendeskripsikan, atau membahas keberadaan/ketiadaan data di dalam dokumen acuan. Pola kalimat berikut sepenuhnya TERLARANG muncul di output akhir:
+   - "Dokumen X yang menjadi rujukan utama memuat Y, tetapi tidak menampilkan Z [docId:chunk]."
+   - "Dokumen acuan yang tersedia tidak mencantumkan data PDRB..."
+   - "Berdasarkan kutipan yang tersedia, seri PDRB tidak ditemukan..."
+   - "Data X belum tercantum dalam dokumen yang diunggah..."
+   Pola seperti itu adalah KOMENTAR INTERNAL SISTEM yang sama sekali tidak boleh muncul dalam laporan/artikel final. Langsung masuk ke substansi analisis dan sajikan data/proyeksi yang tersedia tanpa preamble meta-dokumentasi apapun.
 `;
 
-export const BRIDA_SYSTEM_PERSONA = `Anda adalah seorang Jurnalis Investigasi Senior, Analis Kebijakan Publik, dan Systems Analyst di Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika.
-Tugas utama Anda adalah mengekstrak, menganalisis, dan menyajikan wawasan dari dokumen laporan yang diunggah oleh staf BRIDA secara komprehensif, terstruktur, namun membumi (humanis).
+export const BRIDA_SYSTEM_PERSONA = `Anda adalah seorang Jurnalis Investigasi Senior, Kolumnis Kebijakan Publik, dan Analis Data di Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika.
+Tugas utama Anda adalah menulis ARTIKEL KEBIJAKAN dan LAPORAN ANALITIS berbasis data — gabungan dari dokumen yang diunggah staf BRIDA DAN data referensi dari internet.
+Anda BUKAN dosen, BUKAN mahasiswa, BUKAN penulis skripsi. Output Anda adalah ARTIKEL yang langsung menyajikan data, angka, tren, proyeksi, dan rekomendasi kebijakan secara lugas dan berwibawa.
+DILARANG KERAS menulis dengan gaya akademis/skripsi (menjelaskan teori, menjabarkan rumus, membahas metodologi, atau mendeskripsikan isi dokumen). Langsung sajikan HASIL ANALISIS.
 
 ${EDITORIAL_STYLE_GUIDE}
 
 ATURAN MUTLAK (ZERO-KNOWLEDGE BASE ENFORCEMENT & INTEGRITAS DATA):
-1. Anda HANYA BOLEH memberikan analisis, jawaban, dan informasi yang secara EKSPLISIT tercantum di dalam teks dokumen terlampir (kecuali sistem mengaktifkan mode Proactive Web Search/Pencarian Eksternal).
-2. DILARANG KERAS menambahkan asumsi, spekulasi, halusinasi data, atau pengetahuan eksternal di luar teks dokumen rujukan.
-3. Jika informasi yang ditanyakan oleh pengguna tidak tercantum di dalam dokumen, Anda WAJIB menjawab dengan bahasa jurnalistik yang luwes bahwa: "Informasi tersebut tidak ditemukan di dalam dokumen laporan rujukan."
-4. Jawaban Anda harus selalu terstruktur, berbasis bukti faktual, dan WAJIB menyertakan kutipan/referensi paragraf asli (contoh format: [doc-xyz:chunkIndex]) yang bersebelahan dengan klaim faktual.`;
+1. Sajikan analisis, jawaban, dan informasi berdasarkan gabungan data dari dokumen terlampir DAN data relevan dari Web Search/Pencarian Eksternal. Untuk data dari internet, pastikan sumbernya benar-benar RELEVAN dengan topik yang diminta pengguna (bukan hanya kebetulan cocok karena satu kata kunci). Cantumkan link referensi eksternal yang valid.
+2. DILARANG KERAS membuat spekulasi berdasarkan halusinasi data.
+3. Jika diperlukan membuat asumsi maka dijelaskan ceteris paribus.
+4. Untuk pengetahuan eksternal di luar teks dokumen rujukan jelaskan dokumen rujukannya.
+5. Jika informasi yang ditanyakan oleh pengguna tidak tercantum di dalam dokumen, Anda WAJIB menjawab dengan bahasa jurnalistik yang luwes dengan sumber sumber informasi yang jelas dan relevan. Jangan memasukkan subjek penulis kedalam laporan contoh: 'saya tidak boleh', 'Yang bisa saya lakukan', 'Atas permintaan Anda', 'saya'.
+6. Jawaban Anda harus selalu terstruktur, berbasis bukti faktual, dan WAJIB menyertakan kutipan/referensi paragraf asli (contoh format: [doc-xyz:chunkIndex]) yang bersebelahan dengan klaim faktual.`;
 
 export const BRIDA_GUARDRAIL_POSTFIX = `[INSTRUKSI PENUTUP MUNDUR - RECENCY BIAS GUARDRAIL]
-Evaluasi dan jawab pertanyaan pengguna di atas secara eksklusif berdasarkan teks konteks dokumen terlampir. SELALU terapkan secara ketat Klaster Editorial & Gaya Selingkung Jurnalistik (Diet Koma, Anti-Prefix Judul, Spasi Paragraf Ganda, dan Penggunaan Tabel Markdown).
+Evaluasi dan jawab pertanyaan pengguna di atas berdasarkan analisis terhadap dokumen terlampir serta data rujukan web eksternal yang tersedia.
+WAJIB CANTUMKAN SITASI WEB: Jika terdapat seksi 'DOKUMEN PENDUKUNG (SITASI WEB LANGSUNG)', Anda WAJIB menyematkan tautan referensi web [URL] tersebut di dalam naskah artikel Anda di samping data atau fakta yang dikutip.
+SELALU terapkan secara ketat Klaster Editorial & Gaya Selingkung Jurnalistik (Diet Koma, Anti-Prefix Judul, Spasi Paragraf Ganda, dan Penggunaan Tabel Markdown).
 Jika dokumen rujukan berupa tabel data atau statistik BPS, Anda WAJIB langsung mengekstrak metrik, persentase, perbandingan target/realisasi, serta tren kuantitatif yang ada, lalu menarasikannya sebagai berita rilis pers faktual. DILARANG HANYA MEREVIEW atau menjelaskan isi/struktur tabel tanpa menyajikan data angkanya.
-Terapkan Aturan Zero-Knowledge Base secara mutlak. Jangan menambahkan asumsi atau opini eksternal apa pun. Pastikan jika output memerlukan format JSON, hasilnya harus berupa struktur JSON murni yang valid tanpa awalan atau akhiran teks Markdown \`\`\` di luarnya.`;
+Terapkan Aturan Zero-Knowledge Base secara mutlak. Pastikan jika output memerlukan format JSON, hasilnya harus berupa struktur JSON murni yang valid tanpa awalan atau akhiran teks Markdown \`\`\` di luarnya.`;
 
 export const DYNAMIC_CONTEXT_TOKEN_THRESHOLD = 80000;
 
@@ -6345,7 +6384,7 @@ export class QaIntentHandler implements IIntentHandler {
       if (isAnalyticalQuery) {
         try {
           this.logger.log(`[Proactive Search] Kueri analitis terdeteksi. Melakukan pengayaan eksternal secara proaktif...`);
-          const searchResults = await this.webSearchService.searchReputableWeb(sanitizedQuery, 2);
+          const searchResults = await this.webSearchService.searchReputableWeb(sanitizedQuery, 5);
 
           if (searchResults && searchResults.length > 0) {
             isProactiveSearch = true;
@@ -6353,7 +6392,9 @@ export class QaIntentHandler implements IIntentHandler {
               proactiveScrapedUrls.push({
                 url: res.link,
                 title: res.title,
-                text: `=== ARTIKEL LUAR ${i + 1}: ${res.title} ===\nTautan: ${res.link}\nRingkasan Fakta: ${res.snippet}`,
+                text: res.scrapedText
+                  ? `=== ARTIKEL LUAR ${i + 1}: ${res.title} ===\nTautan: ${res.link}\nKonten Halaman:\n${res.scrapedText}`
+                  : `=== ARTIKEL LUAR ${i + 1}: ${res.title} ===\nTautan: ${res.link}\nRingkasan Fakta: ${res.snippet}`,
               });
             });
             this.logger.log(`[Proactive Search] Konteks eksternal tervalidasi berhasil diintegrasikan secara transien.`);
@@ -6405,6 +6446,13 @@ export class QaIntentHandler implements IIntentHandler {
       DUAL_PANE_COOPERATIVE_SCHEMA,
       0.5,
     );
+
+    if (analysisResult.answer) {
+      analysisResult.answer = cleanCitationsText(analysisResult.answer, allScrapedUrls);
+    }
+    if (analysisResult.updatedArticle && analysisResult.updatedArticle.draftMarkdown) {
+      analysisResult.updatedArticle.draftMarkdown = cleanCitationsText(analysisResult.updatedArticle.draftMarkdown, allScrapedUrls);
+    }
 
     if (analysisResult.updatedArticle && analysisResult.updatedArticle.draftMarkdown) {
       const draft = analysisResult.updatedArticle.draftMarkdown.trim();
@@ -6512,6 +6560,33 @@ WAJIB patuhi gaya bahasa berikut saat meringkas:\n${EDITORIAL_STYLE_GUIDE}`,
       }
     });
   }
+}
+
+function cleanCitationsText(text: string, validScrapedUrls: Array<{ url: string; title: string }>): string {
+  if (!text) return '';
+
+  const validUrlMap = new Map<string, string>();
+  validScrapedUrls.forEach((item) => {
+    validUrlMap.set(item.url.trim(), item.title);
+  });
+
+  return text.replace(/\[(https?:\/\/[^\]\s]+)\]/g, (match, url) => {
+    const cleanUrl = url.trim();
+
+    if (/download\.php/i.test(cleanUrl) || /web-api\.bps\.go\.id/i.test(cleanUrl)) {
+      return `[https://mimikakab.bps.go.id]`;
+    }
+
+    if (validUrlMap.has(cleanUrl)) {
+      return match;
+    }
+
+    if (/\.(go\.id|antaranews\.com|bps\.go\.id|kompas\.com|tempo\.co|cnbcindonesia\.com|bisnis\.com|kontan\.co\.id|katadata\.co\.id)/i.test(cleanUrl)) {
+      return match;
+    }
+
+    return `[https://mimikakab.bps.go.id]`;
+  });
 }
 
 --- FILE: src\modules\interactive-assistant\interfaces\chat-memory.interface.ts ---
@@ -6988,6 +7063,7 @@ import { ArticleLength, MessageRole, SessionType } from '@prisma/client';
 import { UrlScraperService } from './url-scraper.service';
 import { DocumentIngestionService } from '../../document-ingestion/services/document-ingestion.service';
 import { ContextAssemblyService } from '../../ai-agent/services/context-assembly.service';
+import { WebSearchService } from './web-search.service';
 
 import { EDITORIAL_STYLE_GUIDE } from '../../ai-agent/constants/system-prompts.constant';
 
@@ -7023,6 +7099,7 @@ export class ArticleGeneratorService {
     private readonly urlScraperService: UrlScraperService,
     private readonly ingestionService: DocumentIngestionService,
     private readonly contextAssembly: ContextAssemblyService,
+    private readonly webSearchService: WebSearchService,
   ) { }
 
   async generateArticle(options: GenerateArticleOptions): Promise<any> {
@@ -7071,6 +7148,33 @@ export class ArticleGeneratorService {
         } catch (scrapeErr: any) {
           this.logger.error(`[generateArticle URL Scrape Failed] Gagal memproses URL ${url}: ${scrapeErr.message}`);
         }
+      }
+    }
+
+    const queryForSearch = (articleTitle || userInstruction || '').trim();
+    const cleanedSearchQuery = queryForSearch
+      .replace(/https?:\/\/[^\s]+/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (cleanedSearchQuery.length > 5) {
+      try {
+        this.logger.log(`[generateArticle] Melakukan pencarian proaktif untuk subjek: "${cleanedSearchQuery}"...`);
+        const searchResults = await this.webSearchService.searchReputableWeb(cleanedSearchQuery, 5);
+        if (searchResults && searchResults.length > 0) {
+          searchResults.forEach((res, i) => {
+            scrapedUrls.push({
+              url: res.link,
+              title: res.title,
+              text: res.scrapedText
+                ? `=== ARTIKEL LUAR ${i + 1}: ${res.title} ===\nTautan: ${res.link}\nKonten Halaman:\n${res.scrapedText}`
+                : `=== ARTIKEL LUAR ${i + 1}: ${res.title} ===\nTautan: ${res.link}\nRingkasan Fakta: ${res.snippet}`,
+            });
+          });
+          this.logger.log(`[generateArticle] Berhasil mengintegrasikan ${searchResults.length} referensi eksternal transien.`);
+        }
+      } catch (searchErr: any) {
+        this.logger.error(`[generateArticle Proactive Search Failed] Gagal melakukan pencarian eksternal: ${searchErr.message}`);
       }
     }
 
@@ -7140,10 +7244,12 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
 
       fullArticleText = llmResult.fullText || formatArticleFromLlm(llmResult, normalizedTitle);
       fullArticleText = cleanArticleTitlePrefix(fullArticleText);
+      fullArticleText = verifyAndCleanCitations(fullArticleText, scrapedUrls);
     } catch (err: any) {
       this.logger.warn(`[Article LLM Fallback] Gagal memanggil API: ${err.message}. Menggunakan sintesis fallback.`);
       fullArticleText = createFallbackArticleText(normalizedTitle, sourceDocs, tone, targetLength as string);
       fullArticleText = cleanArticleTitlePrefix(fullArticleText);
+      fullArticleText = verifyAndCleanCitations(fullArticleText, scrapedUrls);
     }
 
     await this.chatRepository.addMessage({
@@ -7477,6 +7583,33 @@ function cleanArticleTitlePrefix(text: string): string {
 
   cleaned = cleaned.replace(/^(?:Artikel\s+Strategis|Laporan\s+Strategis|Draft|Draf|Analisis\s+Strategis|Rilis\s+Pers):\s*/i, '');
   return cleaned;
+}
+
+function verifyAndCleanCitations(articleText: string, validScrapedUrls: Array<{ url: string; title: string }>): string {
+  if (!articleText) return '';
+
+  const validUrlMap = new Map<string, string>();
+  validScrapedUrls.forEach((item) => {
+    validUrlMap.set(item.url.trim(), item.title);
+  });
+
+  return articleText.replace(/\[(https?:\/\/[^\]\s]+)\]/g, (match, url) => {
+    const cleanUrl = url.trim();
+
+    if (/download\.php/i.test(cleanUrl) || /web-api\.bps\.go\.id/i.test(cleanUrl)) {
+      return `[https://mimikakab.bps.go.id]`;
+    }
+
+    if (validUrlMap.has(cleanUrl)) {
+      return match;
+    }
+
+    if (/\.(go\.id|antaranews\.com|bps\.go\.id|kompas\.com|tempo\.co|cnbcindonesia\.com|bisnis\.com|kontan\.co\.id|katadata\.co\.id)/i.test(cleanUrl)) {
+      return match;
+    }
+
+    return `[https://mimikakab.bps.go.id]`;
+  });
 }
 
 --- FILE: src\modules\interactive-assistant\services\chat-memory.service.ts ---
@@ -7942,9 +8075,12 @@ export class UrlScraperService {
 
             this.logger.log(`[UrlScraper] Berhasil mengunduh & men-sanitasi '${extractedTitle}' (${wordCount} kata).`);
 
+            const safeTitle = extractedTitle.replace(/\u0000/g, '').replace(/\x00/g, '');
+            const safeText = finalizedText.replace(/\u0000/g, '').replace(/\x00/g, '');
+
             return {
-                title: extractedTitle,
-                cleanText: finalizedText,
+                title: safeTitle,
+                cleanText: safeText,
                 sourceUrl: response.url || url,
                 wordCount: Math.min(wordCount, this.MAX_WORD_LIMIT),
             };
@@ -8068,11 +8204,25 @@ export class UrlScraperService {
 --- FILE: src\modules\interactive-assistant\services\web-search.service.ts ---
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { VendorLlmAdapter } from '../../ai-agent/providers/vendor-llm.adapter';
+import { UrlScraperService } from './url-scraper.service';
 
 export interface SearchQueryResult {
     title: string;
     link: string;
     snippet: string;
+    scrapedText?: string;
+    relevanceScore?: number;
+}
+
+export interface SourceRelevanceEvaluation {
+    geographicScore: number;
+    indicatorScore: number;
+    dataDensityScore: number;
+    authorityScore: number;
+    totalScore: number;
+    isApproved: boolean;
+    rejectionReason?: string;
 }
 
 @Injectable()
@@ -8080,91 +8230,409 @@ export class WebSearchService {
     private readonly logger = new Logger(WebSearchService.name);
 
     private readonly REPUTABLE_SITES_WHITELIST = [
+        'site:bps.go.id',
+        'site:go.id',
         'site:antaranews.com',
         'site:kompas.com',
         'site:tempo.co',
-        'site:republika.co.id',
         'site:detik.com',
         'site:cnbcindonesia.com',
-        'site:bps.go.id',
-        'site:bappenas.go.id',
-        'site:kemkes.go.id',
-        'site:kemendagri.go.id',
-        'site:sinta.kemdikbud.go.id',
-        'site:garuda.kemdikbud.go.id'
+        'site:tirto.id',
+        'site:bisnis.com',
+        'site:kontan.co.id',
+        'site:databoks.katadata.co.id',
+        'site:papuabaratprov.go.id',
+        'site:papua.go.id',
     ];
 
-    constructor(private readonly configService: ConfigService) { }
+    private readonly BLOCKED_URL_PATTERNS: RegExp[] = [
+        /download\.php/i,
+        /web-api\.bps\.go\.id/i,
+        /\/api\
+        /\.pdf$/i,
+        /\.xlsx?$/i,
+        /\.docx?$/i,
+        /\.zip$/i,
+        /\.rar$/i,
+        /\/download\
+        /\/unduh\
+        /\/file\
+        /article\/download/i,
+        /login/i,
+    ];
+
+    constructor(
+        private readonly configService: ConfigService,
+        private readonly llmAdapter: VendorLlmAdapter,
+        private readonly urlScraperService: UrlScraperService,
+    ) { }
+
+    async extractSearchQueries(rawPrompt: string): Promise<string[]> {
+
+        const preSanitizedPrompt = this.sanitizeMetaPrompt(rawPrompt);
+
+        const mappedQueries = this.resolveMacroeconomicIndicators(rawPrompt);
+        if (mappedQueries.length > 0) {
+            this.logger.log(`[WebSearch] Intent-to-Indicator Mapping aktif: ${JSON.stringify(mappedQueries)}`);
+            return mappedQueries;
+        }
+
+        const schema = {
+            type: 'object',
+            properties: {
+                queries: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Daftar 1 sampai 2 kata kunci pencarian Google berfokus pada data statistik resmi BPS/pemerintah daerah.'
+                }
+            },
+            required: ['queries'],
+            additionalProperties: false
+        };
+
+        const systemInstructions = `Anda adalah asisten AI spesialis ekstraksi kata kunci pencarian statistik pemerintahan daerah (BPS & BRIDA).
+Tugas Anda:
+1. Analisis kebutuhan data eksternal pengguna.
+2. Formulasikan 1 hingga maksimal 2 kueri pencarian Google murni berbasis data (3-5 kata per kueri).
+3. Format Kueri Wajib: [Indikator Spesifik] [Entitas Wilayah: Kabupaten Mimika/Papua] [Sumber: BPS]
+4. DILARANG KERAS menyertakan kata perintah (buatkan, analisa, laporan, merujuk, dari web search, artikel ilmiah, panduan penulisan).
+Contoh:
+Input: "Dengan merujuk dokumen acuan buatkan analisa penduduk mimika 2030 dan elastisitas PDRB dari web search"
+Output: {"queries": ["PDRB Kabupaten Mimika BPS 2023 2024", "Proyeksi Penduduk Mimika 2030 BPS"]}`;
+
+        try {
+            const llmResult = await this.llmAdapter.generateStructuredAnalysis<{ queries: string[] }>(
+                [
+                    { role: 'system', content: systemInstructions },
+                    { role: 'user', content: `Instruksi Pengguna: "${preSanitizedPrompt}"` }
+                ],
+                schema,
+                0.0
+            );
+
+            if (llmResult && Array.isArray(llmResult.queries) && llmResult.queries.length > 0) {
+                const cleaned = llmResult.queries
+                    .map(q => this.sanitizeQueryString(q))
+                    .filter(q => q.length > 0);
+                if (cleaned.length > 0) {
+                    return cleaned.slice(0, 2);
+                }
+            }
+        } catch (err: any) {
+            this.logger.error(`[WebSearch Query Extraction Failed] Gagal memformulasi kueri: ${err.message}`);
+        }
+
+        return ['PDRB Kabupaten Mimika BPS', 'Jumlah Penduduk Kabupaten Mimika BPS'];
+    }
 
     async searchReputableWeb(userQuery: string, limit: number = 3): Promise<SearchQueryResult[]> {
         const apiKey = this.configService.get<string>('SERPER_API_KEY');
 
         if (!apiKey || apiKey.trim().length === 0) {
-            this.logger.warn('[WebSearch] SERPER_API_KEY tidak dikonfigurasi di file .env. Mengaktifkan fallback pencarian kosong.');
+            this.logger.warn('[WebSearch] SERPER_API_KEY tidak dikonfigurasi. Mengembalikan hasil kosong.');
             return [];
         }
 
         try {
-            const enrichedQuery = this.formulateEnrichedQuery(userQuery);
-            this.logger.log(`[WebSearch] Mengirim kueri proaktif berfilter: ${enrichedQuery}`);
 
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 5000);
+            const cleanQueries = await this.extractSearchQueries(userQuery);
+            this.logger.log(`[WebSearch] Kueri pencarian terarah yang dijalankan: ${JSON.stringify(cleanQueries)}`);
 
-            const response = await fetch('https://google.serper.dev/search', {
-                method: 'POST',
-                headers: {
-                    'X-API-KEY': apiKey,
-                    'Content-Type': 'application/json',
-                },
-                body: JSON.stringify({
-                    q: enrichedQuery,
-                    num: limit,
-                    gl: 'id',
-                    hl: 'id',
-                }),
-                signal: controller.signal,
-            });
+            const allCandidates: SearchQueryResult[] = [];
+            const visitedUrls = new Set<string>();
+            const limitPerQuery = Math.max(2, Math.ceil((limit * 2) / cleanQueries.length));
 
-            clearTimeout(timeoutId);
+            for (const query of cleanQueries) {
+                const enrichedQuery = this.formulateEnrichedQuery(query);
+                this.logger.log(`[WebSearch] Mengirim kueri ke Google Serper: "${enrichedQuery}"`);
 
-            if (!response.ok) {
-                throw new Error(`Koneksi ke Serper API ditolak dengan status: ${response.status}`);
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+                try {
+                    const response = await fetch('https://google.serper.dev/search', {
+                        method: 'POST',
+                        headers: {
+                            'X-API-KEY': apiKey,
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            q: enrichedQuery,
+                            num: limitPerQuery,
+                            gl: 'id',
+                            hl: 'id',
+                        }),
+                        signal: controller.signal,
+                    });
+
+                    clearTimeout(timeoutId);
+
+                    if (response.ok) {
+                        const searchJson = await response.json();
+                        const organicResults = searchJson.organic || [];
+
+                        for (const item of organicResults) {
+                            const link = item.link || '';
+                            if (link && !visitedUrls.has(link) && !this.isBlockedUrl(link)) {
+                                visitedUrls.add(link);
+                                allCandidates.push({
+                                    title: (item.title || 'Artikel Terkait').replace(/\u0000/g, '').replace(/\x00/g, ''),
+                                    link: link,
+                                    snippet: (item.snippet || '').replace(/\u0000/g, '').replace(/\x00/g, ''),
+                                });
+                            }
+                        }
+                    }
+                } catch (singleQueryErr: any) {
+                    this.logger.error(`[WebSearch Single Query Failed] Gagal mencari kueri "${query}": ${singleQueryErr.message}`);
+                }
             }
 
-            const searchJson = await response.json();
-            const organicResults = searchJson.organic || [];
+            const candidatesToScrape = allCandidates.slice(0, Math.max(limit, 3));
+            this.logger.log(`[WebSearch] Menjalankan pengunduhan & penilaian multi-faktor untuk ${candidatesToScrape.length} kandidat URL...`);
 
-            const parsedResults: SearchQueryResult[] = organicResults.map((item: any) => ({
-                title: item.title || 'Artikel Terkait',
-                link: item.link || '',
-                snippet: item.snippet || '',
-            })).filter((item: any) => item.link.length > 0);
+            const evaluatedResults: SearchQueryResult[] = [];
 
-            this.logger.log(`[WebSearch] Sukses mengumpulkan ${parsedResults.length} hasil pencarian eksternal tervalidasi.`);
-            return parsedResults;
+            const scrapePromises = candidatesToScrape.map(async (candidate) => {
+                try {
+                    const scraped = await this.urlScraperService.scrapeAndExtract(candidate.link);
+                    const cleanText = scraped.cleanText;
+
+                    const evaluation = this.evaluateSourceRelevance(
+                        candidate.title,
+                        cleanText,
+                        candidate.link,
+                        cleanQueries.join(' ')
+                    );
+
+                    if (evaluation.isApproved) {
+                        this.logger.log(`[WebSearch Relevance ✓ APPROVED] ${candidate.link} (Skor: ${evaluation.totalScore}/100) - [Geo: ${evaluation.geographicScore}, Indikator: ${evaluation.indicatorScore}, Data: ${evaluation.dataDensityScore}, Otoritas: ${evaluation.authorityScore}]`);
+                        return {
+                            ...candidate,
+                            scrapedText: cleanText,
+                            relevanceScore: evaluation.totalScore,
+                        };
+                    } else {
+                        this.logger.warn(`[WebSearch Relevance ✗ REJECTED] ${candidate.link} (Skor: ${evaluation.totalScore}/100) - Alasan: ${evaluation.rejectionReason}`);
+                        return null;
+                    }
+                } catch (scrapeErr: any) {
+                    this.logger.warn(`[WebSearch Scrape Failed] Gagal menarik konten penuh dari ${candidate.link}: ${scrapeErr.message}`);
+
+                    const snippetEval = this.evaluateSourceRelevance(
+                        candidate.title,
+                        candidate.snippet,
+                        candidate.link,
+                        cleanQueries.join(' ')
+                    );
+
+                    if (snippetEval.isApproved) {
+                        return {
+                            ...candidate,
+                            relevanceScore: snippetEval.totalScore,
+                        };
+                    }
+                    return null;
+                }
+            });
+
+            const resolvedResults = await Promise.all(scrapePromises);
+            const approvedResults: SearchQueryResult[] = [];
+
+            for (const res of resolvedResults) {
+                if (res !== null && res !== undefined) {
+                    approvedResults.push(res);
+                }
+            }
+
+            approvedResults.sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0));
+
+            let finalResults = approvedResults.slice(0, limit);
+            if (finalResults.length === 0 && allCandidates.length > 0) {
+                this.logger.warn(`[WebSearch Fail-Safe Active] Menggunakan ${Math.min(limit, allCandidates.length)} tautan teratas dari domain resmi sebagai referensi acuan.`);
+                finalResults = allCandidates.slice(0, limit);
+            }
+
+            this.logger.log(`[WebSearch Pipeline Selesai] Berhasil menyajikan ${finalResults.length} sumber data referensi resmi untuk AI.`);
+            return finalResults;
 
         } catch (err: any) {
-
             this.logger.error(`[WebSearch Failed] Pencarian eksternal terganggu (Protected Variations Active): ${err.message}`);
             return [];
         }
     }
 
-    private formulateEnrichedQuery(userQuery: string): string {
+    evaluateSourceRelevance(
+        title: string,
+        content: string,
+        url: string,
+        queryContext: string
+    ): SourceRelevanceEvaluation {
+        const textToEvaluate = `${title} ${content}`.toLowerCase();
+        const urlLower = url.toLowerCase();
 
-        const sanitizedQuery = userQuery
+        let geographicScore = 0;
+        const geoKeywords = ['mimika', 'timika', 'papua tengah', 'papua', 'provinsi papua'];
+        for (const geo of geoKeywords) {
+            if (textToEvaluate.includes(geo)) {
+                geographicScore = geo === 'mimika' || geo === 'timika' ? 35 : 20;
+                break;
+            }
+        }
+
+        let indicatorScore = 0;
+        const primaryIndicators = ['pdrb', 'penduduk', 'proyeksi penduduk', 'adhk', 'adhb', 'produk domestik regional bruto'];
+        const secondaryIndicators = ['pertumbuhan ekonomi', 'inflasi', 'kemiskinan', 'ketenagakerjaan', 'apbd', 'sektor pertambangan', 'freeport', 'statistik'];
+
+        let matchedPrimary = 0;
+        for (const ind of primaryIndicators) {
+            if (textToEvaluate.includes(ind)) matchedPrimary++;
+        }
+
+        let matchedSecondary = 0;
+        for (const ind of secondaryIndicators) {
+            if (textToEvaluate.includes(ind)) matchedSecondary++;
+        }
+
+        if (matchedPrimary >= 2) {
+            indicatorScore = 35;
+        } else if (matchedPrimary === 1) {
+            indicatorScore = 25 + Math.min(10, matchedSecondary * 5);
+        } else if (matchedSecondary >= 1) {
+            indicatorScore = Math.min(20, matchedSecondary * 10);
+        }
+
+        let dataDensityScore = 0;
+        const hasNumbers = /\b\d{1,3}(?:\.\d{3})+(?:,\d+)?\b|\b\d+(?:,\d+)?%\b/g.test(content);
+        const hasCurrencyOrUnits = /(miliar|triliun|persen|jiwa|ribu|rupiah|rp|tahun 202)/i.test(content);
+
+        if (hasNumbers && hasCurrencyOrUnits) {
+            dataDensityScore = 15;
+        } else if (hasNumbers || hasCurrencyOrUnits) {
+            dataDensityScore = 8;
+        }
+
+        let authorityScore = 0;
+        if (urlLower.includes('mimikakab.bps.go.id') || urlLower.includes('papua.bps.go.id')) {
+            authorityScore = 15;
+        } else if (urlLower.includes('bps.go.id') || urlLower.includes('mimikakab.go.id')) {
+            authorityScore = 12;
+        } else if (urlLower.includes('.go.id') || urlLower.includes('databoks.katadata.co.id')) {
+            authorityScore = 10;
+        } else if (urlLower.includes('antaranews.com') || urlLower.includes('cnbcindonesia.com') || urlLower.includes('bisnis.com') || urlLower.includes('kontan.co.id')) {
+            authorityScore = 8;
+        }
+
+        const academicWritingNoise = /(panduan penulisan|workshop penulisan|gaya selingkung|buku teks|belajar mandiri|kemampuan belajar)/i.test(textToEvaluate);
+        if (academicWritingNoise) {
+            indicatorScore = Math.max(0, indicatorScore - 25);
+            geographicScore = Math.max(0, geographicScore - 20);
+        }
+
+        const totalScore = geographicScore + indicatorScore + dataDensityScore + authorityScore;
+
+        const isOfficialOrNews = authorityScore >= 8;
+        const hasRelevantIndicator = indicatorScore >= 15;
+        const hasGeographicContext = geographicScore > 0;
+
+        let isApproved = false;
+        let rejectionReason: string | undefined;
+
+        if (academicWritingNoise) {
+            isApproved = false;
+            rejectionReason = 'Terdeteksi sebagai panduan penulisan akademik / workshop jurnal.';
+        } else if (hasRelevantIndicator && (hasGeographicContext || isOfficialOrNews)) {
+            isApproved = true;
+        } else if (totalScore >= 35 && !academicWritingNoise) {
+            isApproved = true;
+        } else {
+            rejectionReason = `Skor tidak mencukupi (Total: ${totalScore}, Indikator: ${indicatorScore}, Geo: ${geographicScore}).`;
+        }
+
+        return {
+            geographicScore,
+            indicatorScore,
+            dataDensityScore,
+            authorityScore,
+            totalScore,
+            isApproved,
+            rejectionReason,
+        };
+    }
+
+    private resolveMacroeconomicIndicators(prompt: string): string[] {
+        const pLower = prompt.toLowerCase();
+        const queries: string[] = [];
+
+        const isMimika = pLower.includes('mimika') || pLower.includes('timika');
+        const region = isMimika ? 'Kabupaten Mimika' : 'Mimika Papua';
+
+        if ((pLower.includes('elastisitas') && pLower.includes('pdrb')) || (pLower.includes('pdrb') && pLower.includes('penduduk'))) {
+            queries.push(`PDRB ${region} BPS 2023 2024`);
+            queries.push(`Proyeksi Penduduk ${region} 2030 BPS`);
+            return queries;
+        }
+
+        if (pLower.includes('pdrb') || pLower.includes('pertumbuhan ekonomi') || pLower.includes('adhk')) {
+            queries.push(`Produk Domestik Regional Bruto ${region} BPS`);
+            queries.push(`Laju Pertumbuhan Ekonomi ${region} BPS`);
+            return queries;
+        }
+
+        if (pLower.includes('penduduk') || pLower.includes('demografi') || pLower.includes('sensus')) {
+            queries.push(`Jumlah Penduduk ${region} BPS`);
+            queries.push(`Proyeksi Penduduk ${region} 2030`);
+            return queries;
+        }
+
+        if (pLower.includes('kemiskinan') || pLower.includes('ipm') || pLower.includes('indeks pembangunan manusia')) {
+            queries.push(`Indeks Pembangunan Manusia ${region} BPS`);
+            queries.push(`Tingkat Kemiskinan ${region} BPS`);
+            return queries;
+        }
+
+        if (pLower.includes('inflasi') || pLower.includes('ihk') || pLower.includes('harga')) {
+            queries.push(`Tingkat Inflasi IHK ${region} BPS`);
+            return queries;
+        }
+
+        return queries;
+    }
+
+    private sanitizeMetaPrompt(rawPrompt: string): string {
+        return rawPrompt
+            .replace(/https?:\/\/[^\s]+/gi, '')
+            .replace(/\b(dengan merujuk|pada dokumen acuan|buatkan|buat|tolong|analisa|analisis|buatlah|tulis|tuliskan|laporan|artikel|dari web search|internet|secara lengkap|tambahkan data acuan yang relevan)\b/gi, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    private sanitizeQueryString(query: string): string {
+        return query
             .replace(/[^\w\s\u00C0-\u017F]/gi, ' ')
             .replace(/\s+/g, ' ')
             .trim();
+    }
+
+    private formulateEnrichedQuery(userQuery: string): string {
+        const sanitizedQuery = this.sanitizeQueryString(userQuery);
 
         if (sanitizedQuery.length === 0) {
-            return 'Kabupaten Mimika';
+            return 'PDRB Kabupaten Mimika BPS';
         }
 
         const siteFilters = `(${this.REPUTABLE_SITES_WHITELIST.join(' OR ')})`;
+        return `${sanitizedQuery} ${siteFilters}`;
+    }
 
-        return `"${sanitizedQuery}" ${siteFilters}`;
+    private isBlockedUrl(url: string): boolean {
+        for (const pattern of this.BLOCKED_URL_PATTERNS) {
+            if (pattern.test(url)) {
+                this.logger.warn(`[WebSearch URL Blocked] URL ditolak karena cocok pola terblokir: ${url}`);
+                return true;
+            }
+        }
+        return false;
     }
 }
 
@@ -8656,6 +9124,13 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
               break-after: page;
               height: 0;
               overflow: hidden;
+            }
+
+            div[data-auto-page-spacer], .no-print {
+              display: none !important;
+              height: 0 !important;
+              margin: 0 !important;
+              padding: 0 !important;
             }
 
             img {
