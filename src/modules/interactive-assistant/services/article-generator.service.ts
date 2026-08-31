@@ -34,6 +34,7 @@ export interface GenerateArticleOptions {
     kesiaxialRingkas?: string;
   };
   parentSessionId?: string;
+  userId?: string; // Menambahkan userId untuk isolasi
 }
 
 @Injectable()
@@ -74,11 +75,16 @@ export class ArticleGeneratorService {
       (articleTitle || '').trim() || 'Draf Artikel Publikasi';
 
     let session = options.sessionId
-      ? await this.chatRepository.findSessionById(options.sessionId)
+      ? await this.chatRepository.findSessionById(options.sessionId, options.userId)
       : null;
+
+    if (options.sessionId && !session) {
+      throw new NotFoundException(`Sesi artikel dengan ID '${options.sessionId}' tidak ditemukan.`);
+    }
 
     if (!session) {
       session = await this.chatRepository.createArticleSession({
+        userId: options.userId,
         documentIds: validDocIds,
         articleTitle: normalizedTitle,
         targetLength: targetLength as ArticleLength,
@@ -497,8 +503,8 @@ ${EDITORIAL_STYLE_GUIDE}
     };
   }
 
-  async getAllArticleSessions(): Promise<any[]> {
-    const sessions = await this.chatRepository.findArticleSessions();
+  async getAllArticleSessions(userId?: string): Promise<any[]> {
+    const sessions = await this.chatRepository.findArticleSessions(userId);
     return sessions.map((s) => ({
       id: s.id,
       title: s.title,
@@ -517,8 +523,8 @@ ${EDITORIAL_STYLE_GUIDE}
     }));
   }
 
-  async getArticleSessionById(sessionId: string): Promise<any> {
-    const session = await this.chatRepository.findSessionById(sessionId);
+  async getArticleSessionById(sessionId: string, userId?: string): Promise<any> {
+    const session = await this.chatRepository.findSessionById(sessionId, userId);
     if (!session) {
       throw new NotFoundException(
         `Sesi artikel dengan ID '${sessionId}' tidak ditemukan.`,

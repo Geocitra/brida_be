@@ -6,7 +6,7 @@ import { ChatMemoryService } from './services/chat-memory.service';
 import { QaIntentHandler } from './handlers/qa-intent.handler';
 import { ArticleIntentHandler } from './handlers/article-intent.handler';
 import { IntentRouterService } from './services/intent-router.service';
-import { AssistantController } from './controllers/assistant.controller';
+import { AssistantController, ArticleShareController } from './controllers/assistant.controller';
 import { PromptInjectionSanitizer } from './utils/prompt-injection-sanitizer.util';
 import { ArticleGeneratorService } from './services/article-generator.service';
 import { DiscussionBridgeService } from './services/discussion-bridge.service';
@@ -16,7 +16,7 @@ import { WebSearchService } from './services/web-search.service';
 
 @Module({
   imports: [DocumentIngestionModule, AiAgentModule],
-  controllers: [AssistantController],
+  controllers: [AssistantController, ArticleShareController],
   providers: [
     ChatRepository,
     ChatMemoryService,

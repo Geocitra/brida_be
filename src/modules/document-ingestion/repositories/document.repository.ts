@@ -27,6 +27,8 @@ export interface CreateDocumentTransactionInput {
   docType?: string;
   chunks: ChunkWithVectorInput[];
   executionTimeMs: number;
+  categoryId?: string;
+  opdId?: string;
 }
 
 @Injectable()
@@ -63,7 +65,12 @@ export class DocumentRepository {
     return this.prisma.reportDocument.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
-        metadata: true,
+        metadata: {
+          include: {
+            categoryRef: true,
+            opd: true,
+          },
+        },
         _count: { select: { chunks: true } },
       },
     });
@@ -268,6 +275,8 @@ export class DocumentRepository {
           category: input.category,
           uploadedBy: input.uploadedBy,
           docType: input.docType || 'REALIZATION',
+          categoryId: input.categoryId || null,
+          opdId: input.opdId || null,
         },
       });
 

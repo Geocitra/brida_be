@@ -20,14 +20,15 @@ export class ChatMemoryService {
     private readonly tokenEstimator: TokenEstimatorUtil,
   ) { }
 
-  async createSession(documentIds: string[], title?: string, sessionType: SessionType = SessionType.QA_CHAT) {
+  async createSession(documentIds: string[], title?: string, sessionType: SessionType = SessionType.QA_CHAT, userId?: string) {
     if (sessionType === SessionType.ARTICLE_GENERATOR) {
       return this.chatRepository.createArticleSession({
         documentIds,
         articleTitle: title || 'Draf Artikel Baru',
+        userId,
       });
     }
-    return this.chatRepository.createSession(documentIds, title);
+    return this.chatRepository.createSession(documentIds, title, userId);
   }
 
   async recordUserMessage(sessionId: string, content: string, metadata?: any) {
@@ -167,8 +168,8 @@ export class ChatMemoryService {
     }
   }
 
-  async getQaSessions(): Promise<any[]> {
-    const sessions = await this.chatRepository.findQaSessions();
+  async getQaSessions(userId?: string): Promise<any[]> {
+    const sessions = await this.chatRepository.findQaSessions(userId);
     return sessions.map((s: any) => ({
       id: s.id,
       title: s.title,
@@ -181,8 +182,8 @@ export class ChatMemoryService {
     }));
   }
 
-  async getQaSessionDetails(sessionId: string): Promise<any> {
-    const session = await this.chatRepository.findSessionById(sessionId);
+  async getQaSessionDetails(sessionId: string, userId?: string): Promise<any> {
+    const session = await this.chatRepository.findSessionById(sessionId, userId);
     if (!session) {
       throw new NotFoundException(`Sesi obrolan dengan ID '${sessionId}' tidak ditemukan.`);
     }
@@ -200,8 +201,8 @@ export class ChatMemoryService {
     };
   }
 
-  async deleteSession(sessionId: string): Promise<void> {
-    const session = await this.chatRepository.findSessionById(sessionId);
+  async deleteSession(sessionId: string, userId?: string): Promise<void> {
+    const session = await this.chatRepository.findSessionById(sessionId, userId);
     if (!session) {
       throw new NotFoundException(`Sesi obrolan dengan ID '${sessionId}' tidak ditemukan.`);
     }

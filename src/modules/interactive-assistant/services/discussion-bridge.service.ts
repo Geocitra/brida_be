@@ -10,6 +10,7 @@ export interface TransitionQaRequestDto {
     targetLength?: ArticleLength;
     tone?: string;
     userInstruction?: string;
+    userId?: string; // Menambahkan userId untuk isolasi
 }
 
 @Injectable()
@@ -27,14 +28,14 @@ export class DiscussionBridgeService {
      * menjadi sesi penulisan artikel independen baru (ARTICLE_GENERATOR).
      */
     async transitionQaToArticle(dto: TransitionQaRequestDto): Promise<any> {
-        const { sessionId, articleTitle, targetLength = ArticleLength.MEDIUM, tone = 'solutif', userInstruction } = dto;
+        const { sessionId, articleTitle, targetLength = ArticleLength.MEDIUM, tone = 'solutif', userInstruction, userId } = dto;
 
         this.logger.log(
             `[DiscussionBridgeService] Memulai inisiasi transisi sesi diskusi '${sessionId}' ke naskah artikel...`,
         );
 
         // 1. Validasi Sesi Diskusi Asal (Information Expert Check)
-        const sourceSession = await this.chatRepository.findSessionById(sessionId);
+        const sourceSession = await this.chatRepository.findSessionById(sessionId, userId);
         if (!sourceSession) {
             throw new NotFoundException(`Sesi diskusi asal dengan ID '${sessionId}' tidak ditemukan.`);
         }
@@ -86,6 +87,7 @@ export class DiscussionBridgeService {
             userInstruction,
             synthesizedManifest, // Meneruskan Structured Synthesis Manifest hasil Pass-1
             parentSessionId: sessionId, // Mengikat silsilah sesi QA asal secara independen
+            userId, // Mengirimkan userId agar sesi artikel terikat pada pengguna yang sama
         });
 
         this.logger.log(

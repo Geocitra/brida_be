@@ -311,7 +311,26 @@ export class DocumentIngestionService {
 
     const executionTimeMs = Date.now() - startTime;
 
-    // 8. Commit Transaksional ke PostgreSQL DB (Atomic Transaction)
+    // 8. Resolve analyticalRole dari kategori (auto-derive docType)
+    let resolvedDocType = dto.docType || 'REALIZATION';
+    if (dto.categoryId) {
+      try {
+        const cat = await this.prisma.documentCategory.findUnique({ where: { id: dto.categoryId } });
+        if (cat?.analyticalRole) {
+          // Map analyticalRole ke docType lama untuk backward-compat
+          const roleMap: Record<string, string> = {
+            TARGET: 'BASELINE',
+            REALIZATION: 'REALIZATION',
+            REFERENCE: 'GENERAL_REFERENCE',
+          };
+          resolvedDocType = roleMap[cat.analyticalRole] || resolvedDocType;
+        }
+      } catch {
+        this.logger.warn('[Category Role Resolve] Gagal query kategori, fallback ke docType default.');
+      }
+    }
+
+    // 9. Commit Transaksional ke PostgreSQL DB (Atomic Transaction)
     const savedDoc = await this.repository.createDocumentWithTransaction({
       title: dto.title,
       fileUrl: filePathOnDisk,
@@ -322,9 +341,11 @@ export class DocumentIngestionService {
       totalTokenCount,
       category: dto.category || 'General Report',
       uploadedBy: dto.uploadedBy || 'SYSTEM_STAF',
-      docType: dto.docType || 'REALIZATION',
+      docType: resolvedDocType,
       chunks: chunkItems,
       executionTimeMs,
+      categoryId: dto.categoryId,
+      opdId: dto.opdId,
     });
 
     return {
@@ -341,7 +362,7 @@ export class DocumentIngestionService {
         totalTokenCount,
         category: dto.category || 'General Report',
         uploadedBy: dto.uploadedBy || 'SYSTEM_STAF',
-        docType: dto.docType || 'REALIZATION',
+        docType: resolvedDocType,
       },
       chunkCount: chunkObjects.length,
       extractedLocationsCount: totalLocationsCount,
@@ -367,6 +388,11 @@ export class DocumentIngestionService {
           uploadedBy: doc.metadata.uploadedBy,
           docType: doc.metadata.docType,
           sourceUrl: doc.metadata.sourceUrl || undefined,
+          categoryId: doc.metadata.categoryId || undefined,
+          categoryName: (doc.metadata as any).categoryRef?.name || undefined,
+          analyticalRole: (doc.metadata as any).categoryRef?.analyticalRole || undefined,
+          opdId: doc.metadata.opdId || undefined,
+          opdName: (doc.metadata as any).opd?.name || undefined,
         }
         : undefined,
       chunkCount: doc._count?.chunks ?? 0,

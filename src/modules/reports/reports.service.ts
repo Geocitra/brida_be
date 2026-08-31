@@ -33,9 +33,9 @@ export class ReportsService {
     return sorted.join('|');
   }
 
-  async checkCache(documentIds: string[], reportType: string = 'NOTA_DINAS_BUPATI') {
+  async checkCache(documentIds: string[], reportType: string = 'NOTA_DINAS_BUPATI', userId?: string) {
     const hash = this.generateDocumentIdsHash(documentIds);
-    const cachedReport = await this.reportsRepository.findByHash(hash, reportType);
+    const cachedReport = await this.reportsRepository.findByHash(hash, reportType, userId);
 
     if (cachedReport) {
       return {
@@ -55,13 +55,13 @@ export class ReportsService {
     };
   }
 
-  async generateReport(dto: GenerateReportDto) {
-    const { documentIds, reportType = 'NOTA_DINAS_BUPATI', title, forceRegenerate = false } = dto;
+  async generateReport(dto: GenerateReportDto & { userId: string }) {
+    const { documentIds, reportType = 'NOTA_DINAS_BUPATI', title, forceRegenerate = false, userId } = dto;
     const documentIdsHash = this.generateDocumentIdsHash(documentIds);
 
     // 1. Check DB Cache if forceRegenerate is false
     if (!forceRegenerate) {
-      const cached = await this.reportsRepository.findByHash(documentIdsHash, reportType);
+      const cached = await this.reportsRepository.findByHash(documentIdsHash, reportType, userId);
       if (cached) {
         this.logger.log(
           `[Report Cache HIT] Laporan untuk hash '${documentIdsHash}' ditemukan di DB. Mengembalikan cache (0 Token LLM).`,
@@ -217,6 +217,7 @@ ${EDITORIAL_STYLE_GUIDE}
       tokenCount: tokensUsed,
       llmProvider,
       documentIds,
+      userId,
     });
 
     this.logger.log(
@@ -240,8 +241,8 @@ ${EDITORIAL_STYLE_GUIDE}
     };
   }
 
-  async getAllReports() {
-    const reports = await this.reportsRepository.findAll();
+  async getAllReports(userId?: string) {
+    const reports = await this.reportsRepository.findAll(userId);
     return reports.map((r: any) => ({
       id: r.id,
       title: r.title,
@@ -255,8 +256,8 @@ ${EDITORIAL_STYLE_GUIDE}
     }));
   }
 
-  async getReportById(id: string) {
-    const report = await this.reportsRepository.findById(id);
+  async getReportById(id: string, userId?: string) {
+    const report = await this.reportsRepository.findById(id, userId);
     if (!report) {
       throw new NotFoundException(`Laporan dengan ID '${id}' tidak ditemukan.`);
     }
@@ -273,9 +274,25 @@ ${EDITORIAL_STYLE_GUIDE}
     };
   }
 
-  async deleteReport(id: string) {
-    await this.getReportById(id);
-    return this.reportsRepository.delete(id);
+  async deleteReport(id: string, userId?: string) {
+    await this.getReportById(id, userId);
+    return this.reportsRepository.delete(id, userId);
+  }
+
+  async getSharedReportById(id: string) {
+    const report = await this.reportsRepository.findById(id);
+    if (!report) {
+      throw new NotFoundException(`Laporan dengan ID '${id}' tidak ditemukan.`);
+    }
+    return {
+      id: report.id,
+      title: report.title,
+      reportType: report.reportType,
+      executiveSummary: report.executiveSummary,
+      contentPayload: report.contentPayload,
+      createdAt: report.createdAt,
+      sources: report.sources.map((s: any) => sanitizeDocument(s.document)),
+    };
   }
 }
 

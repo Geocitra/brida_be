@@ -14,6 +14,11 @@ export interface DocumentResponseDto {
     uploadedBy: string;
     docType?: string;
     sourceUrl?: string;
+    categoryId?: string;
+    categoryName?: string;
+    analyticalRole?: string;
+    opdId?: string;
+    opdName?: string;
   };
   chunkCount?: number;
   extractedLocationsCount?: number;

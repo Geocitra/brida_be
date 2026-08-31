@@ -8,6 +8,8 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { AnalysisModule } from './modules/analysis/analysis.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { PdfModule } from './modules/pdf/pdf.module';
+import { AdminMasterModule } from './modules/admin-master/admin-master.module';
+import { SystemSettingModule } from './modules/system-setting/system-setting.module';
 
 @Module({
   imports: [
@@ -22,6 +24,8 @@ import { PdfModule } from './modules/pdf/pdf.module';
     AnalysisModule,
     AuthModule,
     PdfModule,
+    AdminMasterModule,
+    SystemSettingModule,
   ],
 })
 export class AppModule {}

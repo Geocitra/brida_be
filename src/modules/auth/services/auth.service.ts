@@ -2,9 +2,10 @@ import { Injectable, Logger, UnauthorizedException, OnModuleInit } from '@nestjs
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { LoginDto } from '../dtos/login.dto';
+import { UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
-@Injectable( )
+@Injectable()
 export class AuthService implements OnModuleInit {
   private readonly logger = new Logger(AuthService.name);
 
@@ -17,7 +18,7 @@ export class AuthService implements OnModuleInit {
   async onModuleInit() {
     try {
       const defaultNip = '197804122003121002';
-      const existingUser = await this.prisma.executiveUser.findUnique({
+      const existingUser = await this.prisma.user.findUnique({
         where: { nip: defaultNip },
       });
 
@@ -26,11 +27,12 @@ export class AuthService implements OnModuleInit {
         const defaultPassword = 'password123'; // Password default awal
         const passwordHash = await bcrypt.hash(defaultPassword, saltRounds);
 
-        await this.prisma.executiveUser.create({
+        await this.prisma.user.create({
           data: {
             nip: defaultNip,
             fullName: 'Darius Sabon Rain, S.E., M.Ec.Dev.',
             passwordHash,
+            role: UserRole.USER,
           },
         });
         this.logger.log(`[Auth Seeder] Akun default Kepala BRIDA (NIP: ${defaultNip}) berhasil diinisialisasi.`);
@@ -40,11 +42,11 @@ export class AuthService implements OnModuleInit {
     }
   }
 
-  async login(dto: LoginDto): Promise<{ accessToken: string; executive: { nip: string; fullName: string } }> {
+  async login(dto: LoginDto): Promise<{ accessToken: string; executive: { nip: string; fullName: string; role: UserRole } }> {
     const { nip, password } = dto;
     const cleanNip = nip.replace(/\s+/g, '').trim();
 
-    const user = await this.prisma.executiveUser.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { nip: cleanNip },
     });
 
@@ -59,16 +61,17 @@ export class AuthService implements OnModuleInit {
       throw new UnauthorizedException('NIP atau Kata Sandi Otorisasi salah.');
     }
 
-    const payload = { sub: user.id, nip: user.nip, fullName: user.fullName };
+    const payload = { sub: user.id, nip: user.nip, fullName: user.fullName, role: user.role };
     const accessToken = this.jwtService.sign(payload);
 
-    this.logger.log(`[Login Success] Kepala BRIDA (${user.fullName}) berhasil masuk sistem.`);
+    this.logger.log(`[Login Success] ${user.role} (${user.fullName}) berhasil masuk sistem.`);
 
     return {
       accessToken,
       executive: {
         nip: user.nip,
         fullName: user.fullName,
+        role: user.role,
       },
     };
   }

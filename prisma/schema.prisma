@@ -68,22 +68,27 @@ model ReportDocument {
 }
 
 model DocumentMetadata {
-  id               String         @id @default(uuid()) @db.Uuid
-  documentId       String         @unique @db.Uuid
+  id               String            @id @default(uuid()) @db.Uuid
+  documentId       String            @unique @db.Uuid
   fileSizeBytes    BigInt
-  pageCount        Int            @default(0)
-  totalTokenCount  Int            @default(0)
-  category         String         @default("General Report")
-  uploadedBy       String         @default("SYSTEM_STAF")
-  docType          String         @default("REALIZATION")
+  pageCount        Int               @default(0)
+  totalTokenCount  Int               @default(0)
+  category         String            @default("General Report")
+  uploadedBy       String            @default("SYSTEM_STAF")
+  docType          String            @default("REALIZATION")
   
   // Bidang Baru: Dukungan Pelacakan Dokumen Virtual Hasil Scraping Eksternal
-  sourceUrl        String?        @map("source_url") @db.VarChar(2048)
-  externalMetadata Json?          @map("external_metadata") @default("{}")
+  sourceUrl        String?           @map("source_url") @db.VarChar(2048)
+  externalMetadata Json?             @map("external_metadata") @default("{}")
   
-  createdAt        DateTime       @default(now())
+  categoryId       String?           @db.Uuid
+  opdId            String?           @db.Uuid
 
-  document         ReportDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  createdAt        DateTime          @default(now())
+
+  document         ReportDocument    @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  categoryRef      DocumentCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  opd              OPD?              @relation(fields: [opdId], references: [id], onDelete: SetNull)
 
   @@map("document_metadata")
 }
@@ -152,6 +157,7 @@ model AiAnalysisLog {
 
 model ChatSession {
   id              String                 @id @default(uuid()) @db.Uuid
+  userId          String                 @db.Uuid
   documentId      String?                @db.Uuid
   sessionType     SessionType            @default(QA_CHAT)
   title           String                 @default("Sesi Analisis Kasus")
@@ -174,6 +180,7 @@ model ChatSession {
   parentSession      ChatSession?           @relation("SessionTransition", fields: [parentSessionId], references: [id], onDelete: SetNull)
   derivedSessions    ChatSession[]          @relation("SessionTransition")
 
+  user               User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   document           ReportDocument?        @relation(fields: [documentId], references: [id], onDelete: Cascade)
   messages           ChatMessage[]
   sources            ChatSessionSourceRef[]
@@ -246,6 +253,7 @@ model MessageAttachment {
 
 model GeneratedReport {
   id               String            @id @default(uuid()) @db.Uuid
+  userId           String            @db.Uuid
   title            String
   reportType       String            @default("NOTA_DINAS_BUPATI")
   documentIdsHash  String            @db.Text
@@ -257,6 +265,7 @@ model GeneratedReport {
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   sources          ReportSourceRef[]
 
   @@index([documentIdsHash])
@@ -321,13 +330,76 @@ model DeviationAnalysis {
   @@map("deviation_analyses")
 }
 
-model ExecutiveUser {
+enum UserRole {
+  ADMIN
+  USER
+}
+
+model User {
   id           String   @id @default(uuid()) @db.Uuid
   nip          String   @unique
   fullName     String   @map("full_name")
   passwordHash String   @map("password_hash")
+  role         UserRole @default(USER)
+  opdId        String?  @db.Uuid
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  @@map("executive_users")
+  opd              OPD?              @relation(fields: [opdId], references: [id], onDelete: SetNull)
+  chatSessions     ChatSession[]
+  generatedReports GeneratedReport[]
+
+  @@map("users")
+}
+
+model District {
+  id             String   @id @default(uuid()) @db.Uuid
+  name           String   @unique
+  latitude       Float
+  longitude      Float
+  aliases        String[] @default([])
+  luasWilayah    Float    @default(0.0)
+  jumlahPenduduk Int      @default(0)
+  deskripsi      String   @default("")
+  batasWilayah   String   @default("")
+  images         String[] @default([])
+  suggestions    String[] @default([])
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("districts")
+}
+
+model DocumentCategory {
+  id             String             @id @default(uuid()) @db.Uuid
+  name           String             @unique
+  code           String             @unique
+  description    String?
+  analyticalRole String             @default("REFERENCE") @map("analytical_role")
+  documents      DocumentMetadata[]
+  createdAt      DateTime           @default(now())
+
+  @@map("document_categories")
+}
+
+model OPD {
+  id        String             @id @default(uuid()) @db.Uuid
+  name      String             @unique
+  code      String             @unique
+  headName  String?            @map("head_name")
+  headPhone String?            @map("head_phone")
+  users     User[]
+  documents DocumentMetadata[]
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  @@map("opds")
+}
+
+model SystemSetting {
+  key       String   @id
+  value     String   @db.Text
+  updatedAt DateTime @updatedAt
+
+  @@map("system_settings")
 }

@@ -1,5 +1,5 @@
 import { Module } from '@nestjs/common';
-import { ReportsController } from './reports.controller';
+import { ReportsController, ReportsShareController } from './reports.controller';
 import { ReportsService } from './reports.service';
 import { ReportsRepository } from './reports.repository';
 import { DocumentIngestionModule } from '../document-ingestion/document-ingestion.module';
@@ -8,7 +8,7 @@ import { AnalysisModule } from '../analysis/analysis.module';
 
 @Module({
   imports: [DocumentIngestionModule, AiAgentModule, AnalysisModule],
-  controllers: [ReportsController],
+  controllers: [ReportsController, ReportsShareController],
   providers: [ReportsService, ReportsRepository],
   exports: [ReportsService, ReportsRepository],
 })

@@ -24,6 +24,7 @@ export interface CreateArticleSessionInput {
   tone?: string;
   initialPrompt?: string;
   parentSessionId?: string; // Menambahkan relasi ke sesi QA asal
+  userId?: string; // Menambahkan userId untuk isolasi data
 }
 
 @Injectable()
@@ -35,10 +36,14 @@ export class ChatRepository {
   /**
    * Membuat sesi obrolan Q&A baru
    */
-  async createSession(documentIds: string[], title?: string): Promise<ChatSession> {
+  async createSession(documentIds: string[], title?: string, userId?: string): Promise<ChatSession> {
     const primaryDocId = documentIds.length > 0 ? documentIds[0] : null;
+    if (!userId) {
+      throw new Error('userId wajib disertakan untuk membuat sesi obrolan.');
+    }
     return this.prisma.chatSession.create({
       data: {
+        userId,
         documentId: primaryDocId,
         sessionType: SessionType.QA_CHAT,
         title: title || 'Sesi Analisis Kasus',
@@ -60,11 +65,17 @@ export class ChatRepository {
       articleTitle,
       targetLength = ArticleLength.MEDIUM,
       tone = 'solutif',
-      parentSessionId
+      parentSessionId,
+      userId
     } = input;
+
+    if (!userId) {
+      throw new Error('userId wajib disertakan untuk membuat sesi artikel.');
+    }
 
     return this.prisma.chatSession.create({
       data: {
+        userId,
         sessionType: SessionType.ARTICLE_GENERATOR,
         title: articleTitle || 'Draf Artikel Publikasi',
         articleTitle,
@@ -97,9 +108,13 @@ export class ChatRepository {
   /**
    * Mengambil detail sesi obrolan lengkap berdasarkan ID
    */
-  async findSessionById(sessionId: string): Promise<any | null> {
-    return this.prisma.chatSession.findUnique({
-      where: { id: sessionId },
+  async findSessionById(sessionId: string, userId?: string): Promise<any | null> {
+    const whereClause: any = { id: sessionId };
+    if (userId) {
+      whereClause.userId = userId;
+    }
+    return this.prisma.chatSession.findFirst({
+      where: whereClause,
       include: {
         document: true,
         sources: {
@@ -134,11 +149,15 @@ export class ChatRepository {
   /**
    * Menarik seluruh sesi penulisan artikel tersimpan
    */
-  async findArticleSessions(): Promise<any[]> {
+  async findArticleSessions(userId?: string): Promise<any[]> {
+    const whereClause: any = {
+      sessionType: SessionType.ARTICLE_GENERATOR,
+    };
+    if (userId) {
+      whereClause.userId = userId;
+    }
     return this.prisma.chatSession.findMany({
-      where: {
-        sessionType: SessionType.ARTICLE_GENERATOR,
-      },
+      where: whereClause,
       orderBy: { updatedAt: 'desc' },
       include: {
         sources: {
@@ -159,11 +178,15 @@ export class ChatRepository {
   /**
    * Menarik seluruh sesi tanya-jawab interaktif terdaftar
    */
-  async findQaSessions(): Promise<any[]> {
+  async findQaSessions(userId?: string): Promise<any[]> {
+    const whereClause: any = {
+      sessionType: SessionType.QA_CHAT,
+    };
+    if (userId) {
+      whereClause.userId = userId;
+    }
     return this.prisma.chatSession.findMany({
-      where: {
-        sessionType: SessionType.QA_CHAT,
-      },
+      where: whereClause,
       orderBy: { updatedAt: 'desc' },
       include: {
         document: true,
