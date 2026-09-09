@@ -253,22 +253,27 @@ model ReportDocument {
 }
 
 model DocumentMetadata {
-  id               String         @id @default(uuid()) @db.Uuid
-  documentId       String         @unique @db.Uuid
+  id               String            @id @default(uuid()) @db.Uuid
+  documentId       String            @unique @db.Uuid
   fileSizeBytes    BigInt
-  pageCount        Int            @default(0)
-  totalTokenCount  Int            @default(0)
-  category         String         @default("General Report")
-  uploadedBy       String         @default("SYSTEM_STAF")
-  docType          String         @default("REALIZATION")
+  pageCount        Int               @default(0)
+  totalTokenCount  Int               @default(0)
+  category         String            @default("General Report")
+  uploadedBy       String            @default("SYSTEM_STAF")
+  docType          String            @default("REALIZATION")
 
   // Bidang Baru: Dukungan Pelacakan Dokumen Virtual Hasil Scraping Eksternal
-  sourceUrl        String?        @map("source_url") @db.VarChar(2048)
-  externalMetadata Json?          @map("external_metadata") @default("{}")
+  sourceUrl        String?           @map("source_url") @db.VarChar(2048)
+  externalMetadata Json?             @map("external_metadata") @default("{}")
 
-  createdAt        DateTime       @default(now())
+  categoryId       String?           @db.Uuid
+  opdId            String?           @db.Uuid
 
-  document         ReportDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  createdAt        DateTime          @default(now())
+
+  document         ReportDocument    @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  categoryRef      DocumentCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  opd              OPD?              @relation(fields: [opdId], references: [id], onDelete: SetNull)
 
   @@map("document_metadata")
 }
@@ -337,6 +342,7 @@ model AiAnalysisLog {
 
 model ChatSession {
   id              String                 @id @default(uuid()) @db.Uuid
+  userId          String                 @db.Uuid
   documentId      String?                @db.Uuid
   sessionType     SessionType            @default(QA_CHAT)
   title           String                 @default("Sesi Analisis Kasus")
@@ -359,6 +365,7 @@ model ChatSession {
   parentSession      ChatSession?           @relation("SessionTransition", fields: [parentSessionId], references: [id], onDelete: SetNull)
   derivedSessions    ChatSession[]          @relation("SessionTransition")
 
+  user               User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
   document           ReportDocument?        @relation(fields: [documentId], references: [id], onDelete: Cascade)
   messages           ChatMessage[]
   sources            ChatSessionSourceRef[]
@@ -431,6 +438,7 @@ model MessageAttachment {
 
 model GeneratedReport {
   id               String            @id @default(uuid()) @db.Uuid
+  userId           String            @db.Uuid
   title            String
   reportType       String            @default("NOTA_DINAS_BUPATI")
   documentIdsHash  String            @db.Text
@@ -442,6 +450,7 @@ model GeneratedReport {
   createdAt       DateTime          @default(now())
   updatedAt       DateTime          @updatedAt
 
+  user             User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   sources          ReportSourceRef[]
 
   @@index([documentIdsHash])
@@ -506,50 +515,485 @@ model DeviationAnalysis {
   @@map("deviation_analyses")
 }
 
-model ExecutiveUser {
+enum UserRole {
+  ADMIN
+  USER
+}
+
+model User {
   id           String   @id @default(uuid()) @db.Uuid
   nip          String   @unique
   fullName     String   @map("full_name")
   passwordHash String   @map("password_hash")
+  role         UserRole @default(USER)
+  opdId        String?  @db.Uuid
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
 
-  @@map("executive_users")
+  opd              OPD?              @relation(fields: [opdId], references: [id], onDelete: SetNull)
+  chatSessions     ChatSession[]
+  generatedReports GeneratedReport[]
+
+  @@map("users")
+}
+
+model District {
+  id             String   @id @default(uuid()) @db.Uuid
+  name           String   @unique
+  latitude       Float
+  longitude      Float
+  aliases        String[] @default([])
+  luasWilayah    Float    @default(0.0)
+  jumlahPenduduk Int      @default(0)
+  deskripsi      String   @default("")
+  batasWilayah   String   @default("")
+  images         String[] @default([])
+  suggestions    String[] @default([])
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("districts")
+}
+
+model DocumentCategory {
+  id             String             @id @default(uuid()) @db.Uuid
+  name           String             @unique
+  code           String             @unique
+  description    String?
+  analyticalRole String             @default("REFERENCE") @map("analytical_role")
+  documents      DocumentMetadata[]
+  createdAt      DateTime           @default(now())
+
+  @@map("document_categories")
+}
+
+model OPD {
+  id        String             @id @default(uuid()) @db.Uuid
+  name      String             @unique
+  code      String             @unique
+  headName  String?            @map("head_name")
+  headPhone String?            @map("head_phone")
+  users     User[]
+  documents DocumentMetadata[]
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+
+  @@map("opds")
+}
+
+model SystemSetting {
+  key       String   @id
+  value     String   @db.Text
+  updatedAt DateTime @updatedAt
+
+  @@map("system_settings")
 }
 
 --- FILE: prisma\seed.ts ---
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
+import * as fs from 'fs';
+import * as path from 'path';
 
 const prisma = new PrismaClient();
 
 async function main() {
-  const defaultNip = '197804122003121002';
-  const defaultName = 'Darius Sabon Rain, S.E., M.Ec.Dev.';
-  const rawPassword = 'password123';
+  const saltRounds = 10;
+
+  const userNip = '197804122003121002';
+  const userName = 'Darius Sabon Rain, S.E., M.Ec.Dev.';
+  const userPass = 'password123';
+  const userPassHash = await bcrypt.hash(userPass, saltRounds);
 
   console.log('[Seeder] Memulai proses seeding akun Kepala BRIDA...');
-
-  const saltRounds = 10;
-  const passwordHash = await bcrypt.hash(rawPassword, saltRounds);
-
-  const executive = await prisma.executiveUser.upsert({
-    where: { nip: defaultNip },
+  const executive = await prisma.user.upsert({
+    where: { nip: userNip },
     update: {
-      fullName: defaultName,
-      passwordHash,
+      fullName: userName,
+      passwordHash: userPassHash,
+      role: UserRole.USER,
     },
     create: {
-      nip: defaultNip,
-      fullName: defaultName,
-      passwordHash,
+      nip: userNip,
+      fullName: userName,
+      passwordHash: userPassHash,
+      role: UserRole.USER,
     },
   });
 
-  console.log(`[Seeder Success] Akun Kepala BRIDA berhasil diamankan ke database:`);
+  console.log(`[Seeder Success] Akun Kepala BRIDA (USER) berhasil diamankan:`);
   console.log(` - NIP      : ${executive.nip}`);
   console.log(` - Nama     : ${executive.fullName}`);
-  console.log(` - Password : ${rawPassword} (Gunakan ini untuk login)`);
+
+  const adminNip = 'admin123';
+  const adminName = 'Administrator BRIDA';
+  const adminPass = 'passwordadmin';
+  const adminPassHash = await bcrypt.hash(adminPass, saltRounds);
+
+  console.log('[Seeder] Memulai proses seeding akun Administrator...');
+  const admin = await prisma.user.upsert({
+    where: { nip: adminNip },
+    update: {
+      fullName: adminName,
+      passwordHash: adminPassHash,
+      role: UserRole.ADMIN,
+    },
+    create: {
+      nip: adminNip,
+      fullName: adminName,
+      passwordHash: adminPassHash,
+      role: UserRole.ADMIN,
+    },
+  });
+
+  console.log(`[Seeder Success] Akun Administrator (ADMIN) berhasil diamankan:`);
+  console.log(` - NIP      : ${admin.nip}`);
+  console.log(` - Nama     : ${admin.fullName}`);
+
+  console.log('[Seeder] Memulai proses seeding OPD...');
+  const opdsData = [
+    { name: 'Badan Riset dan Inovasi Daerah', code: 'BRIDA', headName: 'Darius Sabon Rain, S.E., M.Ec.Dev.', headPhone: '628123456789' },
+    { name: 'Badan Perencanaan Pembangunan Daerah', code: 'BAPPEDA', headName: 'Ir. Yohana Paliling, M.Si.', headPhone: '628111111111' },
+    { name: 'Dinas Pendidikan', code: 'DISDIK', headName: 'Jenny O. Usmany, M.Pd.', headPhone: '628222222222' },
+    { name: 'Dinas Kesehatan', code: 'DINKES', headName: 'Reynold R. Ubra, S.KM., M.Epid.', headPhone: '628333333333' },
+    { name: 'Inspektorat Daerah', code: 'INSPEKTORAT', headName: 'Sihol Parningotan, S.H.', headPhone: '628444444444' },
+  ];
+
+  const seededOpds: Record<string, string> = {};
+  for (const opd of opdsData) {
+    const o = await prisma.oPD.upsert({
+      where: { code: opd.code },
+      update: { name: opd.name, headName: opd.headName, headPhone: opd.headPhone },
+      create: { name: opd.name, code: opd.code, headName: opd.headName, headPhone: opd.headPhone },
+    });
+    seededOpds[opd.code] = o.id;
+  }
+  console.log('[Seeder Success] OPD berhasil di-seed.');
+
+  const bridaOpdId = seededOpds['BRIDA'];
+  const bappedaOpdId = seededOpds['BAPPEDA'];
+
+  if (bridaOpdId) {
+    await prisma.user.update({
+      where: { nip: userNip },
+      data: { opdId: bridaOpdId },
+    });
+    console.log('[Seeder] Akun Kepala BRIDA berhasil dihubungkan ke OPD BRIDA.');
+  }
+  if (bappedaOpdId) {
+    await prisma.user.update({
+      where: { nip: adminNip },
+      data: { opdId: bappedaOpdId },
+    });
+    console.log('[Seeder] Akun Administrator berhasil dihubungkan ke OPD BAPPEDA.');
+  }
+
+  console.log('[Seeder] Memulai proses seeding Kategori Dokumen...');
+  const categoriesData = [
+    { name: 'Rencana Pembangunan Jangka Menengah Daerah', code: 'RPJMD', analyticalRole: 'TARGET', description: 'Dokumen perencanaan pembangunan daerah untuk jangka waktu 5 tahun.' },
+    { name: 'Rencana Strategis Perangkat Daerah', code: 'RENSTRA', analyticalRole: 'TARGET', description: 'Dokumen perencanaan strategis perangkat daerah untuk jangka waktu 5 tahun.' },
+    { name: 'Laporan Keterangan Pertanggungjawaban', code: 'LKPJ', analyticalRole: 'REALIZATION', description: 'Laporan pertanggungjawaban tahunan kepala daerah kepada DPRD.' },
+    { name: 'Kajian Akademis', code: 'KAJIAN_AKADEMIS', analyticalRole: 'REFERENCE', description: 'Dokumen kajian ilmiah/penelitian naskah akademik kebijakan daerah.' },
+    { name: 'Laporan Umum', code: 'GENERAL_REPORT', analyticalRole: 'REALIZATION', description: 'Dokumen laporan umum sektoral daerah.' },
+  ];
+
+  for (const cat of categoriesData) {
+    await prisma.documentCategory.upsert({
+      where: { code: cat.code },
+      update: { name: cat.name, description: cat.description, analyticalRole: cat.analyticalRole },
+      create: { name: cat.name, code: cat.code, description: cat.description, analyticalRole: cat.analyticalRole },
+    });
+  }
+  console.log('[Seeder Success] Kategori Dokumen berhasil di-seed.');
+
+  console.log('[Seeder] Memulai proses kalkulasi centroid dan seeding Distrik...');
+
+  const DISTRICT_PROFILES: Record<string, {
+    luasWilayah: number;
+    jumlahPenduduk: number;
+    deskripsi: string;
+    batasWilayah: string;
+    images: string[];
+    suggestions: string[];
+  }> = {
+    "Mimika Baru": {
+      luasWilayah: 2216,
+      jumlahPenduduk: 142000,
+      deskripsi: "Distrik Mimika Baru berpusat di kota Timika, berfungsi sebagai episentrum aktivitas perekonomian, perbankan, industri kreatif, serta pusat pemerintahan. Kepadatan infrastruktur dasar di distrik ini merupakan yang paling maju di seluruh kabupaten.",
+      batasWilayah: "Utara: Kuala Kencana, Selatan: Wania, Barat: Iwaka, Timur: Mimika Timur",
+      images: ["/img/mimika%20baru/aerial%20view.jpg", "/img/mimika%20baru/Pasar-Sentral-Timika.jpg"],
+      suggestions: ["Analisis Stunting", "Kendala Jalan Darat", "Kondisi Pendidikan"]
+    },
+    "Kuala Kencana": {
+      luasWilayah: 840,
+      jumlahPenduduk: 28000,
+      deskripsi: "Distrik Kuala Kencana merupakan kota modern terencana yang dikelola secara eksklusif berkolaborasi dengan pihak swasta pertambangan. Memiliki tata kota ramah lingkungan, jaringan kabel bawah tanah, dan kualitas sanitasi berstandar internasional.",
+      batasWilayah: "Utara: Tembagapura, Selatan: Mimika Baru, Barat: Iwaka, Timur: Kwamki Narama",
+      images: ["/img/kualakencana/images%20(1).jpg", "/img/kualakencana/images.jpg"],
+      suggestions: ["Analisis Stunting", "Kendala Jalan Darat", "Kondisi Pendidikan"]
+    },
+    "Tembagapura": {
+      luasWilayah: 1452,
+      jumlahPenduduk: 23000,
+      deskripsi: "Distrik Tembagapura terletak di wilayah pegunungan tinggi bersuhu dingin. Merupakan pusat operasi penambangan emas dan tembaga utama. Distrik ini memiliki tantangan geografis berupa lereng terjal dan risiko tanah longsor tinggi.",
+      batasWilayah: "Utara: Kabupaten Puncak, Selatan: Kuala Kencana, Barat: Alama, Timur: Hoya",
+      images: ["/img/tembagapura/Grasberg_pano_(3200491589)_(cropped).jpg", "/img/tembagapura/Tembagapura_4.jpg"],
+      suggestions: ["Analisis Stunting", "Kendala Jalan Darat", "Kondisi Pendidikan"]
+    },
+    "Wania": {
+      luasWilayah: 195,
+      jumlahPenduduk: 61000,
+      deskripsi: "Distrik Wania dikembangkan sebagai kawasan penyangga pemukiman perkotaan Timika. Memiliki konsentrasi pemukiman transmigrasi yang padat, pasar sentral regional, dan perkembangan ruko komersial menengah yang sangat pesat.",
+      batasWilayah: "Utara: Mimika Baru, Selatan: Mimika Timur, Barat: Iwaka, Timur: Mimika Tengah",
+      images: ["/img/wania/Pasar-Sentral-1-scaled.jpg", "/img/mimika%20baru/Indahhnya-Wisata-Timika.jpg"],
+      suggestions: ["Analisis Stunting", "Kendala Jalan Darat", "Kondisi Pendidikan"]
+    },
+    "Iwaka": {
+      luasWilayah: 742,
+      jumlahPenduduk: 12000,
+      deskripsi: "Distrik Iwaka didominasi dataran rendah subur yang dimanfaatkan sebagai kawasan perkebunan buah, penangkaran sagu lokal, serta menjadi area perlintasan utama koridor logistik berat menuju pelabuhan dan tambang.",
+      batasWilayah: "Utara: Kuala Kencana, Selatan: Amar, Barat: Mimika Barat Tengah, Timur: Mimika Baru",
+      images: ["/img/iwaka/sagu-1-635c8e4408a8b57f2152e722.jpg", "/img/iwaka/WhatsApp-Image-2026-07-13-at-10.24.32.jpg"],
+      suggestions: ["Analisis Stunting", "Kendala Jalan Darat", "Kondisi Pendidikan"]
+    },
+    "Kwamki Narama": {
+      luasWilayah: 45,
+      jumlahPenduduk: 15000,
+      deskripsi: "Distrik Kwamki Narama merupakan kawasan pemukiman adat yang padat. Pemerintah daerah memprioritaskan distrik ini untuk program asimilasi sosial, peningkatan literasi pendidikan dasar, dan pemberdayaan perkebunan rakyat.",
+      batasWilayah: "Utara: Kuala Kencana, Selatan: Mimika Baru, Barat: Kuala Kencana, Timur: Mimika Tengah",
+      images: ["/img/kwamki%20narama/prosesi-kremasi-jenazah-junius-m-janempa-di-kwamki-narama-rabu-142026-foto-cenderawasih-posmoh-wahyu-welerubun-xmAu6.webp", "/img/iwaka/traditional-honai-house-dani-tribe-260nw-2635906639.jpg"],
+      suggestions: ["Analisis Stunting", "Kendala Jalan Darat", "Kondisi Pendidikan"]
+    },
+    "Mimika Timur": {
+      luasWilayah: 211,
+      jumlahPenduduk: 11000,
+      deskripsi: "Distrik Mimika Timur merupakan pintu gerbang jalur logistik kelautan utama Mimika. Berpusat di Mapurujaya, distrik ini melayani operasional pelabuhan nasional Pomako dan industri pengolahan hasil laut laut.",
+      batasWilayah: "Utara: Mimika Baru, Selatan: Laut Arafura, Barat: Wania, Timur: Mimika Timur Jauh",
+      images: ["/img/mimika%20timur/624e6c8c105e5.jpg", "/img/mimika%20timur/images.jpg"],
+      suggestions: ["Analisis Stunting", "Kendala Jalan Darat", "Kondisi Pendidikan"]
+    },
+    "Mimika Tengah": {
+      luasWilayah: 341,
+      jumlahPenduduk: 5500,
+      deskripsi: "Distrik Mimika Tengah didominasi oleh bentang alam perairan payau dan muara sungai pesisir selatan. Mata pencaharian utama penduduknya adalah nelayan kepiting bakau dan budidaya tambak ikan tradisional.",
+      batasWilayah: "Utara: Kwamki Narama, Selatan: Laut Arafura, Barat: Wania, Timur: Jita",
+      images: ["/img/jita/Panoramic_view_of_dock_at_Kampung_Rawa,_2014-06-21.jpg", "/img/mimika%20barat/061348_64937_INDAH_mimika_dalam.jpg"],
+      suggestions: ["Analisis Stunting", "Kendala Jalan Darat", "Kondisi Pendidikan"]
+    },
+    "Mimika Barat": {
+      luasWilayah: 1021,
+      jumlahPenduduk: 4200,
+      deskripsi: "Distrik Mimika Barat berpusat di Kokonao. Merupakan kawasan administratif bersejarah yang menyimpan rekam jejak misionaris pendidikan awal di pesisir Papua. Fokus pada pelestarian peninggalan budaya lokal.",
+      batasWilayah: "Utara: Mimika Barat Tengah, Selatan: Laut Arafura, Barat: Mimika Barat Jauh, Timur: Amar",
+      images: ["/img/mimika%20barat/061348_64937_INDAH_mimika_dalam.jpg", "/img/mimika%20barat/IMG-20250929-WA0041-scaled.webp"],
+      suggestions: ["Analisis Stunting", "Kendala Jalan Darat", "Kondisi Pendidikan"]
+    },
+    "Agimuga": {
+      luasWilayah: 4124,
+      jumlahPenduduk: 3800,
+      deskripsi: "Distrik Agimuga merupakan kawasan dataran rendah timur Mimika yang dilalui banyak aliran sungai besar. Pembangunan infrastruktur jalan darat penghubung terus diupayakan untuk mengikis isolasi logistik antar wilayah.",
+      batasWilayah: "Utara: Jila, Selatan: Laut Arafura, Barat: Jita, Timur: Mimika Timur Jauh",
+      images: ["/img/agimuga/209.jpg", "/img/agimuga/7311.jpg"],
+      suggestions: ["Analisis Stunting", "Kendala Jalan Darat", "Kondisi Pendidikan"]
+    },
+    "Jila": {
+      luasWilayah: 6011,
+      jumlahPenduduk: 4500,
+      deskripsi: "Distrik Jila membentang luas di kaki jajaran pegunungan tengah Mimika. Topografi berbukit curam dan lereng batu mempersulit jaringan telekomunikasi dan pembangunan jalan trans-kabupaten.",
+      batasWilayah: "Utara: Kabupaten Puncak, Selatan: Agimuga, Barat: Hoya, Timur: Jita",
+      images: ["/img/jila/615d4d4e6ff0c.jpg", "/img/jila/shutterstock_2362513197.jpg"],
+      suggestions: ["Analisis Stunting", "Kendala Jalan Darat", "Kondisi Pendidikan"]
+    },
+    "Jita": {
+      luasWilayah: 4121,
+      jumlahPenduduk: 2800,
+      deskripsi: "Distrik Jita merupakan kawasan pedalaman berawa di timur Mimika. Sirkulasi mobilitas masyarakat sangat bergantung pada transportasi sungai, perahu kayu tradisional (*perahu jonson*), dan pasang surut air laut.",
+      batasWilayah: "Utara: Jila, Selatan: Laut Arafura, Barat: Mimika Tengah, Timur: Agimuga",
+      images: ["/img/jita/images.jpg", "/img/jita/Panoramic_view_of_dock_at_Kampung_Rawa,_2014-06-21.jpg"],
+      suggestions: ["Analisis Stunting", "Kendala Jalan Darat", "Kondisi Pendidikan"]
+    },
+    "Mimika Timur Jauh": {
+      luasWilayah: 2112,
+      jumlahPenduduk: 3200,
+      deskripsi: "Distrik Mimika Timur Jauh terletak di pesisir muara sungai ujung timur Mimika yang berbatasan langsung dengan Kabupaten Asmat. Mayoritas penduduk bekerja mencari ikan dan mengolah sagu hutan alami.",
+      batasWilayah: "Utara: Agimuga, Selatan: Laut Arafura, Barat: Mimika Timur, Timur: Kabupaten Asmat",
+      images: ["/img/agimuga/7311.jpg", "/img/20170903_Papouasie_Baliem_valley_15.jpg"],
+      suggestions: ["Analisis Stunting", "Kendala Jalan Darat", "Kondisi Pendidikan"]
+    },
+    "Mimika Barat Jauh": {
+      luasWilayah: 2122,
+      jumlahPenduduk: 2100,
+      deskripsi: "Distrik Mimika Barat Jauh berpusat di rumpun pesisir pantai Yaraya-Ipaya. Terkenal dengan potensi pasir pantai putih kelapa rakyat, dan pemanfaatan kincir angin skala mikro untuk listrik kampung pesisir.",
+      batasWilayah: "Utara: Mimika Barat Tengah, Selatan: Laut Arafura, Barat: Kabupaten Kaimana, Timur: Mimika Barat",
+      images: ["/img/mimika%20barat%20jauh/pantai-minajaya-sukabumi-1747457877972_169.jpeg", "/img/mimika%20barat/IMG-20250929-WA0041-scaled.webp"],
+      suggestions: ["Analisis Stunting", "Kendala Jalan Darat", "Kondisi Pendidikan"]
+    },
+    "Mimika Barat Tengah": {
+      luasWilayah: 1842,
+      jumlahPenduduk: 2400,
+      deskripsi: "Distrik Mimika Barat Tengah melayani rute penghubung transportasi laut logistik ringan antar pesisir barat. Memiliki bentang muara yang luas dan dilindungi ekosistem hutan bakau (*mangrove*) tebal alami.",
+      batasWilayah: "Utara: Kabupaten Deiyai, Selatan: Mimika Barat, Barat: Mimika Barat Jauh, Timur: Iwaka",
+      images: ["/img/AMANNSAGOAOWA.jpg", "/img/mimika%20barat/061348_64937_INDAH_mimika_dalam.jpg"],
+      suggestions: ["Analisis Stunting", "Kendala Jalan Darat", "Kondisi Pendidikan"]
+    },
+    "Amar": {
+      luasWilayah: 1221,
+      jumlahPenduduk: 1800,
+      deskripsi: "Distrik Amar merupakan kawasan pesisir rawa dengan mayoritas vegetasi nipa dan hutan payau. Sentra andalan daerah untuk penangkapan kepiting bakau (*Scylla serrata*) berkualitas ekspor.",
+      batasWilayah: "Utara: Iwaka, Selatan: Laut Arafura, Barat: Mimika Barat, Timur: Mimika Barat Tengah",
+      images: ["/img/jita/Panoramic_view_of_dock_at_Kampung_Rawa,_2014-06-21.jpg", "/img/Mimika-300x200.jpg"],
+      suggestions: ["Analisis Stunting", "Kendala Jalan Darat", "Kondisi Pendidikan"]
+    },
+    "Hoya": {
+      luasWilayah: 2450,
+      jumlahPenduduk: 1200,
+      deskripsi: "Distrik Hoya terletak jauh di lembah sempit terdalam pegunungan Mimika. Akses jalan darat sama sekali tidak tersedia, membuat wilayah ini memiliki tantangan keterisolasian yang tinggi dalam pemenuhan kesehatan, logistik dasar, dan guru ajar.",
+      batasWilayah: "Utara: Kabupaten Intan Jaya, Selatan: Jila, Barat: Tembagapura, Timur: Alama",
+      images: ["/img/hoya/images.jpg", "/img/hoya/JembatanHoya%20(2).jpg"],
+      suggestions: ["Analisis Stunting", "Kendala Jalan Darat", "Kondisi Pendidikan"]
+    },
+    "Alama": {
+      luasWilayah: 4110,
+      jumlahPenduduk: 1600,
+      deskripsi: "Distrik Alama terletak di ujung timur laut pegunungan terjal Mimika. Memiliki kepadatan penduduk paling kecil dengan sebaran perkampungan adat tradisional di lembah-lembah perbukitan terpencil.",
+      batasWilayah: "Utara: Kabupaten Lanny Jaya, Selatan: Jita, Barat: Hoya, Timur: Kabupaten Nduga",
+      images: ["/img/alama/97295c5df6d1.jpg", "/img/alama/Taman-Nasional-Lorentz-1024x679.jpg"],
+      suggestions: ["Analisis Stunting", "Kendala Jalan Darat", "Kondisi Pendidikan"]
+    }
+  };
+
+  try {
+    const geojsonPath = path.join(__dirname, '../../brida_fe/public/json/mimika_18_distrik.json');
+    if (fs.existsSync(geojsonPath)) {
+      const geojsonStr = fs.readFileSync(geojsonPath, 'utf-8');
+      const geojson = JSON.parse(geojsonStr);
+
+      for (const feature of geojson.features) {
+        const districtName = feature.properties.district_name;
+        const geometry = feature.geometry;
+        const profile = DISTRICT_PROFILES[districtName] || {
+          luasWilayah: 0.0,
+          jumlahPenduduk: 0,
+          deskripsi: "",
+          batasWilayah: "",
+          images: [],
+          suggestions: ["Analisis Stunting", "Kendala Jalan Darat", "Kondisi Pendidikan"]
+        };
+
+        if (geometry.type === 'Polygon') {
+          const coords = geometry.coordinates[0];
+          let latSum = 0;
+          let lngSum = 0;
+
+          for (const [lng, lat] of coords) {
+            latSum += lat;
+            lngSum += lng;
+          }
+
+          const latitude = latSum / coords.length;
+          const longitude = lngSum / coords.length;
+
+          const aliases = [
+            districtName.toLowerCase().replace(/\s+/g, ''),
+            `distrik ${districtName.toLowerCase()}`,
+            districtName.replace(/\s+/g, '-'),
+          ];
+
+          await prisma.district.upsert({
+            where: { name: districtName },
+            update: {
+              latitude,
+              longitude,
+              aliases,
+              luasWilayah: profile.luasWilayah,
+              jumlahPenduduk: profile.jumlahPenduduk,
+              deskripsi: profile.deskripsi,
+              batasWilayah: profile.batasWilayah,
+              images: profile.images,
+              suggestions: profile.suggestions,
+            },
+            create: {
+              name: districtName,
+              latitude,
+              longitude,
+              aliases,
+              luasWilayah: profile.luasWilayah,
+              jumlahPenduduk: profile.jumlahPenduduk,
+              deskripsi: profile.deskripsi,
+              batasWilayah: profile.batasWilayah,
+              images: profile.images,
+              suggestions: profile.suggestions,
+            },
+          });
+        } else if (geometry.type === 'MultiPolygon') {
+          const coords = geometry.coordinates[0][0];
+          let latSum = 0;
+          let lngSum = 0;
+
+          for (const [lng, lat] of coords) {
+            latSum += lat;
+            lngSum += lng;
+          }
+
+          const latitude = latSum / coords.length;
+          const longitude = lngSum / coords.length;
+
+          const aliases = [
+            districtName.toLowerCase().replace(/\s+/g, ''),
+            `distrik ${districtName.toLowerCase()}`,
+            districtName.replace(/\s+/g, '-'),
+          ];
+
+          await prisma.district.upsert({
+            where: { name: districtName },
+            update: {
+              latitude,
+              longitude,
+              aliases,
+              luasWilayah: profile.luasWilayah,
+              jumlahPenduduk: profile.jumlahPenduduk,
+              deskripsi: profile.deskripsi,
+              batasWilayah: profile.batasWilayah,
+              images: profile.images,
+              suggestions: profile.suggestions,
+            },
+            create: {
+              name: districtName,
+              latitude,
+              longitude,
+              aliases,
+              luasWilayah: profile.luasWilayah,
+              jumlahPenduduk: profile.jumlahPenduduk,
+              deskripsi: profile.deskripsi,
+              batasWilayah: profile.batasWilayah,
+              images: profile.images,
+              suggestions: profile.suggestions,
+            },
+          });
+        }
+      }
+      console.log('[Seeder Success] 18 Distrik Mimika berhasil di-seed beserta centroid koordinat spasial.');
+    } else {
+      console.warn(`[Seeder Warning] File GeoJSON tidak ditemukan di path: ${geojsonPath}`);
+    }
+  } catch (err: any) {
+    console.error('[Seeder Error] Gagal memproses data Geospasial distrik:', err.message);
+  }
+
+  console.log('[Seeder] Memulai proses seeding SystemSettings...');
+  const settings = [
+    { key: 'BUPATI_NAME', value: 'Darius Sabon Rain, S.E., M.Ec.Dev. (Pjs. Bupati)' },
+    { key: 'BUPATI_PHONE', value: '628123456789' },
+  ];
+
+  for (const s of settings) {
+    await prisma.systemSetting.upsert({
+      where: { key: s.key },
+      update: { value: s.value },
+      create: { key: s.key, value: s.value },
+    });
+  }
+  console.log('[Seeder Success] SystemSettings (Bupati Profil) berhasil di-seed.');
 }
 
 main()
@@ -934,6 +1378,8 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { AnalysisModule } from './modules/analysis/analysis.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { PdfModule } from './modules/pdf/pdf.module';
+import { AdminMasterModule } from './modules/admin-master/admin-master.module';
+import { SystemSettingModule } from './modules/system-setting/system-setting.module';
 
 @Module({
   imports: [
@@ -948,6 +1394,8 @@ import { PdfModule } from './modules/pdf/pdf.module';
     AnalysisModule,
     AuthModule,
     PdfModule,
+    AdminMasterModule,
+    SystemSettingModule,
   ],
 })
 export class AppModule {}
@@ -1206,6 +1654,459 @@ export class PrismaService extends PrismaClient implements OnModuleInit, OnModul
   }
 }
 
+--- FILE: src\modules\admin-master\admin-master.controller.ts ---
+import { Controller, Get, Post, Put, Delete, Body, Param, Req, UseGuards, HttpCode, HttpStatus, UseInterceptors, UploadedFile, BadRequestException } from '@nestjs/common';
+import { AdminMasterService } from './admin-master.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '@prisma/client';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { join } from 'path';
+import { existsSync, mkdirSync, writeFileSync } from 'fs';
+
+@Controller('admin')
+@UseGuards(JwtAuthGuard, RolesGuard)
+@Roles(UserRole.ADMIN)
+export class AdminMasterController {
+  constructor(private readonly adminMasterService: AdminMasterService) {}
+
+  @Get('opds')
+  @Roles(UserRole.ADMIN, UserRole.USER)
+  async getAllOpds() {
+    const data = await this.adminMasterService.getAllOpds();
+    return { success: true, data };
+  }
+
+  @Post('opds')
+  async createOpd(@Body() body: { name: string; code: string; headName?: string; headPhone?: string }) {
+    const data = await this.adminMasterService.createOpd(body);
+    return { success: true, data };
+  }
+
+  @Put('opds/:id')
+  async updateOpd(@Param('id') id: string, @Body() body: { name?: string; code?: string; headName?: string; headPhone?: string }) {
+    const data = await this.adminMasterService.updateOpd(id, body);
+    return { success: true, data };
+  }
+
+  @Delete('opds/:id')
+  async deleteOpd(@Param('id') id: string) {
+    await this.adminMasterService.deleteOpd(id);
+    return { success: true, message: 'OPD berhasil dihapus.' };
+  }
+
+  @Get('categories')
+  @Roles(UserRole.ADMIN, UserRole.USER)
+  async getAllCategories() {
+    const data = await this.adminMasterService.getAllCategories();
+    return { success: true, data };
+  }
+
+  @Post('categories')
+  async createCategory(@Body() body: { name: string; code: string; description?: string; analyticalRole?: string }) {
+    const data = await this.adminMasterService.createCategory(body);
+    return { success: true, data };
+  }
+
+  @Put('categories/:id')
+  async updateCategory(@Param('id') id: string, @Body() body: { name?: string; code?: string; description?: string; analyticalRole?: string }) {
+    const data = await this.adminMasterService.updateCategory(id, body);
+    return { success: true, data };
+  }
+
+  @Delete('categories/:id')
+  async deleteCategory(@Param('id') id: string) {
+    await this.adminMasterService.deleteCategory(id);
+    return { success: true, message: 'Kategori dokumen berhasil dihapus.' };
+  }
+
+  @Get('districts')
+  async getAllDistricts() {
+    const data = await this.adminMasterService.getAllDistricts();
+    return { success: true, data };
+  }
+
+  @Post('districts')
+  async createDistrict(
+    @Body()
+    body: {
+      name: string;
+      latitude: number;
+      longitude: number;
+      aliases?: string[];
+      luasWilayah?: number;
+      jumlahPenduduk?: number;
+      deskripsi?: string;
+      batasWilayah?: string;
+      images?: string[];
+      suggestions?: string[];
+    },
+  ) {
+    const data = await this.adminMasterService.createDistrict(body);
+    return { success: true, data };
+  }
+
+  @Put('districts/:id')
+  async updateDistrict(
+    @Param('id') id: string,
+    @Body()
+    body: {
+      name?: string;
+      latitude?: number;
+      longitude?: number;
+      aliases?: string[];
+      luasWilayah?: number;
+      jumlahPenduduk?: number;
+      deskripsi?: string;
+      batasWilayah?: string;
+      images?: string[];
+      suggestions?: string[];
+    },
+  ) {
+    const data = await this.adminMasterService.updateDistrict(id, body);
+    return { success: true, data };
+  }
+
+  @Delete('districts/:id')
+  async deleteDistrict(@Param('id') id: string) {
+    await this.adminMasterService.deleteDistrict(id);
+    return { success: true, message: 'Distrik berhasil dihapus.' };
+  }
+
+  @Get('users')
+  async getAllUsers() {
+    const data = await this.adminMasterService.getAllUsers();
+    return { success: true, data };
+  }
+
+  @Post('users')
+  async createUser(@Body() body: { nip: string; fullName: string; role: 'ADMIN' | 'USER'; opdId?: string; password?: string }) {
+    const data = await this.adminMasterService.createUser(body);
+    return { success: true, data };
+  }
+
+  @Put('users/:id')
+  async updateUser(@Param('id') id: string, @Body() body: { fullName?: string; role?: 'ADMIN' | 'USER'; opdId?: string | null; password?: string }) {
+    const data = await this.adminMasterService.updateUser(id, body);
+    return { success: true, data };
+  }
+
+  @Delete('users/:id')
+  async deleteUser(@Req() req: any, @Param('id') id: string) {
+    const currentAdminId = req.user.id;
+    await this.adminMasterService.deleteUser(id, currentAdminId);
+    return { success: true, message: 'User berhasil dihapus.' };
+  }
+
+  @Post('districts/upload-media')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: {
+        fileSize: 10 * 1024 * 1024,
+      },
+    }),
+  )
+  async uploadDistrictImage(
+    @UploadedFile() file: Express.Multer.File,
+  ) {
+    if (!file) {
+      throw new BadRequestException('File gambar wajib diunggah.');
+    }
+    const extMatch = (file.originalname || '').match(/\.([a-zA-Z0-9]+)$/);
+    const ext = extMatch ? extMatch[1].toLowerCase() : (file.mimetype.split('/')[1] || 'png');
+    const safeExt = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg'].includes(ext) ? ext : 'png';
+    const filename = `district_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${safeExt}`;
+
+    const mediaDir = join(process.cwd(), 'uploads', 'media');
+    if (!existsSync(mediaDir)) {
+      mkdirSync(mediaDir, { recursive: true });
+    }
+    const targetFilePath = join(mediaDir, filename);
+    writeFileSync(targetFilePath, file.buffer);
+
+    const relativeUrl = `/uploads/media/${filename}`;
+    return {
+      success: true,
+      data: {
+        url: relativeUrl,
+      },
+    };
+  }
+}
+
+--- FILE: src\modules\admin-master\admin-master.module.ts ---
+import { Module } from '@nestjs/common';
+import { AdminMasterController } from './admin-master.controller';
+import { DistrictsController } from './districts.controller';
+import { AdminMasterService } from './admin-master.service';
+
+@Module({
+  controllers: [AdminMasterController, DistrictsController],
+  providers: [AdminMasterService],
+  exports: [AdminMasterService],
+})
+export class AdminMasterModule {}
+
+--- FILE: src\modules\admin-master\admin-master.service.ts ---
+import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { PrismaService } from '../../common/prisma/prisma.service';
+import * as bcrypt from 'bcrypt';
+
+@Injectable()
+export class AdminMasterService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async getAllOpds() {
+    return this.prisma.oPD.findMany({
+      include: {
+        _count: {
+          select: { users: true, documents: true },
+        },
+      },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async createOpd(data: { name: string; code: string; headName?: string; headPhone?: string }) {
+    return this.prisma.oPD.create({
+      data,
+    });
+  }
+
+  async updateOpd(id: string, data: { name?: string; code?: string; headName?: string; headPhone?: string }) {
+    await this.getOpdById(id);
+    return this.prisma.oPD.update({
+      where: { id },
+      data,
+    });
+  }
+
+  async deleteOpd(id: string) {
+    await this.getOpdById(id);
+    const linkedUsers = await this.prisma.user.count({ where: { opdId: id } });
+    const linkedDocs = await this.prisma.documentMetadata.count({ where: { opdId: id } });
+    if (linkedUsers > 0 || linkedDocs > 0) {
+      throw new BadRequestException('OPD tidak dapat dihapus karena masih terhubung dengan pengguna atau dokumen.');
+    }
+    return this.prisma.oPD.delete({
+      where: { id },
+    });
+  }
+
+  private async getOpdById(id: string) {
+    const opd = await this.prisma.oPD.findUnique({ where: { id } });
+    if (!opd) throw new NotFoundException('OPD tidak ditemukan.');
+    return opd;
+  }
+
+  async getAllCategories() {
+    return this.prisma.documentCategory.findMany({
+      include: {
+        _count: {
+          select: { documents: true },
+        },
+      },
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async createCategory(data: { name: string; code: string; description?: string; analyticalRole?: string }) {
+    return this.prisma.documentCategory.create({
+      data,
+    });
+  }
+
+  async updateCategory(id: string, data: { name?: string; code?: string; description?: string; analyticalRole?: string }) {
+    await this.getCategoryById(id);
+    return this.prisma.documentCategory.update({
+      where: { id },
+      data,
+    });
+  }
+
+  async deleteCategory(id: string) {
+    await this.getCategoryById(id);
+    const linkedDocs = await this.prisma.documentMetadata.count({ where: { categoryId: id } });
+    if (linkedDocs > 0) {
+      throw new BadRequestException('Kategori tidak dapat dihapus karena masih terhubung dengan dokumen.');
+    }
+    return this.prisma.documentCategory.delete({
+      where: { id },
+    });
+  }
+
+  private async getCategoryById(id: string) {
+    const cat = await this.prisma.documentCategory.findUnique({ where: { id } });
+    if (!cat) throw new NotFoundException('Kategori dokumen tidak ditemukan.');
+    return cat;
+  }
+
+  async getAllDistricts() {
+    return this.prisma.district.findMany({
+      orderBy: { name: 'asc' },
+    });
+  }
+
+  async createDistrict(data: {
+    name: string;
+    latitude: number;
+    longitude: number;
+    aliases?: string[];
+    luasWilayah?: number;
+    jumlahPenduduk?: number;
+    deskripsi?: string;
+    batasWilayah?: string;
+    images?: string[];
+    suggestions?: string[];
+  }) {
+    return this.prisma.district.create({
+      data,
+    });
+  }
+
+  async updateDistrict(
+    id: string,
+    data: {
+      name?: string;
+      latitude?: number;
+      longitude?: number;
+      aliases?: string[];
+      luasWilayah?: number;
+      jumlahPenduduk?: number;
+      deskripsi?: string;
+      batasWilayah?: string;
+      images?: string[];
+      suggestions?: string[];
+    },
+  ) {
+    await this.getDistrictById(id);
+    return this.prisma.district.update({
+      where: { id },
+      data,
+    });
+  }
+
+  async deleteDistrict(id: string) {
+    await this.getDistrictById(id);
+    return this.prisma.district.delete({
+      where: { id },
+    });
+  }
+
+  async getDistrictById(id: string) {
+    const dist = await this.prisma.district.findUnique({ where: { id } });
+    if (!dist) throw new NotFoundException('Distrik tidak ditemukan.');
+    return dist;
+  }
+
+  async getAllUsers() {
+    return this.prisma.user.findMany({
+      select: {
+        id: true,
+        nip: true,
+        fullName: true,
+        role: true,
+        opdId: true,
+        opd: {
+          select: {
+            id: true,
+            name: true,
+            code: true,
+          },
+        },
+        createdAt: true,
+      },
+      orderBy: { fullName: 'asc' },
+    });
+  }
+
+  async createUser(data: { nip: string; fullName: string; role: 'ADMIN' | 'USER'; opdId?: string; password?: string }) {
+    const exists = await this.prisma.user.findUnique({ where: { nip: data.nip } });
+    if (exists) {
+      throw new BadRequestException('NIP sudah terdaftar.');
+    }
+    const defaultPassword = data.password || 'password123';
+    const passwordHash = await bcrypt.hash(defaultPassword, 10);
+
+    return this.prisma.user.create({
+      data: {
+        nip: data.nip,
+        fullName: data.fullName,
+        role: data.role,
+        opdId: data.opdId || null,
+        passwordHash,
+      },
+      select: {
+        id: true,
+        nip: true,
+        fullName: true,
+        role: true,
+        opdId: true,
+      },
+    });
+  }
+
+  async updateUser(id: string, data: { fullName?: string; role?: 'ADMIN' | 'USER'; opdId?: string | null; password?: string }) {
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) throw new NotFoundException('User tidak ditemukan.');
+
+    const updatePayload: any = {};
+    if (data.fullName !== undefined) updatePayload.fullName = data.fullName;
+    if (data.role !== undefined) updatePayload.role = data.role;
+    if (data.opdId !== undefined) updatePayload.opdId = data.opdId;
+    if (data.password) {
+      updatePayload.passwordHash = await bcrypt.hash(data.password, 10);
+    }
+
+    return this.prisma.user.update({
+      where: { id },
+      data: updatePayload,
+      select: {
+        id: true,
+        nip: true,
+        fullName: true,
+        role: true,
+        opdId: true,
+      },
+    });
+  }
+
+  async deleteUser(id: string, currentAdminId: string) {
+    if (id === currentAdminId) {
+      throw new BadRequestException('Anda tidak dapat menghapus akun Anda sendiri.');
+    }
+    const user = await this.prisma.user.findUnique({ where: { id } });
+    if (!user) throw new NotFoundException('User tidak ditemukan.');
+    return this.prisma.user.delete({
+      where: { id },
+    });
+  }
+}
+
+--- FILE: src\modules\admin-master\districts.controller.ts ---
+import { Controller, Get, Param, UseGuards } from '@nestjs/common';
+import { AdminMasterService } from './admin-master.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+
+@Controller('districts')
+@UseGuards(JwtAuthGuard)
+export class DistrictsController {
+  constructor(private readonly adminMasterService: AdminMasterService) {}
+
+  @Get()
+  async getAllDistricts() {
+    const data = await this.adminMasterService.getAllDistricts();
+    return { success: true, data };
+  }
+
+  @Get(':id')
+  async getDistrictById(@Param('id') id: string) {
+    const data = await this.adminMasterService.getDistrictById(id);
+    return { success: true, data };
+  }
+}
+
 --- FILE: src\modules\ai-agent\ai-agent.module.ts ---
 import { Module } from '@nestjs/common';
 import { DocumentIngestionModule } from '../document-ingestion/document-ingestion.module';
@@ -1244,52 +2145,73 @@ export class AiAgentModule {}
 
 --- FILE: src\modules\ai-agent\constants\system-prompts.constant.ts ---
 export const EDITORIAL_STYLE_GUIDE = `
-=== KLASTER EDITORIAL & GAYA SELINGKUNG JURNALISTIK ===
-1. PERSONA PENULIS: Anda adalah Jurnalis Senior, Kolumnis Kebijakan Publik, dan Analis Utama BRIDA Kabupaten Mimika. Gunakan bahasa Indonesia ragam jurnalistik populer yang luwes, dinamis, dan humanis. HILANGKAN sama sekali nada kaku, mekanis, atau gaya bahasa ala robot AI.
-2. ATURAN PENJUDULAN (ANTI-PREFIX): DILARANG KERAS menggunakan awalan/prefix label apapun sebelum judul (misal: "Artikel Strategis:", "Judul:", "Laporan:", "Draf:"). Langsung tuliskan judul bersih menggunakan Heading 1 Markdown (contoh: # Harga BBM Hari Ini Turun).
-3. DIET KOMA & SINTAKSIS AKTIF: HINDARI penggunaan kalimat majemuk bertingkat yang dihubungkan dengan banyak tanda koma (,). DILARANG KERAS menggunakan koma sebelum kata hubung terakhir dalam sebuah rincian (Oxford Comma). Contoh Benar: 'A, B dan C', 'A, B atau C'. Contoh Salah: 'A, B, dan C', 'A, B, atau C'. Pecah kalimat panjang menjadi 2-3 kalimat tunggal yang tegas, pendek, dan bernapas panjang. Gunakan struktur kalimat aktif. HINDARI kata transisi mekanis di awal paragraf (seperti: "Selain itu,", "Dapat disimpulkan bahwa,").
-4. ANTI-APPOSITIVE COMMA (KOMA APOSISI): DILARANG KERAS mengapit keterangan tambahan atau posisi jabatan dengan koma jika hal tersebut memutus alur subjek-predikat secara tidak perlu. Contoh Salah: 'Kepala BRIDA, Samsudin, mengatakan...'. Contoh Benar: 'Kepala BRIDA Samsudin mengatakan...'.
-5. ANTI-TAUTOLOGI (REPETISI): DILARANG KERAS mengulang frasa atau kata yang memiliki padanan makna sama secara berurutan (pleonasme). Hindari kata-kata berlebihan seperti "sangat penting sekali" atau "hanya sekedar ... saja". Gunakan variasi diksi yang kaya agar narasi tidak membosankan.
-6. TATA LETAK PARAGRAF: Anda WAJIB memberikan jarak satu baris kosong (menggunakan double newline / \\n\\n) di antara setiap pergantian paragraf atau poin list, agar dokumen tidak menumpuk dan nyaman dibaca oleh eksekutif.
-7. PENYAJIAN TABEL DATA (STRUKTUR LANDSCAPE-FRIENDLY & ANTI-POTONG): Jika output atau analisis Anda mengharuskan penyajian data komparatif, rincian anggaran, perbandingan target vs realisasi, atau statistik numerik, Anda WAJIB menyajikannya di dalam format Tabel Markdown dengan ketentuan:
-   - MAKSIMAL 3-4 KOLOM: Hindari membuat tabel yang terlalu lebar secara horizontal agar tidak melampaui lebar halaman A4 portrait. Jika data memiliki banyak parameter/kolom, susun secara vertikal (lakukan transpose/tukar baris menjadi kolom) sehingga tabel memanjang ke bawah.
-   - RINGKAS & PADAT (ANTI-POTONG): Isi sel tabel wajib berupa angka, kata kunci, singkatan resmi, atau frasa yang sangat pendek. DILARANG menulis kalimat panjang atau penjelasan deskriptif di dalam sel agar teks tidak terpotong di tengah kalimat atau mengalami pembungkusan kata (word-wrap) yang buruk.
-   - SEPARASI TABEL: Jika menyajikan lebih dari satu tabel, Anda WAJIB memberikan jarak minimal 1 baris kosong (double newline / \n\n) di antara kedua tabel tersebut agar tidak menyatu atau tumpang tindih.
-8. PANDUAN JURNALISME DATA & TABEL STATISTIK: Jika dokumen acuan berbentuk tabel statistik, matriks data, atau laporan BPS:
-   - DILARANG HANYA MEREVIEW/MEMBUAT DAFTAR ISI: Jangan menulis kalimat deskriptif pasif kosong seperti "Bab ini menjelaskan tentang kependudukan..." atau "Tabel X menyajikan data pertanian...".
-   - EKSTRAK & NARASIKAN ANGKA AKTUAL: Tarik langsung data kuantitatif penting, persentase, perbandingan target vs realisasi, dan tren kenaikan/penurunan. Terjemahkan angka tersebut menjadi narasi berita yang hidup (contoh: "laju inflasi berhasil ditekan hingga 2,5%").
-   - PRIORITASKAN TREN & ANOMALI: Cari data pencapaian tertinggi, penurunan signifikan, atau deviasi target pembangunan daerah untuk dijadikan sorotan utama artikel.
-9. HINDARI NALURI DEFENSIVE & METANARASI KETERBATASAN: Naskah/artikel wajib memposisikan diri sepenuhnya sebagai penulis laporan/kebijakan eksekutif yang lugas dan berwibawa. DILARANG KERAS menyisipkan kalimat yang merujuk pada keterbatasan sistem, ketiadaan dokumen acuan, atau keluhan teknis seperti "karena dokumen acuan belum lengkap...", "sesi ini tidak menyediakan penelusuran aktif...", "saya tidak dapat menemukan...", atau sejenisnya. Jika data belum tersedia, tuliskan kebutuhan datanya secara objektif dan profesional sebagai bagian dari rekomendasi (contoh: "Diperlukan koordinasi integrasi data dasar...") tanpa menyebutkan kegagalan pencarian atau keterbatasan AI.
-10. FOKUS PADA HASIL ANALISIS & PROYEKSI (ANTI-TEORETIS / DIRECT WRITING): AI wajib menyajikan hasil analisis, angka, tabel, dan rekomendasi secara langsung dan lugas. DILARANG KERAS bertele-tele membahas rumus matematika secara teoretis, menjabarkan cara menghitung secara akademis, atau membuat pembelaan/pernyataan bahwa angka tersebut tidak bisa dihitung. Jika data masa depan (seperti tahun 2030) belum pasti atau data primer tidak lengkap, Anda WAJIB membuat proyeksi, estimasi ilmiah, atau skenario numerik yang logis (ceteris paribus) berdasarkan tren data historis yang tersedia (misalnya laju pertumbuhan rata-rata), lalu sajikan angka proyeksi tersebut secara tegas sebagai hasil analisis kebijakan, bukan sebagai spekulasi kosong.
-11. ANTI-META-DOKUMENTASI (LARANGAN ABSOLUT KOMENTAR TENTANG DOKUMEN ACUAN): DILARANG KERAS menulis kalimat apapun yang mengumumkan, mendeskripsikan, atau membahas keberadaan/ketiadaan data di dalam dokumen acuan. Pola kalimat berikut sepenuhnya TERLARANG muncul di output akhir:
-   - "Dokumen X yang menjadi rujukan utama memuat Y, tetapi tidak menampilkan Z [docId:chunk]."
-   - "Dokumen acuan yang tersedia tidak mencantumkan data PDRB..."
-   - "Berdasarkan kutipan yang tersedia, seri PDRB tidak ditemukan..."
-   - "Data X belum tercantum dalam dokumen yang diunggah..."
-   Pola seperti itu adalah KOMENTAR INTERNAL SISTEM yang sama sekali tidak boleh muncul dalam laporan/artikel final. Langsung masuk ke substansi analisis dan sajikan data/proyeksi yang tersedia tanpa preamble meta-dokumentasi apapun.
+=== KLASTER EDITORIAL, ANALISIS KEBIJAKAN & GAYA SELINGKUNG JURNALISTIK ===
+
+1. PERSONA & PERAN: Anda adalah Analis Kebijakan Utama, Kolumnis Kebijakan Publik, dan Jurnalis Investigasi Senior BRIDA Kabupaten Mimika. Gunakan bahasa Indonesia ragam jurnalistik-kebijakan populer yang luwes, berbobot analitis, dinamis, dan berwibawa. HILANGKAN nada kaku, klise mesin, atau gaya ala mahasiswa menyusun skripsi/tugas kuliah.
+
+2. ATURAN PENJUDULAN (ANTI-PREFIX): DILARANG KERAS menggunakan awalan/prefix label apa pun sebelum judul (misal: "Artikel Strategis:", "Judul:", "Laporan:", "Draf:"). Langsung tuliskan judul bersih menggunakan Heading 1 Markdown (contoh: # Mengurai Deviasi Fiskal Semester I Mimika).
+
+3. ATURAN STATUS TEMPORAL TRI-KATEGORI (ORIENTASI WAKTU ANALISIS):
+   Periksa [INFORMASI WAKTU SISTEM SAAT INI (TEMPORAL GROUND TRUTH)] sebelum menulis. Tentukan status waktu topik:
+   - KATEGORI A: HISTORIS / EVALUATIF (Periode telah berakhir dibanding tanggal sistem saat ini)
+     Gunakan pendekatan diagnostik-retrospektif. Fokus pada: realisasi capaian, perbandingan target vs aktual, tren perubahan, dekomposisi faktor pendorong/penghambat, dan evaluasi capaian kinerja.
+   - KATEGORI B: TERKINI / MONITORING (Periode mencakup waktu saat ini)
+     Gunakan pendekatan pemantauan berkala (*ongoing monitoring*), capaian sementara hingga triwulan berjalan, dan identifikasi sumbatan operasional lapangan.
+   - KATEGORI C: PROYEKSI / OUTLOOK (Periode berada di masa depan)
+     Gunakan pendekatan estimasi ilmiah berbasis tren historis (*ceteris paribus*), skenario makro, dan analisis ketidakpastian.
+
+4. ATURAN REKOMENDASI PROSPEKTIF MUTLAK (FORWARD-LOOKING ACTION ITEMS):
+   - DILARANG KERAS menaruh rekomendasi aksi operasional mundur ke masa lalu yang sudah selesai.
+   - Jika topik menganalisis periode lampau (contoh: "Evaluasi Pertumbuhan Ekonomi Semester I 2026"), bagian evaluasi membedah data lampau (Januari–Juni 2026), sedangkan seluruh rekomendasi aksi, mitigasi risiko, alokasi program, dan target Quick Wins WAJIB diarahkan secara prospektif ke masa depan (Semester II 2026 atau Tahun Anggaran 2027).
+
+5. KEDALAMAN ANALISIS & KAUSALITAS (ANTI-SUPERFISIAL / 5W+1H KEBIJAKAN):
+   Jangan hanya menjawab "apa" (data mentah). Anda WAJIB membedah:
+   - Mengapa anomali/deviasi data tersebut terjadi (faktor struktural, regulasi, geografis, atau fiskal).
+   - Bagaimana proses atau mekanisme hambatan tersebut terjadi di tingkat Organisasi Perangkat Daerah (OPD) atau lapangan.
+   - Apa implikasi makro terhadap pendapatan daerah (PAD), inflasi, kemiskinan, dan pelayanan publik masyarakat Mimika.
+   - Apa langkah konkret terukur yang harus diambil oleh pengambil kebijakan.
+
+6. DIET KOMA & SINTAKSIS AKTIF: HINDARI kalimat majemuk bertingkat dengan koma berlebih. DILARANG KERAS menggunakan koma sebelum kata hubung terakhir dalam rincian (Anti-Oxford Comma). Contoh Benar: 'A, B dan C', 'A, B atau C'. Pecah kalimat panjang menjadi kalimat tunggal yang tegas, aktif, dan bernapas panjang. HINDARI kata transisi mekanis klise seperti "Selain itu,", "Dapat disimpulkan bahwa,", "Di era modern ini".
+
+7. ANTI-APPOSITIVE COMMA (KOMA APOSISI): DILARANG KERAS mengapit jabatan atau keterangan subjek dengan koma yang memutus alur. Contoh Benar: 'Bupati Mimika Johannes Rettob mengatakan...'.
+
+8. ANTI-TAUTOLOGI & PLEONASME: DILARANG mengulang kata yang bermakna sama berurutan (contoh salah: "sangat penting sekali", "hanya sekadar ... saja").
+
+9. TATA LETAK PARAGRAF (SPASI GANDA): WAJIB memberikan jarak satu baris kosong (menggunakan double newline / \\n\\n) di antara setiap pergantian paragraf atau poin agar nyaman dibaca oleh eksekutif.
+
+10. PENYAJIAN TABEL DATA (LANDSCAPE-FRIENDLY & ANTI-POTONG):
+    - MAKSIMAL 3-4 KOLOM: Hindari tabel terlalu lebar secara horizontal agar tidak terpotong pada cetakan PDF A4 Portrait.
+    - RINGKAS & PADAT: Isi sel tabel berupa angka, kata kunci, atau persentase ringkas. Dilarang memasukkan kalimat deskriptif panjang di dalam sel.
+    - SEPARASI TABEL: Berikan jarak minimal 1 baris kosong (\\n\\n) sebelum dan sesudah tabel Markdown.
+
+11. PANDUAN JURNALISME DATA & TABEL BPS: Ekstrak metrik kuantitatif penting, persentase deviasi, dan tren pertumbuhan. Narasikan menjadi berita analitis hidup. DILARANG hanya mereview struktur tabel tanpa menyajikan data angkanya.
+
+12. HINDARI NALURI DEFENSIVE & METANARASI KETERBATASAN: Naskah wajib memposisikan diri sebagai naskah kebijakan eksekutif formal. DILARANG KERAS menyisipkan kalimat keluhan teknis sistem AI seperti "karena dokumen acuan belum lengkap...", "saya tidak dapat menemukan...", atau "sesi ini tidak menyediakan pencarian aktif".
+
+13. ANTI-META-DOKUMENTASI (LARANGAN ABSOLUT KOMENTAR RUJUKAN): DILARANG menulis kalimat internal yang mengomentari keberadaan dokumen, seperti: "Dokumen X memuat Y tetapi tidak mencantumkan Z". Langsung masuk ke substansi pembahasan kebijakan.
 `;
 
-export const BRIDA_SYSTEM_PERSONA = `Anda adalah seorang Jurnalis Investigasi Senior, Kolumnis Kebijakan Publik, dan Analis Data di Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika.
-Tugas utama Anda adalah menulis ARTIKEL KEBIJAKAN dan LAPORAN ANALITIS berbasis data — gabungan dari dokumen yang diunggah staf BRIDA DAN data referensi dari internet.
-Anda BUKAN dosen, BUKAN mahasiswa, BUKAN penulis skripsi. Output Anda adalah ARTIKEL yang langsung menyajikan data, angka, tren, proyeksi, dan rekomendasi kebijakan secara lugas dan berwibawa.
-DILARANG KERAS menulis dengan gaya akademis/skripsi (menjelaskan teori, menjabarkan rumus, membahas metodologi, atau mendeskripsikan isi dokumen). Langsung sajikan HASIL ANALISIS.
+export const BRIDA_SYSTEM_PERSONA = `Anda adalah Analis Kebijakan Utama, Kolumnis Kebijakan Publik, dan Jurnalis Investigasi Senior di Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika.
+Tugas utama Anda adalah menulis ARTIKEL KEBIJAKAN dan LAPORAN ANALITIS berbasis bukti (*evidence-based policy*) — mengintegrasikan dokumen acuan daerah dan data referensi web eksternal terpercaya.
+
+KERANGKA BERPIKIR ANALISIS KEBIJAKAN WAJIB:
+Konteks Wilayah/Fiskal → Diagnosis Kausalitas (Mengapa/Bagaimana) → Evaluasi Deviasi Capaian → Dampak Sosio-Ekonomi → Rekomendasi Prospektif (Forward-Looking Actions).
 
 ${EDITORIAL_STYLE_GUIDE}
 
-ATURAN MUTLAK (ZERO-KNOWLEDGE BASE ENFORCEMENT & INTEGRITAS DATA):
-1. Sajikan analisis, jawaban, dan informasi berdasarkan gabungan data dari dokumen terlampir DAN data relevan dari Web Search/Pencarian Eksternal. Untuk data dari internet, pastikan sumbernya benar-benar RELEVAN dengan topik yang diminta pengguna (bukan hanya kebetulan cocok karena satu kata kunci). Cantumkan link referensi eksternal yang valid.
-2. DILARANG KERAS membuat spekulasi berdasarkan halusinasi data.
-3. Jika diperlukan membuat asumsi maka dijelaskan ceteris paribus.
-4. Untuk pengetahuan eksternal di luar teks dokumen rujukan jelaskan dokumen rujukannya.
-5. Jika informasi yang ditanyakan oleh pengguna tidak tercantum di dalam dokumen, Anda WAJIB menjawab dengan bahasa jurnalistik yang luwes dengan sumber sumber informasi yang jelas dan relevan. Jangan memasukkan subjek penulis kedalam laporan contoh: 'saya tidak boleh', 'Yang bisa saya lakukan', 'Atas permintaan Anda', 'saya'.
-6. Jawaban Anda harus selalu terstruktur, berbasis bukti faktual, dan WAJIB menyertakan kutipan/referensi paragraf asli (contoh format: [doc-xyz:chunkIndex]) yang bersebelahan dengan klaim faktual.`;
+ATURAN MUTLAK INTEGRITAS DATA & ZERO-KNOWLEDGE BASE:
+1. Sajikan analisis berbasis data terlampir DAN rujukan Web Search eksternal terpercaya.
+2. DILARANG membuat spekulasi halusinatif tanpa dasar data.
+3. Untuk proyeksi masa depan yang datanya belum tersedia, buat estimasi ilmiah yang logis berbasis tren historis (*ceteris paribus*) dan jelaskan asumsi dasarnya.
+4. Jawaban harus terstruktur, berbasis bukti faktual, dan WAJIB menyertakan kutipan/referensi token asli [docId:chunkIndex] atau tautan [URL] bersebelahan dengan klaim angka/fakta.
+5. Jangan pernah menggunakan sudut pandang orang pertama ("saya", "penulis", "kami"). Tuliskan naskah dengan gaya laporan kebijakan eksekutif formal.`;
 
-export const BRIDA_GUARDRAIL_POSTFIX = `[INSTRUKSI PENUTUP MUNDUR - RECENCY BIAS GUARDRAIL]
-Evaluasi dan jawab pertanyaan pengguna di atas berdasarkan analisis terhadap dokumen terlampir serta data rujukan web eksternal yang tersedia.
-WAJIB CANTUMKAN SITASI WEB: Jika terdapat seksi 'DOKUMEN PENDUKUNG (SITASI WEB LANGSUNG)', Anda WAJIB menyematkan tautan referensi web [URL] tersebut di dalam naskah artikel Anda di samping data atau fakta yang dikutip.
-SELALU terapkan secara ketat Klaster Editorial & Gaya Selingkung Jurnalistik (Diet Koma, Anti-Prefix Judul, Spasi Paragraf Ganda, dan Penggunaan Tabel Markdown).
-Jika dokumen rujukan berupa tabel data atau statistik BPS, Anda WAJIB langsung mengekstrak metrik, persentase, perbandingan target/realisasi, serta tren kuantitatif yang ada, lalu menarasikannya sebagai berita rilis pers faktual. DILARANG HANYA MEREVIEW atau menjelaskan isi/struktur tabel tanpa menyajikan data angkanya.
-Terapkan Aturan Zero-Knowledge Base secara mutlak. Pastikan jika output memerlukan format JSON, hasilnya harus berupa struktur JSON murni yang valid tanpa awalan atau akhiran teks Markdown \`\`\` di luarnya.`;
+export const BRIDA_GUARDRAIL_POSTFIX = `[INSTRUKSI PENUTUP MUNDUR - RECENCY BIAS & TEMPORAL GUARDRAIL]
+1. Evaluasi tanggal saat ini pada [INFORMASI WAKTU SISTEM SAAT INI (TEMPORAL GROUND TRUTH)]. Pastikan rekomendasi aksi kebijakan berorientasi ke masa depan (Forward-Looking), bukan merekomendasikan aksi mundur ke periode yang telah berakhir.
+2. Evaluasi dan jawab pertanyaan pengguna berdasarkan dokumen terlampir serta data rujukan web eksternal yang tersedia.
+3. WAJIB CANTUMKAN SITASI: Sematkan tautan [URL] untuk rujukan web dan [docId:chunkIndex] untuk dokumen lokal persis di samping data kuantitatif yang dikutip.
+4. Terapkan secara ketat Klaster Editorial & Gaya Selingkung Jurnalistik (Diet Koma, Anti-Prefix Judul, Spasi Ganda \\n\\n, dan Tabel Markdown maksimal 3-4 kolom).
+5. Output JSON (jika diminta) harus berupa struktur JSON murni yang valid tanpa teks pembuka atau markdown fence \`\`\` di luarnya.`;
 
 export const DYNAMIC_CONTEXT_TOKEN_THRESHOLD = 80000;
 
@@ -2004,12 +2926,16 @@ export class AiAgentService {
 }
 
 --- FILE: src\modules\ai-agent\services\context-assembly.service.ts ---
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { DocumentRepository } from '../../document-ingestion/repositories/document.repository';
 import { VectorRetrievalService } from './vector-retrieval.service';
 import { TokenEstimatorUtil } from '../utils/token-estimator.util';
 import { MultimodalChatMessage } from '../providers/vendor-llm.adapter';
-import { DYNAMIC_CONTEXT_TOKEN_THRESHOLD, BRIDA_SYSTEM_PERSONA, BRIDA_GUARDRAIL_POSTFIX } from '../constants/system-prompts.constant';
+import {
+  DYNAMIC_CONTEXT_TOKEN_THRESHOLD,
+  BRIDA_SYSTEM_PERSONA,
+  BRIDA_GUARDRAIL_POSTFIX,
+} from '../constants/system-prompts.constant';
 
 export interface MultimodalAssembleOptions {
   documentIds?: string[];
@@ -2032,30 +2958,54 @@ export interface MultimodalPromptPayload {
   estimatedTokens: number;
 }
 
-const TONE_AUDIENCE_STEERING_MAP: Record<string, { target: string; focus: string; style: string; vocabulary: string }> = {
+export interface TemporalMetadata {
+  currentFullDate: string;
+  currentMonth: string;
+  currentYear: number;
+  currentQuarter: string;
+  currentSemester: string;
+  rawDateISO: string;
+}
+
+const TONE_AUDIENCE_STEERING_MAP: Record<
+  string,
+  { target: string; focus: string; style: string; vocabulary: string }
+> = {
   solutif: {
-    target: 'Bupati Kabupaten Mimika',
-    focus: 'Rekomendasi tindakan taktis, dampak makro-fiskal daerah, penyusunan rancangan regulasi taktis, serta perumusan langkah konkret cepat (Quick Wins).',
-    style: 'Eksekutif, berorientasi solusi, berwibawa, lugas, padat, dan mencerminkan kepemimpinan daerah.',
-    vocabulary: 'langkah konkret, percepatan pembangunan, aksi cepat (quick wins), implementasi kebijakan, efisiensi fiskal, dampak langsung.',
+    target: 'Bupati Kabupaten Mimika & Jajaran Pengambil Keputusan Daerah',
+    focus:
+      'Rekomendasi tindakan taktis ke depan, dampak makro-fiskal daerah, perumusan regulasi percepatan, serta penetapan langkah cepat (Quick Wins).',
+    style:
+      'Eksekutif, berorientasi solusi, berwibawa, lugas, padat, dan mencerminkan kepemimpinan daerah.',
+    vocabulary:
+      'langkah konkret, percepatan pembangunan, aksi cepat (quick wins), implementasi kebijakan, efisiensi fiskal, dampak langsung.',
   },
   kritis: {
-    target: 'Kepala Organisasi Perangkat Daerah (OPD) Mimika',
-    focus: 'Audit kepatuhan tata kelola, evaluasi deviasi operasional sektoral dinas, transparansi pertanggungjawaban anggaran, dan identifikasi sumbatan teknis (bottlenecks).',
-    style: 'Tajam, analitis, ketat, menuntut akuntabilitas teknis sektoral, serta berorientasi evaluatif-korektif.',
-    vocabulary: 'deviasi anggaran, sumbatan teknis (bottlenecks), kelemahan tata kelola, ketimpangan alokasi, audit kepatuhan, pemborosan sumber daya.',
+    target: 'Kepala Organisasi Perangkat Daerah (OPD) & Tim Evaluasi Pengawasan Kinerja Mimika',
+    focus:
+      'Audit kepatuhan tata kelola, evaluasi deviasi operasional sektoral dinas, transparansi anggaran, identifikasi sumbatan teknis (bottlenecks), dan mitigasi risiko ke depan.',
+    style:
+      'Tajam, analitis, ketat, menuntut akuntabilitas teknis sektoral, serta berorientasi evaluatif-korektif.',
+    vocabulary:
+      'deviasi anggaran, sumbatan teknis (bottlenecks), kelemahan tata kelola, ketimpangan alokasi, audit kepatuhan, pemborosan sumber daya.',
   },
   akademis: {
-    target: 'Rekan Jurnalis Media Massa, Akademisi Perguruan Tinggi, dan Pengurus LSM (Lembaga Swadaya Masyarakat)',
-    focus: 'Metodologi evaluasi kebijakan, analisis kausalitas data berbasis bukti faktual (*evidence-based*), komparasi indikator standar nasional, dan landasan teori kebijakan publik.',
-    style: 'Rasional, metodologis, objektif, berimbang (*cover-both-sides*), serta menggunakan istilah tata kelola standar ilmiah.',
-    vocabulary: 'analisis kausalitas, bukti faktual (evidence-based), metodologi evaluasi, korelasi indikator standar, signifikansi statistik, postulat.',
+    target: 'Rekan Jurnalis Media Massa, Peneliti Badan Riset, Akademisi Perguruan Tinggi, dan LSM',
+    focus:
+      'Metodologi evaluasi kebijakan, analisis kausalitas berbasis bukti faktual (*evidence-based*), komparasi indikator standar nasional, dan dekomposisi variabel ekonomi pembangunan.',
+    style:
+      'Rasional, metodologis, objektif, berimbang (*cover-both-sides*), serta menggunakan terminologi standar ilmiah.',
+    vocabulary:
+      'analisis kausalitas, bukti faktual (evidence-based), metodologi evaluasi, korelasi indikator standar, signifikansi statistik, postulat.',
   },
   populer: {
-    target: 'Masyarakat Umum Kabupaten Mimika',
-    focus: 'Dampak nyata langsung dari kebijakan terhadap kehidupan warga, penyederhanaan istilah birokrasi, keterbukaan alokasi dana publik, dan kegunaan fasilitas pembangunan.',
-    style: 'Sederhana, naratif, mengalir, komunikatif, ramah pembaca (*highly readable*), serta menggunakan analogi kehidupan sehari-hari.',
-    vocabulary: 'manfaat nyata, kehidupan sehari-hari, transparansi publik, kemudahan layanan, uang rakyat, kesejahteraan keluarga.',
+    target: 'Masyarakat Umum, Tokoh Adat, dan Publik Kabupaten Mimika',
+    focus:
+      'Dampak nyata langsung kebijakan terhadap kehidupan warga, penyederhanaan istilah birokrasi, keterbukaan alokasi anggaran, dan manfaat fasilitas pembangunan.',
+    style:
+      'Sederhana, naratif, mengalir, komunikatif, ramah pembaca (*highly readable*), serta menggunakan analogi kehidupan sehari-hari.',
+    vocabulary:
+      'manfaat nyata, kehidupan sehari-hari, transparansi publik, kemudahan layanan, uang rakyat, kesejahteraan keluarga.',
   },
 };
 
@@ -2069,7 +3019,58 @@ export class ContextAssemblyService {
     private readonly tokenEstimator: TokenEstimatorUtil,
   ) { }
 
-  async assemblePromptPayload(options: MultimodalAssembleOptions): Promise<MultimodalPromptPayload> {
+  public generateTemporalGroundTruth(): TemporalMetadata {
+    const now = new Date();
+
+    const monthNamesIndo = [
+      'Januari',
+      'Februari',
+      'Maret',
+      'April',
+      'Mei',
+      'Juni',
+      'Juli',
+      'Agustus',
+      'September',
+      'Oktober',
+      'November',
+      'Desember',
+    ];
+
+    const monthIndex = now.getMonth();
+    const currentMonth = monthNamesIndo[monthIndex];
+    const currentYear = now.getFullYear();
+    const day = now.getDate();
+
+    const currentFullDate = `${day} ${currentMonth} ${currentYear}`;
+
+    let currentQuarter = 'Triwulan I (Q1)';
+    if (monthIndex >= 3 && monthIndex <= 5) {
+      currentQuarter = 'Triwulan II (Q2)';
+    } else if (monthIndex >= 6 && monthIndex <= 8) {
+      currentQuarter = 'Triwulan III (Q3)';
+    } else if (monthIndex >= 9) {
+      currentQuarter = 'Triwulan IV (Q4)';
+    }
+
+    const currentSemester =
+      monthIndex < 6
+        ? `Semester I (Januari–Juni ${currentYear})`
+        : `Semester II (Juli–Desember ${currentYear})`;
+
+    return {
+      currentFullDate,
+      currentMonth,
+      currentYear,
+      currentQuarter,
+      currentSemester,
+      rawDateISO: now.toISOString(),
+    };
+  }
+
+  async assemblePromptPayload(
+    options: MultimodalAssembleOptions,
+  ): Promise<MultimodalPromptPayload> {
     const {
       documentIds = [],
       images = [],
@@ -2083,25 +3084,39 @@ export class ContextAssemblyService {
       scrapedUrls = [],
     } = options;
 
-    let contextPayloadText = '';
+    const temporal = this.generateTemporalGroundTruth();
     const activeTone = tone.toLowerCase();
 
     let localContextText = '';
     let externalContextText = '';
 
     if (documentIds.length > 0) {
-      const docs = await Promise.all(documentIds.map((id) => this.repository.findById(id)));
-      const validDocs = docs.filter((d): d is NonNullable<typeof d> => d !== null && d !== undefined);
+      const docs = await Promise.all(
+        documentIds.map((id) => this.repository.findById(id)),
+      );
+      const validDocs = docs.filter(
+        (d): d is NonNullable<typeof d> => d !== null && d !== undefined,
+      );
 
       if (validDocs.length > 0) {
-
-        const localDocs = validDocs.filter((d) => !(d.metadata as any)?.sourceUrl);
-        const externalDocs = validDocs.filter((d) => !!(d.metadata as any)?.sourceUrl);
+        const localDocs = validDocs.filter(
+          (d) => !(d.metadata as any)?.sourceUrl,
+        );
+        const externalDocs = validDocs.filter(
+          (d) => !!(d.metadata as any)?.sourceUrl,
+        );
 
         if (localDocs.length > 0) {
-          const localTokens = localDocs.reduce((acc, doc) => acc + (doc.metadata?.totalTokenCount || 0), 0);
+          const localTokens = localDocs.reduce(
+            (acc, doc) => acc + (doc.metadata?.totalTokenCount || 0),
+            0,
+          );
           if (localTokens < DYNAMIC_CONTEXT_TOKEN_THRESHOLD) {
-            localContextText = await this.executeFullDocumentStuffingStrategy(localDocs, localTokens, districts);
+            localContextText = await this.executeFullDocumentStuffingStrategy(
+              localDocs,
+              localTokens,
+              districts,
+            );
           } else {
             localContextText = await this.executeDynamicRagStrategy(
               localDocs,
@@ -2115,9 +3130,16 @@ export class ContextAssemblyService {
         }
 
         if (externalDocs.length > 0) {
-          const externalTokens = externalDocs.reduce((acc, doc) => acc + (doc.metadata?.totalTokenCount || 0), 0);
+          const externalTokens = externalDocs.reduce(
+            (acc, doc) => acc + (doc.metadata?.totalTokenCount || 0),
+            0,
+          );
           if (externalTokens < DYNAMIC_CONTEXT_TOKEN_THRESHOLD) {
-            externalContextText = await this.executeFullDocumentStuffingStrategy(externalDocs, externalTokens, districts);
+            externalContextText = await this.executeFullDocumentStuffingStrategy(
+              externalDocs,
+              externalTokens,
+              districts,
+            );
           } else {
             externalContextText = await this.executeDynamicRagStrategy(
               externalDocs,
@@ -2140,16 +3162,27 @@ export class ContextAssemblyService {
       ? `=== DOKUMEN PENDUKUNG (PENGAYAAN EKSTERNAL / KOMPARASI NASIONAL) ===\n\nGunakan dokumen di bawah ini secara proaktif untuk komparasi, dasar hukum pusat, atau pengayaan analisis:\n\n${externalContextText}`
       : '';
 
-    const scrapedSection = scrapedUrls.length > 0
-      ? `=== DOKUMEN PENDUKUNG (SITASI WEB LANGSUNG) ===\n\nBerikut adalah konten dari tautan web yang dimasukkan oleh pengguna atau hasil pencarian eksternal. Gunakan sebagai acuan pendukung analitis.\n\nATURAN SITASI WEB WAJIB: Anda HARUS menyematkan sitasi URL aslinya menggunakan format kurung siku langsung: [URL] (misalnya: [https://www.contoh.com/halaman]) di sebelah setiap klaim fakta yang bersumber dari halaman web tersebut. JANGAN gunakan format Markdown link biasa [Judul](URL). SELALU gunakan format [URL] saja.\n\n` +
-        scrapedUrls.map((page, idx) => `[SUMBER ${idx + 1}]:\nJudul: ${page.title}\nTautan: ${page.url}\nKonten:\n${page.text}`).join('\n\n')
-      : '';
+    const scrapedSection =
+      scrapedUrls.length > 0
+        ? `=== DOKUMEN PENDUKUNG (SITASI WEB LANGSUNG) ===\n\nBerikut adalah konten dari tautan web atau hasil penelusuran eksternal resmi. Gunakan sebagai acuan pendukung analitis.\n\nATURAN SITASI WEB WAJIB: Sematkan sitasi URL aslinya menggunakan format kurung siku langsung: [URL] di sebelah setiap klaim fakta dari web tersebut.\n\n` +
+        scrapedUrls
+          .map(
+            (page, idx) =>
+              `[SUMBER ${idx + 1}]:\nJudul: ${page.title}\nTautan: ${page.url}\nKonten:\n${page.text}`,
+          )
+          .join('\n\n')
+        : '';
 
-    contextPayloadText = [localSection, externalSection, scrapedSection].filter(Boolean).join('\n\n');
+    let contextPayloadText = [localSection, externalSection, scrapedSection]
+      .filter(Boolean)
+      .join('\n\n');
 
     if (!contextPayloadText) {
-      this.logger.log('[Zero-Reference Mode] Tidak ada dokumen acuan terdaftar. AI berfokus pada draf & ketikan pengguna.');
-      contextPayloadText = 'Sistem berjalan dalam mode mandiri. Gunakan draf ketikan pengguna dan pengetahuan internal Anda untuk menulis naskah.';
+      this.logger.log(
+        '[Zero-Reference Mode] Tidak ada dokumen acuan terdaftar. AI berfokus pada draf & ketikan pengguna.',
+      );
+      contextPayloadText =
+        'Sistem berjalan dalam mode mandiri. Gunakan draf ketikan pengguna dan pengetahuan internal Anda untuk menulis naskah.';
     }
 
     let lengthGuidance = `
@@ -2172,9 +3205,28 @@ Target Panjang Teks: LONG (~1500 kata) - Mendalam, Mendetail, & Analitis Formal.
       `;
     }
 
-    const steering = TONE_AUDIENCE_STEERING_MAP[activeTone] || TONE_AUDIENCE_STEERING_MAP['solutif'];
+    const steering =
+      TONE_AUDIENCE_STEERING_MAP[activeTone] ||
+      TONE_AUDIENCE_STEERING_MAP['solutif'];
+
+    const temporalAnchorBlock = `
+[INFORMASI WAKTU SISTEM SAAT INI (TEMPORAL GROUND TRUTH)]
+- Tanggal Eksekusi Riil : ${temporal.currentFullDate}
+- Bulan Berjalan        : ${temporal.currentMonth} ${temporal.currentYear}
+- Posisi Semester Aktif : ${temporal.currentSemester}
+- Posisi Triwulan Aktif : ${temporal.currentQuarter}
+
+PANDUAN PENYELARASAN WAKTU WAJIB:
+1. Posisi waktu Anda saat ini adalah: ${temporal.currentFullDate} (${temporal.currentSemester}).
+2. Jika topik mengevaluasi periode sebelum ${temporal.currentMonth} ${temporal.currentYear} (misalnya Semester I ${temporal.currentYear} atau tahun-tahun sebelumnya), perlakukan periode tersebut sebagai HISTORIS (TELAH BERLALU).
+3. Evaluasi kinerja membedah data aktual yang sudah terjadi di periode lampau tersebut.
+4. SELURUH REKOMENDASI KEBIJAKAN, RENCANA AKSI, DAN SOLUSI TAKTIS WAJIB DITUJUKAN UNTUK PERIODE MASA DEPAN (${temporal.currentSemester} atau Tahun Anggaran ${temporal.currentYear + 1}). DILARANG merekomendasikan aksi mundur ke periode yang sudah selesai.
+`;
+
     const customSystemPersona = `
 ${BRIDA_SYSTEM_PERSONA}
+
+${temporalAnchorBlock.trim()}
 
 ATURAN TARGET AUDIENS GAYA BAHASA (TONE STEERING):
 - Artikel ini ditujukan kepada: **${steering.target}**
@@ -2182,21 +3234,20 @@ ATURAN TARGET AUDIENS GAYA BAHASA (TONE STEERING):
 - Gaya penyampaian bahasa: ${steering.style}
 - **Kosa Kata Fungsional Wajib (Vocabulary Steer):** Anda wajib menyisipkan istilah-istilah taktis berikut secara natural dalam naskah: *${steering.vocabulary}*
 
-ATURAN PRIORITAS SUMBER DATA (HIERARCHY OF TRUTH) [1.1.2]:
-1. Anda wajib mengutamakan fakta dari [DOKUMEN UTAMA] sebagai kebenaran mutlak data daerah Kabupaten Mimika.
-2. Gunakan data dari [DOKUMEN PENDUKUNG] secara proaktif dan cerdas untuk melengkapi analisis dengan komparasi nasional, berita terkini, atau landasan hukum kementerian terkait.
-3. Sebutkan nama dokumen rujukan secara alami (contoh: "berdasarkan data BPS...") dan sematkan selalu sitasi aslinya [docId:chunkIndex] di sebelah klaim fakta.
+ATURAN PRIORITAS SUMBER DATA (HIERARCHY OF TRUTH):
+1. Utamakan fakta dari [DOKUMEN UTAMA] sebagai kebenaran mutlak data daerah Kabupaten Mimika.
+2. Gunakan data dari [DOKUMEN PENDUKUNG] secara proaktif untuk komparasi nasional, berita terkini, atau dasar hukum kementerian.
+3. Sebutkan nama dokumen rujukan secara alami dan sematkan sitasi aslinya [docId:chunkIndex] atau [URL] di samping klaim data.
 
-ATURAN FORMATTING DAN PENATAAN PARAGRAF (SPASI GANDA):
-- Setiap paragraf baru di dalam naskah wajib dipisahkan menggunakan spasi ganda standar Markdown (double newline / '\\n\\n') sehingga menghasilkan visualisasi ruang kosong 1 baris yang konsisten secara estetik.
+ATURAN FORMATTING & PARAGRAF (SPASI GANDA):
+- Setiap pergantian paragraf baru wajib dipisahkan menggunakan spasi ganda standar Markdown (double newline / '\\n\\n').
 
 ATURAN PANJANG NASKAH & BLUEPRINT DENSITAS STRUKTURAL:
 ${lengthGuidance}
-- Anda WAJIB mengembangkan pembahasan, analisis, rekomendasi, dan data pendukung agar memenuhi target panjang naskah di atas. Jangan mengembalikan respons singkat jika target adalah LONG/MEDIUM.
+- Kembangkan pembahasan, analisis kausalitas, dan rekomendasi prospektif agar memenuhi target panjang di atas.
 
 ATURAN COLLABORATIVE CO-WRITING:
-- Jika pengguna memasukkan draf tulisan pribadinya di dalam prompt, prioritas utama Anda adalah memoles, menyempurnakan struktur kalimat, memparafrase, atau melanjutkan draf tersebut secara mulus (*seamless*).
-- Pertahankan ide orisinal dan fakta yang ditulis oleh pengguna, tingkatkan kualitas bahasanya agar sesuai dengan target audiens di atas.
+- Jika pengguna menyertakan draf tulisan pribadinya, prioritas utama adalah memoles, menyempurnakan struktur kalimat, dan melanjutkan draf tersebut secara mulus (*seamless*) dengan mempertahankan ide orisinalnya.
 `;
 
     const userParts: any[] = [];
@@ -2209,7 +3260,9 @@ ATURAN COLLABORATIVE CO-WRITING:
     userParts.push({ text: userTextContent });
 
     if (images.length > 0) {
-      this.logger.log(`[Multimodal Ingest] Memasukkan ${images.length} data biner visual (screenshot) ke prompt user parts.`);
+      this.logger.log(
+        `[Multimodal Ingest] Memasukkan ${images.length} data biner visual ke prompt user parts.`,
+      );
       images.forEach((img) => {
         userParts.push({
           inlineData: {
@@ -2223,11 +3276,11 @@ ATURAN COLLABORATIVE CO-WRITING:
     const messages: MultimodalChatMessage[] = [
       {
         role: 'system',
-        content: customSystemPersona.trim()
+        content: customSystemPersona.trim(),
       },
       {
         role: 'system',
-        content: `[DOKUMEN TERLAMPIR - RUANG KONTEKS STATIS]\n${contextPayloadText}`
+        content: `[DOKUMEN TERLAMPIR - RUANG KONTEKS STATIS]\n${contextPayloadText}`,
       },
       {
         role: 'user',
@@ -2236,15 +3289,18 @@ ATURAN COLLABORATIVE CO-WRITING:
       },
       {
         role: 'user',
-        content: BRIDA_GUARDRAIL_POSTFIX
+        content: BRIDA_GUARDRAIL_POSTFIX,
       },
     ];
 
-    const rawTextsForEstimation = messages.map((m) => m.content).concat([userTextContent]);
-    const estimatedTokens = this.tokenEstimator.estimateArrayTokenCount(rawTextsForEstimation);
+    const rawTextsForEstimation = messages
+      .map((m) => m.content)
+      .concat([userTextContent]);
+    const estimatedTokens =
+      this.tokenEstimator.estimateArrayTokenCount(rawTextsForEstimation);
 
     this.logger.log(
-      `[ContextAssemblyBroker] Sukses merakit Composite Multimodal Prompt (Estimasi Input: ${estimatedTokens} tokens).`,
+      `[ContextAssemblyBroker] Sukses merakit Composite Multimodal Prompt dengan Temporal Anchor ${temporal.currentFullDate} (Estimasi Input: ${estimatedTokens} tokens).`,
     );
 
     return {
@@ -2267,17 +3323,24 @@ ATURAN COLLABORATIVE CO-WRITING:
       if (doc.chunks && doc.chunks.length > 0) {
         let filteredChunks = doc.chunks;
         if (districts && districts.length > 0) {
-          filteredChunks = doc.chunks.filter((c: any) =>
-            c.detected_districts && c.detected_districts.some((d: string) => districts.includes(d))
+          filteredChunks = doc.chunks.filter(
+            (c: any) =>
+              c.detected_districts &&
+              c.detected_districts.some((d: string) => districts.includes(d)),
           );
         }
         if (filteredChunks.length > 0) {
-          allChunksText.push(`=== DOKUMEN: ${doc.title} ===\n` + filteredChunks.map((c: any) => c.rawText).join('\n\n'));
+          allChunksText.push(
+            `=== DOKUMEN: ${doc.title} ===\n` +
+            filteredChunks.map((c: any) => c.rawText).join('\n\n'),
+          );
         }
       }
     });
 
-    return allChunksText.length > 0 ? allChunksText.join('\n\n') : 'Konteks dokumen rujukan yang relevan dengan topik pertanyaan tidak ditemukan untuk distrik yang dipilih.';
+    return allChunksText.length > 0
+      ? allChunksText.join('\n\n')
+      : 'Konteks dokumen rujukan yang relevan dengan topik pertanyaan tidak ditemukan untuk distrik yang dipilih.';
   }
 
   private async executeDynamicRagStrategy(
@@ -2293,18 +3356,20 @@ ATURAN COLLABORATIVE CO-WRITING:
     );
 
     const retrievalTasks = validDocs.map((doc) =>
-      this.vectorRetrieval.searchRelevantChunks({
-        documentId: doc.id,
-        queryText: userQuery,
-        topK,
-        similarityThreshold,
-        districts,
-      }).catch((err) => {
-        this.logger.warn(
-          `Gagal mengambil chunks semantik untuk Dokumen ID '${doc.id}': ${err.message}`,
-        );
-        return [];
-      }),
+      this.vectorRetrieval
+        .searchRelevantChunks({
+          documentId: doc.id,
+          queryText: userQuery,
+          topK,
+          similarityThreshold,
+          districts,
+        })
+        .catch((err) => {
+          this.logger.warn(
+            `Gagal mengambil chunks semantik untuk Dokumen ID '${doc.id}': ${err.message}`,
+          );
+          return [];
+        }),
     );
 
     const allResultsList = await Promise.all(retrievalTasks);
@@ -2315,10 +3380,11 @@ ATURAN COLLABORATIVE CO-WRITING:
       .sort((a, b) => b.similarityScore - a.similarityScore)
       .slice(0, topK);
 
-    const swappedOutCount = combinedFlatResults.length - highlyRelevantResults.length;
+    const swappedOutCount =
+      combinedFlatResults.length - highlyRelevantResults.length;
 
     this.logger.log(
-      `[Dynamic Semantic Swapping] Selesai menyaring konteks. ${highlyRelevantResults.length} chunks relevan dimasukkan (SWAPPED IN), ${swappedOutCount} chunks sampah semantik dibuang (SWAPPED OUT) dari prompt payload [4].`,
+      `[Dynamic Semantic Swapping] Selesai menyaring konteks. ${highlyRelevantResults.length} chunks relevan dimasukkan, ${swappedOutCount} chunks sampah dibuang.`,
     );
 
     if (highlyRelevantResults.length > 0) {
@@ -2326,7 +3392,8 @@ ATURAN COLLABORATIVE CO-WRITING:
         .map(
           (item, idx) =>
             `--- CHUNK ${idx + 1} (Dokumen: ${item.documentId}, Indeks: ${item.chunkIndex
-            }, Skor Semantik: ${item.similarityScore.toFixed(3)}) ---\n${item.rawText}`,
+            }, Skor Semantik: ${item.similarityScore.toFixed(3)}) ---\n${item.rawText
+            }`,
         )
         .join('\n\n');
     }
@@ -2340,17 +3407,21 @@ ATURAN COLLABORATIVE CO-WRITING:
     for (const id of documentIds) {
       const doc = await this.repository.findById(id);
       if (doc) {
-
         const density = await this.repository.getDocumentDistrictDensity(id);
 
         const densityLines = Object.entries(density)
-          .map(([district, count]) => `- Distrik ${district}: Disebut sebanyak ${count} kali dalam dokumen`)
+          .map(
+            ([district, count]) =>
+              `- Distrik ${district}: Disebut sebanyak ${count} kali dalam dokumen`,
+          )
           .join('\n');
 
         manifestParts.push(
           `=== PROFIL KERAPATAN SPASIAL DOKUMEN: ${doc.title} ===\n` +
           `Laporan mencatat intensitas pembahasan distrik sebagai berikut:\n` +
-          `${densityLines || 'Tidak ada spesifikasi penyebutan nama distrik secara eksplisit.'}`
+          `${densityLines ||
+          'Tidak ada spesifikasi penyebutan nama distrik secara eksplisit.'
+          }`,
         );
       }
     }
@@ -3438,12 +4509,17 @@ export class AnalysisMathService {
 --- FILE: src\modules\auth\auth.module.ts ---
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
+import { PassportModule } from '@nestjs/passport';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthController } from './controllers/auth.controller';
 import { AuthService } from './services/auth.service';
+import { JwtStrategy } from './strategies/jwt.strategy';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
+import { RolesGuard } from './guards/roles.guard';
 
 @Module({
   imports: [
+    PassportModule.register({ defaultStrategy: 'jwt' }),
     JwtModule.registerAsync({
       imports: [ConfigModule],
       inject: [ConfigService],
@@ -3454,8 +4530,8 @@ import { AuthService } from './services/auth.service';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService],
-  exports: [AuthService],
+  providers: [AuthService, JwtStrategy, JwtAuthGuard, RolesGuard],
+  exports: [AuthService, PassportModule, JwtAuthGuard, RolesGuard],
 })
 export class AuthModule { }
 
@@ -3479,6 +4555,13 @@ export class AuthController {
   }
 }
 
+--- FILE: src\modules\auth\decorators\roles.decorator.ts ---
+import { SetMetadata } from '@nestjs/common';
+import { UserRole } from '@prisma/client';
+
+export const ROLES_KEY = 'roles';
+export const Roles = (...roles: UserRole[]) => SetMetadata(ROLES_KEY, roles);
+
 --- FILE: src\modules\auth\dtos\login.dto.ts ---
 import { IsString, IsNotEmpty, MinLength } from 'class-validator';
 
@@ -3493,14 +4576,48 @@ export class LoginDto {
   password!: string;
 }
 
+--- FILE: src\modules\auth\guards\jwt-auth.guard.ts ---
+import { Injectable } from '@nestjs/common';
+import { AuthGuard } from '@nestjs/passport';
+
+@Injectable()
+export class JwtAuthGuard extends AuthGuard('jwt') {}
+
+--- FILE: src\modules\auth\guards\roles.guard.ts ---
+import { Injectable, CanActivate, ExecutionContext } from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
+import { UserRole } from '@prisma/client';
+import { ROLES_KEY } from '../decorators/roles.decorator';
+
+@Injectable()
+export class RolesGuard implements CanActivate {
+  constructor(private reflector: Reflector) {}
+
+  canActivate(context: ExecutionContext): boolean {
+    const requiredRoles = this.reflector.getAllAndOverride<UserRole[]>(ROLES_KEY, [
+      context.getHandler(),
+      context.getClass(),
+    ]);
+    if (!requiredRoles) {
+      return true;
+    }
+    const { user } = context.switchToHttp().getRequest();
+    if (!user) {
+      return false;
+    }
+    return requiredRoles.includes(user.role);
+  }
+}
+
 --- FILE: src\modules\auth\services\auth.service.ts ---
 import { Injectable, Logger, UnauthorizedException, OnModuleInit } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../../../common/prisma/prisma.service';
 import { LoginDto } from '../dtos/login.dto';
+import { UserRole } from '@prisma/client';
 import * as bcrypt from 'bcrypt';
 
-@Injectable( )
+@Injectable()
 export class AuthService implements OnModuleInit {
   private readonly logger = new Logger(AuthService.name);
 
@@ -3512,7 +4629,7 @@ export class AuthService implements OnModuleInit {
   async onModuleInit() {
     try {
       const defaultNip = '197804122003121002';
-      const existingUser = await this.prisma.executiveUser.findUnique({
+      const existingUser = await this.prisma.user.findUnique({
         where: { nip: defaultNip },
       });
 
@@ -3521,11 +4638,12 @@ export class AuthService implements OnModuleInit {
         const defaultPassword = 'password123';
         const passwordHash = await bcrypt.hash(defaultPassword, saltRounds);
 
-        await this.prisma.executiveUser.create({
+        await this.prisma.user.create({
           data: {
             nip: defaultNip,
             fullName: 'Darius Sabon Rain, S.E., M.Ec.Dev.',
             passwordHash,
+            role: UserRole.USER,
           },
         });
         this.logger.log(`[Auth Seeder] Akun default Kepala BRIDA (NIP: ${defaultNip}) berhasil diinisialisasi.`);
@@ -3535,11 +4653,11 @@ export class AuthService implements OnModuleInit {
     }
   }
 
-  async login(dto: LoginDto): Promise<{ accessToken: string; executive: { nip: string; fullName: string } }> {
+  async login(dto: LoginDto): Promise<{ accessToken: string; executive: { nip: string; fullName: string; role: UserRole } }> {
     const { nip, password } = dto;
     const cleanNip = nip.replace(/\s+/g, '').trim();
 
-    const user = await this.prisma.executiveUser.findUnique({
+    const user = await this.prisma.user.findUnique({
       where: { nip: cleanNip },
     });
 
@@ -3554,17 +4672,56 @@ export class AuthService implements OnModuleInit {
       throw new UnauthorizedException('NIP atau Kata Sandi Otorisasi salah.');
     }
 
-    const payload = { sub: user.id, nip: user.nip, fullName: user.fullName };
+    const payload = { sub: user.id, nip: user.nip, fullName: user.fullName, role: user.role };
     const accessToken = this.jwtService.sign(payload);
 
-    this.logger.log(`[Login Success] Kepala BRIDA (${user.fullName}) berhasil masuk sistem.`);
+    this.logger.log(`[Login Success] ${user.role} (${user.fullName}) berhasil masuk sistem.`);
 
     return {
       accessToken,
       executive: {
         nip: user.nip,
         fullName: user.fullName,
+        role: user.role,
       },
+    };
+  }
+}
+
+--- FILE: src\modules\auth\strategies\jwt.strategy.ts ---
+import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { PassportStrategy } from '@nestjs/passport';
+import { ExtractJwt, Strategy } from 'passport-jwt';
+import { ConfigService } from '@nestjs/config';
+import { PrismaService } from '../../../common/prisma/prisma.service';
+
+@Injectable()
+export class JwtStrategy extends PassportStrategy(Strategy) {
+  constructor(
+    private readonly configService: ConfigService,
+    private readonly prisma: PrismaService,
+  ) {
+    super({
+      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      ignoreExpiration: false,
+      secretOrKey: configService.get<string>('JWT_SECRET') || 'brida_super_secret_key_2026',
+    });
+  }
+
+  async validate(payload: { sub: string; nip: string; fullName: string }) {
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('Pengguna tidak valid atau tidak terdaftar.');
+    }
+
+    return {
+      id: user.id,
+      nip: user.nip,
+      fullName: user.fullName,
+      role: user.role,
     };
   }
 }
@@ -3771,6 +4928,11 @@ export interface DocumentResponseDto {
     uploadedBy: string;
     docType?: string;
     sourceUrl?: string;
+    categoryId?: string;
+    categoryName?: string;
+    analyticalRole?: string;
+    opdId?: string;
+    opdName?: string;
   };
   chunkCount?: number;
   extractedLocationsCount?: number;
@@ -3801,6 +4963,14 @@ export class UploadDocumentDto {
   @IsString()
   @IsOptional()
   docType?: string;
+
+  @IsString()
+  @IsOptional()
+  categoryId?: string;
+
+  @IsString()
+  @IsOptional()
+  opdId?: string;
 }
 
 --- FILE: src\modules\document-ingestion\interfaces\chunk-data.interface.ts ---
@@ -4314,6 +5484,8 @@ export interface CreateDocumentTransactionInput {
   docType?: string;
   chunks: ChunkWithVectorInput[];
   executionTimeMs: number;
+  categoryId?: string;
+  opdId?: string;
 }
 
 @Injectable()
@@ -4350,7 +5522,12 @@ export class DocumentRepository {
     return this.prisma.reportDocument.findMany({
       orderBy: { createdAt: 'desc' },
       include: {
-        metadata: true,
+        metadata: {
+          include: {
+            categoryRef: true,
+            opd: true,
+          },
+        },
         _count: { select: { chunks: true } },
       },
     });
@@ -4542,6 +5719,8 @@ export class DocumentRepository {
           category: input.category,
           uploadedBy: input.uploadedBy,
           docType: input.docType || 'REALIZATION',
+          categoryId: input.categoryId || null,
+          opdId: input.opdId || null,
         },
       });
 
@@ -4964,6 +6143,24 @@ export class DocumentIngestionService {
 
     const executionTimeMs = Date.now() - startTime;
 
+    let resolvedDocType = dto.docType || 'REALIZATION';
+    if (dto.categoryId) {
+      try {
+        const cat = await this.prisma.documentCategory.findUnique({ where: { id: dto.categoryId } });
+        if (cat?.analyticalRole) {
+
+          const roleMap: Record<string, string> = {
+            TARGET: 'BASELINE',
+            REALIZATION: 'REALIZATION',
+            REFERENCE: 'GENERAL_REFERENCE',
+          };
+          resolvedDocType = roleMap[cat.analyticalRole] || resolvedDocType;
+        }
+      } catch {
+        this.logger.warn('[Category Role Resolve] Gagal query kategori, fallback ke docType default.');
+      }
+    }
+
     const savedDoc = await this.repository.createDocumentWithTransaction({
       title: dto.title,
       fileUrl: filePathOnDisk,
@@ -4974,9 +6171,11 @@ export class DocumentIngestionService {
       totalTokenCount,
       category: dto.category || 'General Report',
       uploadedBy: dto.uploadedBy || 'SYSTEM_STAF',
-      docType: dto.docType || 'REALIZATION',
+      docType: resolvedDocType,
       chunks: chunkItems,
       executionTimeMs,
+      categoryId: dto.categoryId,
+      opdId: dto.opdId,
     });
 
     return {
@@ -4993,7 +6192,7 @@ export class DocumentIngestionService {
         totalTokenCount,
         category: dto.category || 'General Report',
         uploadedBy: dto.uploadedBy || 'SYSTEM_STAF',
-        docType: dto.docType || 'REALIZATION',
+        docType: resolvedDocType,
       },
       chunkCount: chunkObjects.length,
       extractedLocationsCount: totalLocationsCount,
@@ -5019,6 +6218,11 @@ export class DocumentIngestionService {
           uploadedBy: doc.metadata.uploadedBy,
           docType: doc.metadata.docType,
           sourceUrl: doc.metadata.sourceUrl || undefined,
+          categoryId: doc.metadata.categoryId || undefined,
+          categoryName: (doc.metadata as any).categoryRef?.name || undefined,
+          analyticalRole: (doc.metadata as any).categoryRef?.analyticalRole || undefined,
+          opdId: doc.metadata.opdId || undefined,
+          opdName: (doc.metadata as any).opd?.name || undefined,
         }
         : undefined,
       chunkCount: doc._count?.chunks ?? 0,
@@ -5724,7 +6928,7 @@ import { ChatMemoryService } from './services/chat-memory.service';
 import { QaIntentHandler } from './handlers/qa-intent.handler';
 import { ArticleIntentHandler } from './handlers/article-intent.handler';
 import { IntentRouterService } from './services/intent-router.service';
-import { AssistantController } from './controllers/assistant.controller';
+import { AssistantController, ArticleShareController } from './controllers/assistant.controller';
 import { PromptInjectionSanitizer } from './utils/prompt-injection-sanitizer.util';
 import { ArticleGeneratorService } from './services/article-generator.service';
 import { DiscussionBridgeService } from './services/discussion-bridge.service';
@@ -5734,7 +6938,7 @@ import { WebSearchService } from './services/web-search.service';
 
 @Module({
   imports: [DocumentIngestionModule, AiAgentModule],
-  controllers: [AssistantController],
+  controllers: [AssistantController, ArticleShareController],
   providers: [
     ChatRepository,
     ChatMemoryService,
@@ -5798,6 +7002,8 @@ import {
   UseInterceptors,
   UploadedFile,
   NotFoundException,
+  UseGuards,
+  Req,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { join } from 'path';
@@ -5809,6 +7015,7 @@ import { DiscussionBridgeService } from '../services/discussion-bridge.service';
 import { DocumentIngestionService } from '../../document-ingestion/services/document-ingestion.service';
 import { ChatAttachmentSignatureValidationPipe } from '../../document-ingestion/pipes/chat-attachment-validation.pipe';
 import { ArticleLength, SessionType } from '@prisma/client';
+import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 
 import { IsString, IsNotEmpty, IsUUID, MinLength, IsOptional, IsArray, ValidateNested } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -5877,6 +7084,7 @@ export class ExtendedInteractRequestDto {
 }
 
 @Controller('assistant')
+@UseGuards(JwtAuthGuard)
 export class AssistantController {
   constructor(
     private readonly routerService: IntentRouterService,
@@ -5889,6 +7097,7 @@ export class AssistantController {
   @Post('session')
   @HttpCode(HttpStatus.CREATED)
   async createSession(
+    @Req() req: any,
     @Body('documentId') documentId?: string,
     @Body('documentIds') documentIds?: string[],
     @Body('title') title?: string,
@@ -5896,7 +7105,7 @@ export class AssistantController {
   ) {
     const targetIds = documentIds && documentIds.length > 0 ? documentIds : (documentId ? [documentId] : []);
     const type = sessionType || SessionType.QA_CHAT;
-    const session = await this.memoryService.createSession(targetIds, title, type);
+    const session = await this.memoryService.createSession(targetIds, title, type, req.user.id);
     return {
       success: true,
       data: session,
@@ -5913,11 +7122,12 @@ export class AssistantController {
     }),
   )
   async uploadSessionAttachment(
+    @Req() req: any,
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @UploadedFile(new ChatAttachmentSignatureValidationPipe()) file: Express.Multer.File,
   ) {
 
-    await this.memoryService.getQaSessionDetails(id);
+    await this.memoryService.getQaSessionDetails(id, req.user.id);
 
     const result = await this.ingestionService.processTemporaryUpload(file);
     return {
@@ -5931,7 +7141,10 @@ export class AssistantController {
 
   @Post('interact')
   @HttpCode(HttpStatus.OK)
-  async interact(@Body() dto: ExtendedInteractRequestDto) {
+  async interact(@Req() req: any, @Body() dto: ExtendedInteractRequestDto) {
+
+    await this.memoryService.getQaSessionDetails(dto.sessionId, req.user.id);
+
     if (dto.documentIds) {
       await this.memoryService.syncSessionDocuments(dto.sessionId, dto.documentIds);
     }
@@ -5952,8 +7165,8 @@ export class AssistantController {
   }
 
   @Get('sessions')
-  async getAllQaSessions() {
-    const data = await this.memoryService.getQaSessions();
+  async getAllQaSessions(@Req() req: any) {
+    const data = await this.memoryService.getQaSessions(req.user.id);
     return {
       success: true,
       data,
@@ -5961,8 +7174,8 @@ export class AssistantController {
   }
 
   @Get('sessions/:id')
-  async getQaSessionById(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
-    const data = await this.memoryService.getQaSessionDetails(id);
+  async getQaSessionById(@Req() req: any, @Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
+    const data = await this.memoryService.getQaSessionDetails(id, req.user.id);
     return {
       success: true,
       data,
@@ -5970,8 +7183,8 @@ export class AssistantController {
   }
 
   @Delete('sessions/:id')
-  async deleteQaSession(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
-    await this.memoryService.deleteSession(id);
+  async deleteQaSession(@Req() req: any, @Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
+    await this.memoryService.deleteSession(id, req.user.id);
     return {
       success: true,
       message: `Sesi Q&A ID '${id}' berhasil dihapus.`,
@@ -5981,6 +7194,7 @@ export class AssistantController {
   @Post('article/generate')
   @HttpCode(HttpStatus.OK)
   async generateArticle(
+    @Req() req: any,
     @Body()
     body: {
       documentIds: string[];
@@ -5991,7 +7205,13 @@ export class AssistantController {
       sessionId?: string;
     },
   ) {
-    const result = await this.articleGeneratorService.generateArticle(body);
+    if (body.sessionId) {
+      await this.articleGeneratorService.getArticleSessionById(body.sessionId, req.user.id);
+    }
+    const result = await this.articleGeneratorService.generateArticle({
+      ...body,
+      userId: req.user.id,
+    });
     return {
       success: true,
       data: result,
@@ -6001,6 +7221,7 @@ export class AssistantController {
   @Post('article/transition')
   @HttpCode(HttpStatus.CREATED)
   async transitionQaToArticle(
+    @Req() req: any,
     @Body()
     body: {
       sessionId: string;
@@ -6010,7 +7231,13 @@ export class AssistantController {
       userInstruction?: string;
     },
   ) {
-    const result = await this.discussionBridgeService.transitionQaToArticle(body);
+
+    await this.memoryService.getQaSessionDetails(body.sessionId, req.user.id);
+
+    const result = await this.discussionBridgeService.transitionQaToArticle({
+      ...body,
+      userId: req.user.id,
+    });
     return {
       success: true,
       data: result,
@@ -6020,8 +7247,12 @@ export class AssistantController {
   @Post('article/interact')
   @HttpCode(HttpStatus.OK)
   async interactArticle(
+    @Req() req: any,
     @Body() body: { sessionId: string; userInstruction: string },
   ) {
+
+    await this.articleGeneratorService.getArticleSessionById(body.sessionId, req.user.id);
+
     const result = await this.articleGeneratorService.interactWithArticleSession(
       body.sessionId,
       body.userInstruction,
@@ -6033,8 +7264,8 @@ export class AssistantController {
   }
 
   @Get('article/sessions')
-  async getAllArticleSessions() {
-    const data = await this.articleGeneratorService.getAllArticleSessions();
+  async getAllArticleSessions(@Req() req: any) {
+    const data = await this.articleGeneratorService.getAllArticleSessions(req.user.id);
     return {
       success: true,
       data,
@@ -6042,8 +7273,8 @@ export class AssistantController {
   }
 
   @Get('article/sessions/:id')
-  async getArticleSessionById(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
-    const data = await this.articleGeneratorService.getArticleSessionById(id);
+  async getArticleSessionById(@Req() req: any, @Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
+    const data = await this.articleGeneratorService.getArticleSessionById(id, req.user.id);
     return {
       success: true,
       data,
@@ -6060,11 +7291,13 @@ export class AssistantController {
     }),
   )
   async uploadEditorMedia(
+    @Req() req: any,
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @UploadedFile(new ChatAttachmentSignatureValidationPipe()) file: Express.Multer.File,
   ) {
-    const session = await this.articleGeneratorService.getArticleSessionById(id).catch(() => null)
-      || await this.memoryService.getQaSessionDetails(id).catch(() => null);
+
+    const session = await this.articleGeneratorService.getArticleSessionById(id, req.user.id).catch(() => null)
+      || await this.memoryService.getQaSessionDetails(id, req.user.id).catch(() => null);
 
     if (!session) {
       throw new NotFoundException(`Sesi dengan ID '${id}' tidak ditemukan.`);
@@ -6104,9 +7337,13 @@ export class AssistantController {
   @Patch('article/sessions/:id/content')
   @HttpCode(HttpStatus.OK)
   async updateArticleContent(
+    @Req() req: any,
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
     @Body() body: UpdateArticleContentDto,
   ) {
+
+    await this.articleGeneratorService.getArticleSessionById(id, req.user.id);
+
     const result = await this.articleGeneratorService.updateArticleContent(
       id,
       body.articleTitle,
@@ -6120,7 +7357,10 @@ export class AssistantController {
   }
 
   @Delete('article/sessions/:id')
-  async deleteArticleSession(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
+  async deleteArticleSession(@Req() req: any, @Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
+
+    await this.articleGeneratorService.getArticleSessionById(id, req.user.id);
+
     await this.articleGeneratorService.deleteArticleSession(id);
     return {
       success: true,
@@ -6129,8 +7369,8 @@ export class AssistantController {
   }
 
   @Get('article/sessions/:id/export-data')
-  async getArticleExportData(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
-    const data = await this.articleGeneratorService.getArticleSessionById(id);
+  async getArticleExportData(@Req() req: any, @Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
+    const data = await this.articleGeneratorService.getArticleSessionById(id, req.user.id);
     return {
       success: true,
       data: {
@@ -6138,6 +7378,27 @@ export class AssistantController {
         content: data.editorDocumentState || data.fullArticleText,
         tone: data.tone,
         generatedAt: data.updatedAt,
+      },
+    };
+  }
+}
+
+@Controller('assistant/article/share')
+export class ArticleShareController {
+  constructor(private readonly articleGeneratorService: ArticleGeneratorService) {}
+
+  @Get(':id')
+  async getSharedArticle(@Param('id', new ParseUUIDPipe({ version: '4' })) id: string) {
+    const data = await this.articleGeneratorService.getArticleSessionById(id);
+    return {
+      success: true,
+      data: {
+        id: data.id,
+        title: data.articleTitle,
+        content: data.editorDocumentState || data.fullArticleText,
+        tone: data.tone,
+        createdAt: data.createdAt,
+        updatedAt: data.updatedAt,
       },
     };
   }
@@ -6212,7 +7473,10 @@ import {
 } from '../interfaces/intent-handler.interface';
 import { ChatMemoryService } from '../services/chat-memory.service';
 import { ContextAssemblyService } from '../../ai-agent/services/context-assembly.service';
-import { VendorLlmAdapter, MultimodalChatMessage } from '../../ai-agent/providers/vendor-llm.adapter';
+import {
+  VendorLlmAdapter,
+  MultimodalChatMessage,
+} from '../../ai-agent/providers/vendor-llm.adapter';
 import { PromptInjectionSanitizer } from '../utils/prompt-injection-sanitizer.util';
 import { DocumentIngestionService } from '../../document-ingestion/services/document-ingestion.service';
 import { ChatRepository } from '../repositories/chat.repository';
@@ -6228,24 +7492,26 @@ const DUAL_PANE_COOPERATIVE_SCHEMA = {
     answer: {
       type: 'string',
       description:
-        `The conversational feedback/thought process in Bahasa Indonesia explaining what changes you made, what data you analyzed, or answering the user. Format strictly using beautiful, rich Markdown (using headers ##, bold texts, bullet lists, and comparison tables if comparing data). Always embed structured citation anchors in the format [docId:chunkIndex] (e.g. [doc-001:2]) adjacent to any claims, metrics, or factual statements derived from the context chunks. WAJIB patuhi panduan berikut:\n\n${EDITORIAL_STYLE_GUIDE}`,
+        `Conversational feedback/thought process dalam Bahasa Indonesia yang menjelaskan analisis data, diagnosis deviasi, serta tindak lanjut kebijakan. Format WAJIB menggunakan Markdown kaya (header ##, teks tebal, bullet list, dan tabel perbandingan data jika relevan). Sematkan sitasi [docId:chunkIndex] atau [URL] bersebelahan dengan klaim data. Jika memberikan rekomendasi atau rencana intervensi aksi, WAJIB mengarahkannya secara prospektif untuk periode MASA DEPAN (bukan merekomendasikan aksi mundur ke masa lalu). WAJIB patuhi panduan berikut:\n\n${EDITORIAL_STYLE_GUIDE}`,
     },
     suggestions: {
       type: 'array',
       items: { type: 'string' },
       description:
-        'Generate exactly 3 highly relevant, contextual follow-up questions or discussion options to guide the user in continuing the conversation.',
+        'Hasilkan tepat 3 opsi pertanyaan lanjutan atau topik diskusi taktis yang relevan untuk memandu pengguna melanjutkan pembahasan.',
     },
     updatedArticle: {
       type: 'object',
       properties: {
         title: {
           type: 'string',
-          description: 'The updated or newly generated article title. DILARANG menggunakan prefix "Artikel Strategis:" atau semacamnya.',
+          description:
+            'Judul artikel naskah publikasi yang diperbarui atau baru dibuat. DILARANG menggunakan awalan seperti "Artikel Strategis:" atau "Judul:".',
         },
         draftMarkdown: {
           type: 'string',
-          description: `The fully updated or newly generated article text formatted in Markdown. If the user only asked a question without editing or creating the article, return the unmodified currentDraft or leave this blank. JIKA MENGHASILKAN TEKS BARU, WAJIB PATUHI:\n\n${EDITORIAL_STYLE_GUIDE}`,
+          description:
+            `Teks naskah artikel utuh yang diperbarui atau baru dibuat dalam format CommonMark Markdown bersih. Jika pengguna hanya bertanya tanpa meminta penulisan/pembaruan naskah, kembalikan currentDraft tanpa modifikasi atau kosongkan. JIKA MENGHASILKAN TEKS BARU: Evaluasi data lampau dilakukan secara retrospektif, sedangkan seluruh rekomendasi dan rencana aksi WAJIB dialokasikan ke masa depan (Forward-Looking Actions). WAJIB PATUHI:\n\n${EDITORIAL_STYLE_GUIDE}`,
         },
       },
     },
@@ -6255,7 +7521,9 @@ const DUAL_PANE_COOPERATIVE_SCHEMA = {
 @Injectable()
 export class QaIntentHandler implements IIntentHandler {
   private readonly logger = new Logger(QaIntentHandler.name);
-  private readonly uploadDir = path.resolve(process.env.UPLOAD_DESTINATION || './uploads');
+  private readonly uploadDir = path.resolve(
+    process.env.UPLOAD_DESTINATION || './uploads',
+  );
   private readonly tempDir = path.join(this.uploadDir, 'temp');
 
   private readonly URL_REGEX = /https?:\/\/[^\s]+/gi;
@@ -6287,10 +7555,13 @@ export class QaIntentHandler implements IIntentHandler {
     const sanitizedQuery = this.sanitizer.sanitize(payload.query);
 
     const foundUrls = sanitizedQuery.match(this.URL_REGEX) || [];
-    const currentScrapedUrls: Array<{ url: string; title: string; text: string }> = [];
+    const currentScrapedUrls: Array<{ url: string; title: string; text: string }> =
+      [];
 
     if (foundUrls.length > 0) {
-      this.logger.log(`[URL Interceptor] Mendeteksi ${foundUrls.length} tautan eksternal untuk diekstraksi.`);
+      this.logger.log(
+        `[URL Interceptor] Mendeteksi ${foundUrls.length} tautan eksternal untuk diekstraksi.`,
+      );
       const scrapeTasks = foundUrls.map(async (url: string) => {
         try {
           const scraped = await this.urlScraperService.scrapeAndExtract(url);
@@ -6300,7 +7571,9 @@ export class QaIntentHandler implements IIntentHandler {
             text: scraped.cleanText,
           };
         } catch (scrapeErr: any) {
-          this.logger.error(`[Parallel Scrape Failed] Gagal memproses URL ${url}: ${scrapeErr.message}`);
+          this.logger.error(
+            `[Parallel Scrape Failed] Gagal memproses URL ${url}: ${scrapeErr.message}`,
+          );
           return null;
         }
       });
@@ -6313,9 +7586,17 @@ export class QaIntentHandler implements IIntentHandler {
       }
     }
 
-    await this.chatMemory.recordUserMessage(payload.sessionId, sanitizedQuery, currentScrapedUrls.length > 0 ? { scrapedUrls: currentScrapedUrls } : undefined);
+    await this.chatMemory.recordUserMessage(
+      payload.sessionId,
+      sanitizedQuery,
+      currentScrapedUrls.length > 0
+        ? { scrapedUrls: currentScrapedUrls }
+        : undefined,
+    );
 
-    const memory = await this.chatMemory.getActiveSlidingWindowMemory(payload.sessionId);
+    const memory = await this.chatMemory.getActiveSlidingWindowMemory(
+      payload.sessionId,
+    );
 
     const documentIds = [...(memory.documentIds || [])];
     const images: Array<{ mimeType: string; base64Data: string }> = [];
@@ -6325,7 +7606,9 @@ export class QaIntentHandler implements IIntentHandler {
         if (att.classification) {
 
           try {
-            this.logger.log(`[Bypass Ingest] Menjalankan bypass pendaftaran dokumen untuk ID berkas sementara: ${att.fileId}`);
+            this.logger.log(
+              `[Bypass Ingest] Menjalankan bypass pendaftaran dokumen untuk ID berkas sementara: ${att.fileId}`,
+            );
 
             const categoryMap = {
               BASELINE: 'Perencanaan & Baseline Target',
@@ -6333,20 +7616,28 @@ export class QaIntentHandler implements IIntentHandler {
               GENERAL_REFERENCE: 'Referensi Umum & Kliping',
             } as const;
 
-            const classificationKey = att.classification as keyof typeof categoryMap;
-            const targetCategory = categoryMap[classificationKey] || 'Referensi Umum & Kliping';
+            const classificationKey =
+              att.classification as keyof typeof categoryMap;
+            const targetCategory =
+              categoryMap[classificationKey] || 'Referensi Umum & Kliping';
 
-            const ingestedDoc = await this.ingestionService.convertTempToPermanent(att.fileId, {
-              title: `Dokumen Tambahan Chat (${att.classification})`,
-              category: targetCategory,
-              docType: att.classification,
-            });
+            const ingestedDoc =
+              await this.ingestionService.convertTempToPermanent(att.fileId, {
+                title: `Dokumen Tambahan Chat (${att.classification})`,
+                category: targetCategory,
+                docType: att.classification,
+              });
 
             documentIds.push(ingestedDoc.id);
 
-            await this.chatRepository.linkDocumentSource(payload.sessionId, ingestedDoc.id);
+            await this.chatRepository.linkDocumentSource(
+              payload.sessionId,
+              ingestedDoc.id,
+            );
           } catch (ingestErr: any) {
-            this.logger.error(`[Bypass Ingest Failed] Gagal mendaftarkan dokumen sementara ke repositori: ${ingestErr.message}`);
+            this.logger.error(
+              `[Bypass Ingest Failed] Gagal mendaftarkan dokumen sementara ke repositori: ${ingestErr.message}`,
+            );
           }
         } else {
 
@@ -6359,9 +7650,10 @@ export class QaIntentHandler implements IIntentHandler {
               const fileBuffer = fs.readFileSync(filePath);
 
               const parts = targetFile.split('__');
-              const mimeType = parts.length > 1
-                ? Buffer.from(parts[1], 'hex').toString('utf-8')
-                : 'image/png';
+              const mimeType =
+                parts.length > 1
+                  ? Buffer.from(parts[1], 'hex').toString('utf-8')
+                  : 'image/png';
 
               images.push({
                 mimeType,
@@ -6369,52 +7661,78 @@ export class QaIntentHandler implements IIntentHandler {
               });
             }
           } catch (imageErr: any) {
-            this.logger.error(`[Screenshot Resolution Failed] Gagal memuat data biner gambar: ${imageErr.message}`);
+            this.logger.error(
+              `[Screenshot Resolution Failed] Gagal memuat data biner gambar: ${imageErr.message}`,
+            );
           }
         }
       }
     }
 
-    const proactiveScrapedUrls: Array<{ url: string; title: string; text: string }> = [];
+    const proactiveScrapedUrls: Array<{
+      url: string;
+      title: string;
+      text: string;
+    }> = [];
     let isProactiveSearch = false;
 
-      const isAnalyticalQuery = sanitizedQuery.length > 12 &&
-        !/^(halo|hi|hai|pagi|siang|sore|malam|terima kasih|thanks|p|tes|test)/i.test(sanitizedQuery);
+    const isAnalyticalQuery =
+      sanitizedQuery.length > 12 &&
+      !/^(halo|hi|hai|pagi|siang|sore|malam|terima kasih|thanks|p|tes|test)/i.test(
+        sanitizedQuery,
+      );
 
-      if (isAnalyticalQuery) {
-        try {
-          this.logger.log(`[Proactive Search] Kueri analitis terdeteksi. Melakukan pengayaan eksternal secara proaktif...`);
-          const searchResults = await this.webSearchService.searchReputableWeb(sanitizedQuery, 5);
+    if (isAnalyticalQuery) {
+      try {
+        this.logger.log(
+          `[Proactive Search] Kueri analitis terdeteksi. Melakukan pengayaan eksternal secara proaktif...`,
+        );
+        const searchResults = await this.webSearchService.searchReputableWeb(
+          sanitizedQuery,
+          5,
+        );
 
-          if (searchResults && searchResults.length > 0) {
-            isProactiveSearch = true;
-            searchResults.forEach((res, i) => {
-              proactiveScrapedUrls.push({
-                url: res.link,
-                title: res.title,
-                text: res.scrapedText
-                  ? `=== ARTIKEL LUAR ${i + 1}: ${res.title} ===\nTautan: ${res.link}\nKonten Halaman:\n${res.scrapedText}`
-                  : `=== ARTIKEL LUAR ${i + 1}: ${res.title} ===\nTautan: ${res.link}\nRingkasan Fakta: ${res.snippet}`,
-              });
+        if (searchResults && searchResults.length > 0) {
+          isProactiveSearch = true;
+          searchResults.forEach((res, i) => {
+            proactiveScrapedUrls.push({
+              url: res.link,
+              title: res.title,
+              text: res.scrapedText
+                ? `=== ARTIKEL LUAR ${i + 1}: ${res.title} ===\nTautan: ${res.link
+                }\nKonten Halaman:\n${res.scrapedText}`
+                : `=== ARTIKEL LUAR ${i + 1}: ${res.title} ===\nTautan: ${res.link
+                }\nRingkasan Fakta: ${res.snippet}`,
             });
-            this.logger.log(`[Proactive Search] Konteks eksternal tervalidasi berhasil diintegrasikan secara transien.`);
-          }
-        } catch (searchErr: any) {
-          this.logger.error(`[Proactive Search Failed] Gagal mengayakan konteks eksternal: ${searchErr.message}`);
+          });
+          this.logger.log(
+            `[Proactive Search] Konteks eksternal tervalidasi berhasil diintegrasikan secara transien.`,
+          );
         }
+      } catch (searchErr: any) {
+        this.logger.error(
+          `[Proactive Search Failed] Gagal mengayakan konteks eksternal: ${searchErr.message}`,
+        );
       }
+    }
 
-    const scrapedUrlsFromHistory: Array<{ url: string; title: string; text: string }> = [];
-    const historyMessages: MultimodalChatMessage[] = memory.activeMessages.map((m) => {
-      const meta = m.metadata as any;
-      if (meta && Array.isArray(meta.scrapedUrls)) {
-        scrapedUrlsFromHistory.push(...meta.scrapedUrls);
-      }
-      return {
-        role: m.role === 'USER' ? 'user' : 'assistant',
-        content: m.content,
-      };
-    });
+    const scrapedUrlsFromHistory: Array<{
+      url: string;
+      title: string;
+      text: string;
+    }> = [];
+    const historyMessages: MultimodalChatMessage[] = memory.activeMessages.map(
+      (m) => {
+        const meta = m.metadata as any;
+        if (meta && Array.isArray(meta.scrapedUrls)) {
+          scrapedUrlsFromHistory.push(...meta.scrapedUrls);
+        }
+        return {
+          role: m.role === 'USER' ? 'user' : 'assistant',
+          content: m.content,
+        };
+      },
+    );
 
     const allScrapedUrls = [
       ...scrapedUrlsFromHistory,
@@ -6441,51 +7759,86 @@ export class QaIntentHandler implements IIntentHandler {
       });
     }
 
-    const analysisResult = await this.llmAdapter.generateStructuredAnalysis<any>(
-      promptPayload.messages,
-      DUAL_PANE_COOPERATIVE_SCHEMA,
-      0.5,
-    );
+    const analysisResult =
+      await this.llmAdapter.generateStructuredAnalysis<any>(
+        promptPayload.messages,
+        DUAL_PANE_COOPERATIVE_SCHEMA,
+        0.5,
+      );
 
     if (analysisResult.answer) {
-      analysisResult.answer = cleanCitationsText(analysisResult.answer, allScrapedUrls);
+      analysisResult.answer = cleanCitationsText(
+        analysisResult.answer,
+        allScrapedUrls,
+      );
     }
-    if (analysisResult.updatedArticle && analysisResult.updatedArticle.draftMarkdown) {
-      analysisResult.updatedArticle.draftMarkdown = cleanCitationsText(analysisResult.updatedArticle.draftMarkdown, allScrapedUrls);
+    if (
+      analysisResult.updatedArticle &&
+      analysisResult.updatedArticle.draftMarkdown
+    ) {
+      analysisResult.updatedArticle.draftMarkdown = cleanCitationsText(
+        analysisResult.updatedArticle.draftMarkdown,
+        allScrapedUrls,
+      );
     }
 
-    if (analysisResult.updatedArticle && analysisResult.updatedArticle.draftMarkdown) {
+    if (
+      analysisResult.updatedArticle &&
+      analysisResult.updatedArticle.draftMarkdown
+    ) {
       const draft = analysisResult.updatedArticle.draftMarkdown.trim();
       const answer = (analysisResult.answer || '').trim();
 
       const isIdenticalToAnswer = draft === answer;
-      const isRefusalKeyword = draft.includes('tidak ditemukan di dalam dokumen') ||
-                              draft.includes('belum bisa ditulis') ||
-                              draft.includes('belum menemukan isi artikel') ||
-                              draft.includes('tidak memiliki akses');
+      const isRefusalKeyword =
+        draft.includes('tidak ditemukan di dalam dokumen') ||
+        draft.includes('belum bisa ditulis') ||
+        draft.includes('belum menemukan isi artikel') ||
+        draft.includes('tidak memiliki akses');
       const isShortNonArticle = !draft.startsWith('#') && draft.length < 400;
 
       if (isIdenticalToAnswer || isRefusalKeyword || isShortNonArticle) {
-        this.logger.warn(`[Guardrail] Mencegah pembaruan draf dengan teks penolakan/obrolan AI. Teks dicegah: "${draft.slice(0, 100)}..."`);
+        this.logger.warn(
+          `[Guardrail] Mencegah pembaruan draf dengan teks penolakan/obrolan AI. Teks dicegah: "${draft.slice(
+            0,
+            100,
+          )}..."`,
+        );
         delete analysisResult.updatedArticle;
       }
     }
 
-    if (analysisResult.updatedArticle && analysisResult.updatedArticle.draftMarkdown) {
+    if (
+      analysisResult.updatedArticle &&
+      analysisResult.updatedArticle.draftMarkdown
+    ) {
       const updatedDraft = analysisResult.updatedArticle.draftMarkdown;
-      const updatedTitle = analysisResult.updatedArticle.title || memory.articleTitle || memory.title;
+      const updatedTitle =
+        analysisResult.updatedArticle.title ||
+        memory.articleTitle ||
+        memory.title;
 
-      await this.chatRepository.updateActiveDraft(payload.sessionId, updatedDraft);
-      await this.chatRepository.updateArticleMetadata(payload.sessionId, updatedTitle);
+      await this.chatRepository.updateActiveDraft(
+        payload.sessionId,
+        updatedDraft,
+      );
+      await this.chatRepository.updateArticleMetadata(
+        payload.sessionId,
+        updatedTitle,
+      );
 
-      this.logger.log(`[State Sync] Draf naskah dan judul artikel aktif berhasil disinkronkan ke PostgreSQL.`);
+      this.logger.log(
+        `[State Sync] Draf naskah dan judul artikel aktif berhasil disinkronkan ke PostgreSQL.`,
+      );
     }
 
     const assistantResponseContent = JSON.stringify(analysisResult);
     await this.chatMemory.recordAssistantMessage(
       payload.sessionId,
       assistantResponseContent,
-      isProactiveSearch && proactiveScrapedUrls.length > 0 ? { scrapedUrls: proactiveScrapedUrls } : undefined
+      isProactiveSearch && proactiveScrapedUrls.length > 0
+        ? { scrapedUrls: proactiveScrapedUrls }
+        : undefined,
     );
 
     if (
@@ -6518,9 +7871,13 @@ export class QaIntentHandler implements IIntentHandler {
     memory: any,
     latestAnswer: string,
   ): Promise<void> {
-    const previousSummary = memory.runningSummary || 'Belum ada riwayat pembicaraan.';
+    const previousSummary =
+      memory.runningSummary || 'Belum ada riwayat pembicaraan.';
     const activeMessagesStr = memory.activeMessages
-      .map((m: any) => `${m.role === 'USER' ? 'User' : 'Assistant'}: ${m.content}`)
+      .map(
+        (m: any) =>
+          `${m.role === 'USER' ? 'User' : 'Assistant'}: ${m.content}`,
+      )
       .join('\n');
 
     const compactionPrompt: MultimodalChatMessage[] = [
@@ -6541,28 +7898,42 @@ WAJIB patuhi gaya bahasa berikut saat meringkas:\n${EDITORIAL_STYLE_GUIDE}`,
       type: 'object',
       required: ['summary'],
       properties: {
-        summary: { type: 'string', description: 'Ringkasan naratif gabungan baru.' },
+        summary: {
+          type: 'string',
+          description: 'Ringkasan naratif gabungan baru.',
+        },
       },
     };
 
     setImmediate(async () => {
       try {
-        const result = await this.llmAdapter.generateStructuredAnalysis<{
-          summary: string;
-        }>(compactionPrompt, compactionSchema, 0.0);
+        const result =
+          await this.llmAdapter.generateStructuredAnalysis<{
+            summary: string;
+          }>(compactionPrompt, compactionSchema, 0.0);
 
         if (result && result.summary) {
-          await this.chatMemory.updateRunningSummary(sessionId, result.summary);
-          this.logger.log(`[Compaction Guard] Berhasil memperbarui Running Summary.`);
+          await this.chatMemory.updateRunningSummary(
+            sessionId,
+            result.summary,
+          );
+          this.logger.log(
+            `[Compaction Guard] Berhasil memperbarui Running Summary.`,
+          );
         }
       } catch (err: any) {
-        this.logger.error(`[Compaction Guard Error] Gagal memadatkan memori: ${err.message}`);
+        this.logger.error(
+          `[Compaction Guard Error] Gagal memadatkan memori: ${err.message}`,
+        );
       }
     });
   }
 }
 
-function cleanCitationsText(text: string, validScrapedUrls: Array<{ url: string; title: string }>): string {
+function cleanCitationsText(
+  text: string,
+  validScrapedUrls: Array<{ url: string; title: string }>,
+): string {
   if (!text) return '';
 
   const validUrlMap = new Map<string, string>();
@@ -6573,7 +7944,10 @@ function cleanCitationsText(text: string, validScrapedUrls: Array<{ url: string;
   return text.replace(/\[(https?:\/\/[^\]\s]+)\]/g, (match, url) => {
     const cleanUrl = url.trim();
 
-    if (/download\.php/i.test(cleanUrl) || /web-api\.bps\.go\.id/i.test(cleanUrl)) {
+    if (
+      /download\.php/i.test(cleanUrl) ||
+      /web-api\.bps\.go\.id/i.test(cleanUrl)
+    ) {
       return `[https://mimikakab.bps.go.id]`;
     }
 
@@ -6581,7 +7955,11 @@ function cleanCitationsText(text: string, validScrapedUrls: Array<{ url: string;
       return match;
     }
 
-    if (/\.(go\.id|antaranews\.com|bps\.go\.id|kompas\.com|tempo\.co|cnbcindonesia\.com|bisnis\.com|kontan\.co\.id|katadata\.co\.id)/i.test(cleanUrl)) {
+    if (
+      /\.(go\.id|antaranews\.com|bps\.go\.id|kompas\.com|tempo\.co|cnbcindonesia\.com|bisnis\.com|kontan\.co\.id|katadata\.co\.id)/i.test(
+        cleanUrl,
+      )
+    ) {
       return match;
     }
 
@@ -6671,6 +8049,7 @@ export interface CreateArticleSessionInput {
   tone?: string;
   initialPrompt?: string;
   parentSessionId?: string;
+  userId?: string;
 }
 
 @Injectable()
@@ -6679,10 +8058,14 @@ export class ChatRepository {
 
   constructor(private readonly prisma: PrismaService) { }
 
-  async createSession(documentIds: string[], title?: string): Promise<ChatSession> {
+  async createSession(documentIds: string[], title?: string, userId?: string): Promise<ChatSession> {
     const primaryDocId = documentIds.length > 0 ? documentIds[0] : null;
+    if (!userId) {
+      throw new Error('userId wajib disertakan untuk membuat sesi obrolan.');
+    }
     return this.prisma.chatSession.create({
       data: {
+        userId,
         documentId: primaryDocId,
         sessionType: SessionType.QA_CHAT,
         title: title || 'Sesi Analisis Kasus',
@@ -6701,11 +8084,17 @@ export class ChatRepository {
       articleTitle,
       targetLength = ArticleLength.MEDIUM,
       tone = 'solutif',
-      parentSessionId
+      parentSessionId,
+      userId
     } = input;
+
+    if (!userId) {
+      throw new Error('userId wajib disertakan untuk membuat sesi artikel.');
+    }
 
     return this.prisma.chatSession.create({
       data: {
+        userId,
         sessionType: SessionType.ARTICLE_GENERATOR,
         title: articleTitle || 'Draf Artikel Publikasi',
         articleTitle,
@@ -6735,9 +8124,13 @@ export class ChatRepository {
     });
   }
 
-  async findSessionById(sessionId: string): Promise<any | null> {
-    return this.prisma.chatSession.findUnique({
-      where: { id: sessionId },
+  async findSessionById(sessionId: string, userId?: string): Promise<any | null> {
+    const whereClause: any = { id: sessionId };
+    if (userId) {
+      whereClause.userId = userId;
+    }
+    return this.prisma.chatSession.findFirst({
+      where: whereClause,
       include: {
         document: true,
         sources: {
@@ -6769,11 +8162,15 @@ export class ChatRepository {
     });
   }
 
-  async findArticleSessions(): Promise<any[]> {
+  async findArticleSessions(userId?: string): Promise<any[]> {
+    const whereClause: any = {
+      sessionType: SessionType.ARTICLE_GENERATOR,
+    };
+    if (userId) {
+      whereClause.userId = userId;
+    }
     return this.prisma.chatSession.findMany({
-      where: {
-        sessionType: SessionType.ARTICLE_GENERATOR,
-      },
+      where: whereClause,
       orderBy: { updatedAt: 'desc' },
       include: {
         sources: {
@@ -6791,11 +8188,15 @@ export class ChatRepository {
     });
   }
 
-  async findQaSessions(): Promise<any[]> {
+  async findQaSessions(userId?: string): Promise<any[]> {
+    const whereClause: any = {
+      sessionType: SessionType.QA_CHAT,
+    };
+    if (userId) {
+      whereClause.userId = userId;
+    }
     return this.prisma.chatSession.findMany({
-      where: {
-        sessionType: SessionType.QA_CHAT,
-      },
+      where: whereClause,
       orderBy: { updatedAt: 'desc' },
       include: {
         document: true,
@@ -7053,7 +8454,7 @@ import {
   Logger,
   NotFoundException,
   BadRequestException,
-  PayloadTooLargeException
+  PayloadTooLargeException,
 } from '@nestjs/common';
 import { DocumentRepository } from '../../document-ingestion/repositories/document.repository';
 import { VendorLlmAdapter } from '../../ai-agent/providers/vendor-llm.adapter';
@@ -7083,6 +8484,7 @@ export interface GenerateArticleOptions {
     kesiaxialRingkas?: string;
   };
   parentSessionId?: string;
+  userId?: string;
 }
 
 @Injectable()
@@ -7110,18 +8512,24 @@ export class ArticleGeneratorService {
       tone = 'solutif',
       userInstruction,
       synthesizedManifest,
-      parentSessionId
+      parentSessionId,
     } = options;
 
     const validDocIds = [...(documentIds || [])];
-    const normalizedTitle = (articleTitle || '').trim() || 'Draf Artikel Publikasi';
+    const normalizedTitle =
+      (articleTitle || '').trim() || 'Draf Artikel Publikasi';
 
     let session = options.sessionId
-      ? await this.chatRepository.findSessionById(options.sessionId)
+      ? await this.chatRepository.findSessionById(options.sessionId, options.userId)
       : null;
+
+    if (options.sessionId && !session) {
+      throw new NotFoundException(`Sesi artikel dengan ID '${options.sessionId}' tidak ditemukan.`);
+    }
 
     if (!session) {
       session = await this.chatRepository.createArticleSession({
+        userId: options.userId,
         documentIds: validDocIds,
         articleTitle: normalizedTitle,
         targetLength: targetLength as ArticleLength,
@@ -7136,7 +8544,9 @@ export class ArticleGeneratorService {
     const scrapedUrls: Array<{ url: string; title: string; text: string }> = [];
 
     if (foundUrls.length > 0) {
-      this.logger.log(`[generateArticle] Mendeteksi ${foundUrls.length} tautan eksternal untuk diekstraksi.`);
+      this.logger.log(
+        `[generateArticle] Mendeteksi ${foundUrls.length} tautan eksternal untuk diekstraksi.`,
+      );
       for (const url of foundUrls) {
         try {
           const scraped = await this.urlScraperService.scrapeAndExtract(url);
@@ -7146,7 +8556,9 @@ export class ArticleGeneratorService {
             text: scraped.cleanText,
           });
         } catch (scrapeErr: any) {
-          this.logger.error(`[generateArticle URL Scrape Failed] Gagal memproses URL ${url}: ${scrapeErr.message}`);
+          this.logger.error(
+            `[generateArticle URL Scrape Failed] Gagal memproses URL ${url}: ${scrapeErr.message}`,
+          );
         }
       }
     }
@@ -7159,8 +8571,13 @@ export class ArticleGeneratorService {
 
     if (cleanedSearchQuery.length > 5) {
       try {
-        this.logger.log(`[generateArticle] Melakukan pencarian proaktif untuk subjek: "${cleanedSearchQuery}"...`);
-        const searchResults = await this.webSearchService.searchReputableWeb(cleanedSearchQuery, 5);
+        this.logger.log(
+          `[generateArticle] Melakukan pencarian proaktif untuk subjek: "${cleanedSearchQuery}"...`,
+        );
+        const searchResults = await this.webSearchService.searchReputableWeb(
+          cleanedSearchQuery,
+          5,
+        );
         if (searchResults && searchResults.length > 0) {
           searchResults.forEach((res, i) => {
             scrapedUrls.push({
@@ -7171,10 +8588,14 @@ export class ArticleGeneratorService {
                 : `=== ARTIKEL LUAR ${i + 1}: ${res.title} ===\nTautan: ${res.link}\nRingkasan Fakta: ${res.snippet}`,
             });
           });
-          this.logger.log(`[generateArticle] Berhasil mengintegrasikan ${searchResults.length} referensi eksternal transien.`);
+          this.logger.log(
+            `[generateArticle] Berhasil mengintegrasikan ${searchResults.length} referensi eksternal transien.`,
+          );
         }
       } catch (searchErr: any) {
-        this.logger.error(`[generateArticle Proactive Search Failed] Gagal melakukan pencarian eksternal: ${searchErr.message}`);
+        this.logger.error(
+          `[generateArticle Proactive Search Failed] Gagal melakukan pencarian eksternal: ${searchErr.message}`,
+        );
       }
     }
 
@@ -7188,7 +8609,10 @@ export class ArticleGeneratorService {
     if (synthesizedManifest) {
       const argumenList = Array.isArray(synthesizedManifest.argumenKunci)
         ? synthesizedManifest.argumenKunci
-          .map((arg, idx) => `- Poin ${idx + 1}: "${arg.fakta}" (WAJIB lampirkan sitasi asli: ${arg.sitasiAsli})`)
+          .map(
+            (arg, idx) =>
+              `- Poin ${idx + 1}: "${arg.fakta}" (WAJIB lampirkan sitasi asli: ${arg.sitasiAsli})`,
+          )
           .join('\n')
         : 'Tidak ada argumen spesifik.';
 
@@ -7229,25 +8653,40 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
       sessionId: session.id,
       role: MessageRole.USER,
       content: userPromptRecordedContent,
-      tokenCount: this.tokenEstimator.estimateTokenCount(userPromptRecordedContent),
+      tokenCount: this.tokenEstimator.estimateTokenCount(
+        userPromptRecordedContent,
+      ),
       metadata: scrapedUrls.length > 0 ? { scrapedUrls } : undefined,
     });
 
     let fullArticleText = '';
+    const temporal = this.contextAssembly.generateTemporalGroundTruth();
+
     try {
 
-      const llmResult = await this.llmAdapter.generateStructuredAnalysis<any>(
-        promptPayload.messages,
-        ARTICLE_OUTPUT_SCHEMA,
-        0.7,
-      );
+      const llmResult =
+        await this.llmAdapter.generateStructuredAnalysis<any>(
+          promptPayload.messages,
+          ARTICLE_OUTPUT_SCHEMA,
+          0.7,
+        );
 
-      fullArticleText = llmResult.fullText || formatArticleFromLlm(llmResult, normalizedTitle);
+      fullArticleText =
+        llmResult.fullText ||
+        formatArticleFromLlm(llmResult, normalizedTitle, temporal);
       fullArticleText = cleanArticleTitlePrefix(fullArticleText);
       fullArticleText = verifyAndCleanCitations(fullArticleText, scrapedUrls);
     } catch (err: any) {
-      this.logger.warn(`[Article LLM Fallback] Gagal memanggil API: ${err.message}. Menggunakan sintesis fallback.`);
-      fullArticleText = createFallbackArticleText(normalizedTitle, sourceDocs, tone, targetLength as string);
+      this.logger.warn(
+        `[Article LLM Fallback] Gagal memanggil API: ${err.message}. Menggunakan sintesis fallback terstruktur.`,
+      );
+      fullArticleText = createFallbackArticleText(
+        normalizedTitle,
+        sourceDocs,
+        tone,
+        targetLength as string,
+        temporal,
+      );
       fullArticleText = cleanArticleTitlePrefix(fullArticleText);
       fullArticleText = verifyAndCleanCitations(fullArticleText, scrapedUrls);
     }
@@ -7282,11 +8721,15 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
   ): Promise<any> {
     const session = await this.chatRepository.findSessionById(sessionId);
     if (!session) {
-      throw new NotFoundException(`Sesi artikel dengan ID '${sessionId}' tidak ditemukan.`);
+      throw new NotFoundException(
+        `Sesi artikel dengan ID '${sessionId}' tidak ditemukan.`,
+      );
     }
 
     if (session.sessionType !== SessionType.ARTICLE_GENERATOR) {
-      throw new BadRequestException('Sesi ini bukan merupakan sesi penulisan rilis artikel.');
+      throw new BadRequestException(
+        'Sesi ini bukan merupakan sesi penulisan rilis artikel.',
+      );
     }
 
     const trimmedTitle = articleTitle.trim();
@@ -7317,17 +8760,21 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
     });
 
     const structuredPayload = {
-      answer: 'Saya telah memperbarui draf naskah artikel sesuai dengan suntingan manual Anda.',
+      answer:
+        'Saya telah memperbarui draf naskah artikel sesuai dengan suntingan manual Anda.',
       suggestions: [
         'Bagian mana lagi yang ingin Anda kembangkan?',
         'Tambahkan rincian data baru ke dalam artikel.',
-        'Sesuaikan kembali gaya bahasa artikel.'
+        'Sesuaikan kembali gaya bahasa artikel.',
       ],
       updatedArticle: {
         title: trimmedTitle,
-        draftMarkdown: fullArticleText || session.currentDraft || 'Naskah editorial diperbarui.',
+        draftMarkdown:
+          fullArticleText ||
+          session.currentDraft ||
+          'Naskah editorial diperbarui.',
         editorDocumentState: editorState,
-      }
+      },
     };
     const stringifiedPayload = JSON.stringify(structuredPayload);
 
@@ -7339,7 +8786,9 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
     });
 
     this.logger.log(
-      `[Draft Manual Sync] Berhasil melakukan pembaruan naskah manual untuk Sesi ID: ${sessionId} (Visual State: ${Boolean(editorState)})`,
+      `[Draft Manual Sync] Berhasil melakukan pembaruan naskah manual untuk Sesi ID: ${sessionId} (Visual State: ${Boolean(
+        editorState,
+      )})`,
     );
 
     const updatedSession = await this.chatRepository.findSessionById(sessionId);
@@ -7358,10 +8807,15 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
     };
   }
 
-  async interactWithArticleSession(sessionId: string, userInstruction: string): Promise<any> {
+  async interactWithArticleSession(
+    sessionId: string,
+    userInstruction: string,
+  ): Promise<any> {
     const session = await this.chatRepository.findSessionById(sessionId);
     if (!session) {
-      throw new NotFoundException(`Sesi artikel dengan ID '${sessionId}' tidak ditemukan.`);
+      throw new NotFoundException(
+        `Sesi artikel dengan ID '${sessionId}' tidak ditemukan.`,
+      );
     }
 
     await this.chatRepository.addMessage({
@@ -7372,12 +8826,30 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
     });
 
     const conversationMessages = session.messages.map((m: any) => ({
-      role: m.role === MessageRole.USER ? ('user' as const) : ('assistant' as const),
+      role:
+        m.role === MessageRole.USER
+          ? ('user' as const)
+          : ('assistant' as const),
       content: m.content,
     }));
 
-    const systemPrompt = `Anda adalah Asisten Penulis & Editor Artikel BRIDA Kabupaten Mimika.
-Perbarui / revisi draf naskah artikel berdasarkan instruksi revisi terbaru dari pengguna. Pertahankan gaya bahasa ${session.tone || 'SOLUTIF'}.
+    const temporal = this.contextAssembly.generateTemporalGroundTruth();
+
+    const systemPrompt = `Anda adalah Asisten Penulis & Analis Kebijakan Utama BRIDA Kabupaten Mimika.
+Perbarui / revisi draf naskah artikel berdasarkan instruksi revisi terbaru dari pengguna. Pertahankan gaya bahasa ${session.tone || 'SOLUTIF'
+      }.
+
+[INFORMASI WAKTU SISTEM SAAT INI (TEMPORAL GROUND TRUTH)]
+- Tanggal Eksekusi Riil : ${temporal.currentFullDate}
+- Bulan Berjalan        : ${temporal.currentMonth} ${temporal.currentYear}
+- Posisi Semester Aktif : ${temporal.currentSemester}
+- Posisi Triwulan Aktif : ${temporal.currentQuarter}
+
+ATURAN REVISI BERORIENTASI WAKTU (ANTI-ANAKRONISTIS):
+1. Seluruh perbaikan atau revisi pada bagian evaluasi/diagnosis data lampau tetap menggunakan pendekatan retrospektif.
+2. JIKA pengguna meminta penambahan saran, solusi, program intervensi, atau tindak lanjut kebijakan, Anda WAJIB mengarahkannya secara prospektif untuk periode MASA DEPAN (${temporal.currentSemester
+      } atau Tahun Anggaran ${temporal.currentYear + 1
+      }). DILARANG merekomendasikan aksi mundur ke masa yang sudah lewat.
 
 ATURAN FORMATTING MUTLAK (COMMONMARK COMPLIANCE - ZERO RANDOM HTML):
 1. DILARANG KERAS menghasilkan atau menyisipkan tag HTML kustom visual (seperti <p style="...">, <font>, dll.) ke dalam teks naskah revisi Anda.
@@ -7388,7 +8860,9 @@ ATURAN FORMATTING MUTLAK (COMMONMARK COMPLIANCE - ZERO RANDOM HTML):
 ${EDITORIAL_STYLE_GUIDE}
 `;
 
-    const rawConversationTexts = conversationMessages.map((m: any) => m.content).concat([systemPrompt, userInstruction]);
+    const rawConversationTexts = conversationMessages
+      .map((m: any) => m.content)
+      .concat([systemPrompt, userInstruction]);
     this.tokenEstimator.enforceBudgetCircuitBreaker({
       texts: rawConversationTexts,
       imagesCount: 0,
@@ -7397,20 +8871,34 @@ ${EDITORIAL_STYLE_GUIDE}
 
     let revisedArticleText = '';
     try {
-      const llmResult = await this.llmAdapter.generateStructuredAnalysis<any>(
-        [
-          { role: 'system', content: systemPrompt },
-          ...conversationMessages,
-          { role: 'user', content: `Instruksi Revisi Terbaru: ${userInstruction}` },
-        ],
-        ARTICLE_OUTPUT_SCHEMA,
-        0.7,
-      );
+      const llmResult =
+        await this.llmAdapter.generateStructuredAnalysis<any>(
+          [
+            { role: 'system', content: systemPrompt },
+            ...conversationMessages,
+            {
+              role: 'user',
+              content: `Instruksi Revisi Terbaru: ${userInstruction}`,
+            },
+          ],
+          ARTICLE_OUTPUT_SCHEMA,
+          0.7,
+        );
 
-      revisedArticleText = llmResult.fullText || formatArticleFromLlm(llmResult, session.articleTitle || session.title);
+      revisedArticleText =
+        llmResult.fullText ||
+        formatArticleFromLlm(
+          llmResult,
+          session.articleTitle || session.title,
+          temporal,
+        );
       revisedArticleText = cleanArticleTitlePrefix(revisedArticleText);
     } catch (err: any) {
-      revisedArticleText = `[Hasil Revisi Draf Artikel - ${new Date().toLocaleTimeString('id-ID')}]\n\n${userInstruction}\n\n` + (conversationMessages[conversationMessages.length - 1]?.content || '');
+      revisedArticleText =
+        `[Hasil Revisi Draf Artikel - ${new Date().toLocaleTimeString(
+          'id-ID',
+        )}]\n\n${userInstruction}\n\n` +
+        (conversationMessages[conversationMessages.length - 1]?.content || '');
     }
 
     await this.chatRepository.addMessage({
@@ -7435,8 +8923,8 @@ ${EDITORIAL_STYLE_GUIDE}
     };
   }
 
-  async getAllArticleSessions(): Promise<any[]> {
-    const sessions = await this.chatRepository.findArticleSessions();
+  async getAllArticleSessions(userId?: string): Promise<any[]> {
+    const sessions = await this.chatRepository.findArticleSessions(userId);
     return sessions.map((s) => ({
       id: s.id,
       title: s.title,
@@ -7448,17 +8936,24 @@ ${EDITORIAL_STYLE_GUIDE}
       editorDocumentState: s.editorDocumentState || null,
       sourcesCount: s.sources?.length || 0,
       sources: sanitizeSources(s.sources),
-      lastMessage: s.messages && s.messages.length > 0 ? s.messages[s.messages.length - 1].content : null,
+      lastMessage:
+        s.messages && s.messages.length > 0
+          ? s.messages[s.messages.length - 1].content
+          : null,
     }));
   }
 
-  async getArticleSessionById(sessionId: string): Promise<any> {
-    const session = await this.chatRepository.findSessionById(sessionId);
+  async getArticleSessionById(sessionId: string, userId?: string): Promise<any> {
+    const session = await this.chatRepository.findSessionById(sessionId, userId);
     if (!session) {
-      throw new NotFoundException(`Sesi artikel dengan ID '${sessionId}' tidak ditemukan.`);
+      throw new NotFoundException(
+        `Sesi artikel dengan ID '${sessionId}' tidak ditemukan.`,
+      );
     }
 
-    const lastAssistantMsg = [...session.messages].reverse().find((m: any) => m.role === MessageRole.ASSISTANT);
+    const lastAssistantMsg = [...session.messages]
+      .reverse()
+      .find((m: any) => m.role === MessageRole.ASSISTANT);
 
     let fullArticleText = '';
     let editorDocumentState = session.editorDocumentState || null;
@@ -7468,16 +8963,25 @@ ${EDITORIAL_STYLE_GUIDE}
         const parsed = JSON.parse(lastAssistantMsg.content);
         if (parsed && typeof parsed === 'object') {
           if (parsed.updatedArticle) {
-            if (parsed.updatedArticle.editorDocumentState && !editorDocumentState) {
+            if (
+              parsed.updatedArticle.editorDocumentState &&
+              !editorDocumentState
+            ) {
               editorDocumentState = parsed.updatedArticle.editorDocumentState;
             }
             if (parsed.updatedArticle.draftMarkdown) {
               fullArticleText = parsed.updatedArticle.draftMarkdown;
             } else {
-              fullArticleText = parsed.answer || parsed.fullArticleText || lastAssistantMsg.content;
+              fullArticleText =
+                parsed.answer ||
+                parsed.fullArticleText ||
+                lastAssistantMsg.content;
             }
           } else {
-            fullArticleText = parsed.answer || parsed.fullArticleText || lastAssistantMsg.content;
+            fullArticleText =
+              parsed.answer ||
+              parsed.fullArticleText ||
+              lastAssistantMsg.content;
           }
         } else {
           fullArticleText = lastAssistantMsg.content;
@@ -7506,7 +9010,9 @@ ${EDITORIAL_STYLE_GUIDE}
   async deleteArticleSession(sessionId: string): Promise<void> {
     const session = await this.chatRepository.findSessionById(sessionId);
     if (!session) {
-      throw new NotFoundException(`Sesi artikel dengan ID '${sessionId}' tidak ditemukan.`);
+      throw new NotFoundException(
+        `Sesi artikel dengan ID '${sessionId}' tidak ditemukan.`,
+      );
     }
     await this.chatRepository.deleteSession(sessionId);
   }
@@ -7519,7 +9025,8 @@ const ARTICLE_OUTPUT_SCHEMA = {
     ringkasan: { type: 'string' },
     fullText: {
       type: 'string',
-      description: 'Isi lengkap naskah artikel dalam format CommonMark Markdown bersih (tanpa tag HTML kustom visual).'
+      description:
+        'Isi lengkap naskah artikel dalam format CommonMark Markdown bersih (tanpa tag HTML kustom visual).',
     },
   },
   required: ['fullText'],
@@ -7535,57 +9042,88 @@ function sanitizeSources(sources: any[]): any[] {
   }));
 }
 
-function formatArticleFromLlm(llmResult: any, defaultTitle: string): string {
+function formatArticleFromLlm(
+  llmResult: any,
+  defaultTitle: string,
+  temporal?: any,
+): string {
   if (llmResult.fullText) return llmResult.fullText;
+
+  const targetPeriod = temporal
+    ? `${temporal.currentSemester}`
+    : 'Tahun Anggaran Berjalan';
 
   return `# ${llmResult.judulUsulan || defaultTitle}
 
 **Oleh: Tim Analis & Penulis Kebijakan BRIDA Kabupaten Mimika**
 
 ## Ringkasan Eksekutif
-${llmResult.ringkasan || 'Artikel publikasi dirakit berdasarkan analisis data acuan terkonfirmasi.'}
+${llmResult.ringkasan ||
+    'Artikel publikasi dirakit berdasarkan sintesis data acuan terkonfirmasi dan evaluasi capaian pembangunan daerah.'
+    }
 
-## Pembahasan Utama
-Berdasarkan data dokumen acuan strategis daerah, diperlukan koordinasi aktif antara pemerintah daerah dan pemangku kepentingan untuk memastikan pencapaian indikator pembangunan secara inklusif.
+## Diagnosis Kinerja & Capaian Faktual
+Berdasarkan data dokumen acuan strategis daerah, evaluasi capaian menunjukkan perlunya akselerasi integrasi lintas sektor guna memastikan pemenuhan target indikator pembangunan secara inklusif.
 
-## Kesimpulan & Solusi Rekomendasi
-Pemerintah Kabupaten Mimika berkomitmen untuk mendorong efisiensi pelaksanaan program serta keterbukaan informasi bagi seluruh lapisan masyarakat.
+## Rekomendasi Aksi Kebijakan & Solusi Taktis (${targetPeriod})
+1. Penguatan mitigasi risiko operasional dan efisiensi belanja program prioritas.
+2. Penyelarasan target kinerja fisik dengan mekanisme monitoring berkala.
+3. Akselerasi koordinasi lintas Organisasi Perangkat Daerah (OPD) untuk percepatan target pembangunan semester mendatang.
 `.trim();
 }
 
-function createFallbackArticleText(title: string, docs: any[], tone: string, length: string): string {
+function createFallbackArticleText(
+  title: string,
+  docs: any[],
+  tone: string,
+  length: string,
+  temporal?: any,
+): string {
   const docNames = docs.map((d) => d.title).join(', ');
+  const forwardPeriod = temporal
+    ? `${temporal.currentSemester} / TA ${temporal.currentYear + 1}`
+    : 'Periode Semester Mendatang';
+
   return `# ${title}
 
 **Oleh: Tim Analis & Penulis Kebijakan BRIDA Kabupaten Mimika**
 *Gaya Bahasa: ${tone.toUpperCase()} | Target Panjang: ${length}*
 
-## Pendahuluan
-Dokumen acuan (${docNames}) menjadi landasan utama dalam penyusunan analisis artikel publikasi ini. Berdasarkan fakta lapangan, Kabupaten Mimika terus mendorong akselerasi pembangunan berbasis inovasi daerah.
+## Pendahuluan & Konteks Kebijakan
+Dokumen acuan (${docNames}) menjadi landasan utama dalam penyusunan analisis kebijakan ini. Berdasarkan fakta lapangan dan dinamika pembangunan, Pemerintah Kabupaten Mimika terus mendorong akselerasi program berbasis bukti faktual (*evidence-based policy*).
 
-## Pembahasan Utama & Data Faktual
-Dalam konteks tata kelola pemerintahan yang responsif, sintesis data menunjukkan pentingnya penyelarasan target operasional dengan indikator capaian fisik di lapangan. Faktor transparansi dan akuntabilitas menjadi kunci utama perbaikan kualitas layanan publik.
+## Pembahasan Kausalitas & Evaluasi Capaian
+Dalam konteks tata kelola pemerintahan daerah, sintesis data menunjukkan bahwa deviasi antara target perencanaan dan realisasi fisik memerlukan evaluasi komprehensif. Faktor transparansi, akuntabilitas anggaran, dan kesiapan logistik lapangan menjadi kunci utama dalam menjaga stabilitas indikator makro daerah.
 
-## Rekomendasi & Langkah Solutif
-1. Peningkatan koordinasi lintas sektor dalam mengawal program prioritas daerah.
-2. Penguatan integrasi sistem informasi dan monitoring berkala oleh BRIDA Kabupaten Mimika.
-3. Pelibatan aktif masyarakat dan akademisi dalam mengawal keberlanjutan program pembangunan.
+## Rekomendasi Aksi Taktis & Intervensi Kebijakan (${forwardPeriod})
+1. **Langkah Cepat (Quick Wins)**: Percepatan sinkronisasi data realisasi fisik dan penagihan target pendapatan daerah pada triwulan berjalan.
+2. **Penguatan Tata Kelola**: Peningkatan pengawasan berkala oleh tim koordinasi BRIDA dan dinas teknis terkait untuk mengeliminasi sumbatan operasional (*bottlenecks*).
+3. **Mitigasi Berkelanjutan**: Perumusan kerangka alokasi program prioritas yang adaptif terhadap fluktuasi ekonomi dan tantangan geografis wilayah Mimika.
 
 ---
-*Dikeluarkan oleh BRIDA SMART Analysis &bull; Pemerintah Kabupaten Mimika*
+*Dikeluarkan oleh BRIDA SMART Analysis • Pemerintah Kabupaten Mimika*
 `.trim();
 }
 
 function cleanArticleTitlePrefix(text: string): string {
   if (!text) return '';
 
-  let cleaned = text.replace(/^(#\s*)(?:Artikel\s+Strategis|Laporan\s+Strategis|Draft|Draf|Analisis\s+Strategis|Rilis\s+Pers):\s*/i, '$1');
+  let cleaned = text.replace(
+    /^(#\s*)(?:Artikel\s+Strategis|Laporan\s+Strategis|Draft|Draf|Analisis\s+Strategis|Rilis\s+Pers):\s*/i,
+    '$1',
+  );
 
-  cleaned = cleaned.replace(/^(?:Artikel\s+Strategis|Laporan\s+Strategis|Draft|Draf|Analisis\s+Strategis|Rilis\s+Pers):\s*/i, '');
+  cleaned = cleaned.replace(
+    /^(?:Artikel\s+Strategis|Laporan\s+Strategis|Draft|Draf|Analisis\s+Strategis|Rilis\s+Pers):\s*/i,
+    '',
+  );
   return cleaned;
 }
 
-function verifyAndCleanCitations(articleText: string, validScrapedUrls: Array<{ url: string; title: string }>): string {
+function verifyAndCleanCitations(
+  articleText: string,
+  validScrapedUrls: Array<{ url: string; title: string }>,
+): string {
   if (!articleText) return '';
 
   const validUrlMap = new Map<string, string>();
@@ -7596,7 +9134,10 @@ function verifyAndCleanCitations(articleText: string, validScrapedUrls: Array<{ 
   return articleText.replace(/\[(https?:\/\/[^\]\s]+)\]/g, (match, url) => {
     const cleanUrl = url.trim();
 
-    if (/download\.php/i.test(cleanUrl) || /web-api\.bps\.go\.id/i.test(cleanUrl)) {
+    if (
+      /download\.php/i.test(cleanUrl) ||
+      /web-api\.bps\.go\.id/i.test(cleanUrl)
+    ) {
       return `[https://mimikakab.bps.go.id]`;
     }
 
@@ -7604,7 +9145,11 @@ function verifyAndCleanCitations(articleText: string, validScrapedUrls: Array<{ 
       return match;
     }
 
-    if (/\.(go\.id|antaranews\.com|bps\.go\.id|kompas\.com|tempo\.co|cnbcindonesia\.com|bisnis\.com|kontan\.co\.id|katadata\.co\.id)/i.test(cleanUrl)) {
+    if (
+      /\.(go\.id|antaranews\.com|bps\.go\.id|kompas\.com|tempo\.co|cnbcindonesia\.com|bisnis\.com|kontan\.co\.id|katadata\.co\.id)/i.test(
+        cleanUrl,
+      )
+    ) {
       return match;
     }
 
@@ -7632,14 +9177,15 @@ export class ChatMemoryService {
     private readonly tokenEstimator: TokenEstimatorUtil,
   ) { }
 
-  async createSession(documentIds: string[], title?: string, sessionType: SessionType = SessionType.QA_CHAT) {
+  async createSession(documentIds: string[], title?: string, sessionType: SessionType = SessionType.QA_CHAT, userId?: string) {
     if (sessionType === SessionType.ARTICLE_GENERATOR) {
       return this.chatRepository.createArticleSession({
         documentIds,
         articleTitle: title || 'Draf Artikel Baru',
+        userId,
       });
     }
-    return this.chatRepository.createSession(documentIds, title);
+    return this.chatRepository.createSession(documentIds, title, userId);
   }
 
   async recordUserMessage(sessionId: string, content: string, metadata?: any) {
@@ -7761,8 +9307,8 @@ export class ChatMemoryService {
     }
   }
 
-  async getQaSessions(): Promise<any[]> {
-    const sessions = await this.chatRepository.findQaSessions();
+  async getQaSessions(userId?: string): Promise<any[]> {
+    const sessions = await this.chatRepository.findQaSessions(userId);
     return sessions.map((s: any) => ({
       id: s.id,
       title: s.title,
@@ -7775,8 +9321,8 @@ export class ChatMemoryService {
     }));
   }
 
-  async getQaSessionDetails(sessionId: string): Promise<any> {
-    const session = await this.chatRepository.findSessionById(sessionId);
+  async getQaSessionDetails(sessionId: string, userId?: string): Promise<any> {
+    const session = await this.chatRepository.findSessionById(sessionId, userId);
     if (!session) {
       throw new NotFoundException(`Sesi obrolan dengan ID '${sessionId}' tidak ditemukan.`);
     }
@@ -7794,8 +9340,8 @@ export class ChatMemoryService {
     };
   }
 
-  async deleteSession(sessionId: string): Promise<void> {
-    const session = await this.chatRepository.findSessionById(sessionId);
+  async deleteSession(sessionId: string, userId?: string): Promise<void> {
+    const session = await this.chatRepository.findSessionById(sessionId, userId);
     if (!session) {
       throw new NotFoundException(`Sesi obrolan dengan ID '${sessionId}' tidak ditemukan.`);
     }
@@ -7816,6 +9362,7 @@ export interface TransitionQaRequestDto {
     targetLength?: ArticleLength;
     tone?: string;
     userInstruction?: string;
+    userId?: string;
 }
 
 @Injectable()
@@ -7829,13 +9376,13 @@ export class DiscussionBridgeService {
     ) { }
 
     async transitionQaToArticle(dto: TransitionQaRequestDto): Promise<any> {
-        const { sessionId, articleTitle, targetLength = ArticleLength.MEDIUM, tone = 'solutif', userInstruction } = dto;
+        const { sessionId, articleTitle, targetLength = ArticleLength.MEDIUM, tone = 'solutif', userInstruction, userId } = dto;
 
         this.logger.log(
             `[DiscussionBridgeService] Memulai inisiasi transisi sesi diskusi '${sessionId}' ke naskah artikel...`,
         );
 
-        const sourceSession = await this.chatRepository.findSessionById(sessionId);
+        const sourceSession = await this.chatRepository.findSessionById(sessionId, userId);
         if (!sourceSession) {
             throw new NotFoundException(`Sesi diskusi asal dengan ID '${sessionId}' tidak ditemukan.`);
         }
@@ -7880,6 +9427,7 @@ export class DiscussionBridgeService {
             userInstruction,
             synthesizedManifest,
             parentSessionId: sessionId,
+            userId,
         });
 
         this.logger.log(
@@ -8697,29 +10245,33 @@ export const SSM_OUTPUT_SCHEMA = {
     properties: {
         tesisUtama: {
             type: 'string',
-            description: 'Gagasan utama, tesis, atau konsensus akhir yang disepakati dari seluruh alur obrolan.',
+            description:
+                'Gagasan utama, tesis, atau konsensus akhir kebijakan yang disepakati dari seluruh alur obrolan.',
         },
         argumenKunci: {
             type: 'array',
-            description: 'Daftar tepat 3-4 argumen, bukti faktual, atau data kunci yang terverifikasi selama obrolan.',
+            description:
+                'Daftar tepat 3-4 poin gabungan antara diagnosis bukti faktual lampau dan rencana aksi strategis masa depan.',
             items: {
                 type: 'object',
                 required: ['fakta', 'sitasiAsli'],
                 properties: {
                     fakta: {
                         type: 'string',
-                        description: 'Penjelasan klaim data atau argumen faktual penting yang dibahas.',
+                        description:
+                            'Uraian klaim data faktual atau rumusan rekomendasi aksi strategis ke depan yang dibahas.',
                     },
                     sitasiAsli: {
                         type: 'string',
-                        description: 'Token sitasi orisinal dalam format [doc-XYZ:chunkIndex] yang tercantum di dalam teks obrolan. WAJIB kosongkan jika tidak ada.',
+                        description:
+                            'Token sitasi orisinal dalam format [doc-XYZ:chunkIndex] atau [URL] yang tercantum di dalam teks obrolan. WAJIB dikosongkan jika poin berupa usulan rekomendasi masa depan.',
                     },
                 },
             },
         },
         kesimpulanRingkas: {
             type: 'string',
-            description: 'Ringkasan rangkuman hasil akhir diskusi dalam 1-2 kalimat.',
+            description: 'Ringkasan rangkuman hasil akhir diskusi dan arah kebijakan ke depan dalam 1-2 kalimat.',
         },
     },
 };
@@ -8737,7 +10289,10 @@ export class TranscriptDistiller {
 
         const dialogueScript = messages
             .map((msg) => {
-                const actor = msg.role === 'USER' ? 'Staf BRIDA (User)' : 'Asisten AI BRIDA (Assistant)';
+                const actor =
+                    msg.role === 'USER'
+                        ? 'Staf BRIDA (User)'
+                        : 'Asisten AI BRIDA (Assistant)';
 
                 let cleanContent = msg.content;
                 try {
@@ -8754,28 +10309,34 @@ export class TranscriptDistiller {
             .join('\n\n--------------------\n\n');
 
         const systemPrompt = `Anda adalah Asisten Analis Kognitif Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika.
-Tugas Anda: Ekstrak dan padatkan transkrip percakapan tanya-jawab antara Staf BRIDA dan AI menjadi dokumen antara berupa JSON terstruktur (Structured Synthesis Manifest).
+Tugas Anda: Ekstrak dan padatkan transkrip percakapan tanya-jawab antara Staf BRIDA dan AI menjadi dokumen antara berupa JSON terstruktur (Structured Synthesis Manifest / SSM).
 
-PANDUAN EKSTRAKSI:
-- Tentukan Tesis Utama ("tesisUtama") yang mencerminkan inti konsensus diskusi.
-- Ekstrak tepat 3-4 bukti faktual atau argumen kritis ("argumenKunci").
-- Untuk setiap argumen, Anda WAJIB menyalin ulang "sitasiAsli" dalam format token asli [doc-XYZ:chunkIndex] yang tertera di dalam skrip percakapan. DILARANG KERAS mengarang, mengubah, atau memotong token sitasi tersebut.
-- Saring hanya fakta-fakta yang disepakati bersama. Abaikan pertanyaan tentatif yang tidak terjawab.`;
+PANDUAN EKSTRAKSI DUAL-AXIS (HISTORIS VS PROSPEKTIF):
+1. Tentukan Tesis Utama ("tesisUtama") yang merangkum konsensus arah kebijakan dari diskusi.
+2. Ekstrak tepat 3-4 poin kunci ("argumenKunci") dengan pembagian tegas:
+   - KELOMPOK EVALUASI FAKTUAL (Retrospektif): Catat bukti data, angka realisasi, atau hambatan yang terjadi di periode evaluasi lampau. Wajib sertakan "sitasiAsli" ([docId:chunkIndex] / [URL]) yang tertera pada transkrip.
+   - KELOMPOK REKOMENDASI KEBIJAKAN (Prospektif): Catat usulan solusi, langkah cepat (Quick Wins), atau mitigasi risiko yang disepakati untuk dieksekusi pada periode MASA DEPAN (semester mendatang). Kosongkan "sitasiAsli" jika poin merupakan usulan aksi baru.
+3. DILARANG KERAS merumuskan rekomendasi aksi mundur ke masa yang sudah selesai.
+4. Saring hanya fakta dan kesepakatan yang valid. Abaikan pertanyaan tentatif pengguna yang tidak terjawab.`;
 
         const userPrompt = `=== TRANSKRIP PERCAKAPAN LENGKAP ===\n${dialogueScript}\n\nEkstrak seluruh konsensus di atas menjadi Structured Synthesis Manifest JSON yang valid sesuai dengan skema keluaran.`;
 
         try {
-            const ssmResult = await this.llmAdapter.generateStructuredAnalysis<StructuredSynthesisManifest>(
-                [
-                    { role: 'system', content: systemPrompt },
-                    { role: 'user', content: userPrompt },
-                ],
-                SSM_OUTPUT_SCHEMA,
-                0.0,
-            );
+            const ssmResult =
+                await this.llmAdapter.generateStructuredAnalysis<StructuredSynthesisManifest>(
+                    [
+                        { role: 'system', content: systemPrompt },
+                        { role: 'user', content: userPrompt },
+                    ],
+                    SSM_OUTPUT_SCHEMA,
+                    0.0,
+                );
 
             this.logger.log(
-                `[TranscriptDistiller] Berhasil men-distilasi transkrip obrolan menjadi manifest tesis: "${ssmResult.tesisUtama.slice(0, 50)}..."`,
+                `[TranscriptDistiller] Berhasil men-distilasi transkrip obrolan menjadi manifest tesis: "${ssmResult.tesisUtama.slice(
+                    0,
+                    50,
+                )}..."`,
             );
 
             return ssmResult;
@@ -8786,14 +10347,21 @@ PANDUAN EKSTRAKSI:
             );
 
             return {
-                tesisUtama: 'Analisis Kebijakan Daerah Terintegrasi',
+                tesisUtama: 'Analisis Kebijakan Pembangunan Daerah Terintegrasi',
                 argumenKunci: [
                     {
-                        fakta: 'Penyelarasan target operasional dengan realisasi pembangunan fisik di lapangan.',
+                        fakta:
+                            'Evaluasi capaian indikator pembangunan fisik dan realisasi fiskal pada periode laporan lampau.',
+                        sitasiAsli: '',
+                    },
+                    {
+                        fakta:
+                            'Akselerasi mitigasi risiko operasional dan penajaman program prioritas untuk semester mendatang.',
                         sitasiAsli: '',
                     },
                 ],
-                kesimpulanRingkas: 'Sintesis darurat akibat gangguan jaringan eksternal LLM.',
+                kesimpulanRingkas:
+                    'Sintesis darurat konsensus kebijakan akibat gangguan jaringan eksternal LLM.',
             };
         }
     }
@@ -9268,29 +10836,36 @@ import {
   Param,
   HttpCode,
   HttpStatus,
+  UseGuards,
+  Req,
 } from '@nestjs/common';
 import { ReportsService } from './reports.service';
 import { GenerateReportDto, CheckCacheDto } from './dto/generate-report.dto';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
 @Controller('reports')
+@UseGuards(JwtAuthGuard)
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}
 
   @Post('generate')
   @HttpCode(HttpStatus.OK)
-  async generateReport(@Body() dto: GenerateReportDto) {
-    return this.reportsService.generateReport(dto);
+  async generateReport(@Req() req: any, @Body() dto: GenerateReportDto) {
+    return this.reportsService.generateReport({
+      ...dto,
+      userId: req.user.id,
+    });
   }
 
   @Post('check-cache')
   @HttpCode(HttpStatus.OK)
-  async checkCache(@Body() dto: CheckCacheDto) {
-    return this.reportsService.checkCache(dto.documentIds, dto.reportType);
+  async checkCache(@Req() req: any, @Body() dto: CheckCacheDto) {
+    return this.reportsService.checkCache(dto.documentIds, dto.reportType, req.user.id);
   }
 
   @Get()
-  async getAllReports() {
-    const data = await this.reportsService.getAllReports();
+  async getAllReports(@Req() req: any) {
+    const data = await this.reportsService.getAllReports(req.user.id);
     return {
       success: true,
       data,
@@ -9298,8 +10873,8 @@ export class ReportsController {
   }
 
   @Get(':id')
-  async getReportById(@Param('id') id: string) {
-    const data = await this.reportsService.getReportById(id);
+  async getReportById(@Req() req: any, @Param('id') id: string) {
+    const data = await this.reportsService.getReportById(id, req.user.id);
     return {
       success: true,
       data,
@@ -9307,8 +10882,8 @@ export class ReportsController {
   }
 
   @Delete(':id')
-  async deleteReport(@Param('id') id: string) {
-    await this.reportsService.deleteReport(id);
+  async deleteReport(@Req() req: any, @Param('id') id: string) {
+    await this.reportsService.deleteReport(id, req.user.id);
     return {
       success: true,
       message: `Laporan dengan ID '${id}' berhasil dihapus.`,
@@ -9316,9 +10891,23 @@ export class ReportsController {
   }
 }
 
+@Controller('reports/share')
+export class ReportsShareController {
+  constructor(private readonly reportsService: ReportsService) {}
+
+  @Get(':id')
+  async getSharedReport(@Param('id') id: string) {
+    const data = await this.reportsService.getSharedReportById(id);
+    return {
+      success: true,
+      data,
+    };
+  }
+}
+
 --- FILE: src\modules\reports\reports.module.ts ---
 import { Module } from '@nestjs/common';
-import { ReportsController } from './reports.controller';
+import { ReportsController, ReportsShareController } from './reports.controller';
 import { ReportsService } from './reports.service';
 import { ReportsRepository } from './reports.repository';
 import { DocumentIngestionModule } from '../document-ingestion/document-ingestion.module';
@@ -9327,7 +10916,7 @@ import { AnalysisModule } from '../analysis/analysis.module';
 
 @Module({
   imports: [DocumentIngestionModule, AiAgentModule, AnalysisModule],
-  controllers: [ReportsController],
+  controllers: [ReportsController, ReportsShareController],
   providers: [ReportsService, ReportsRepository],
   exports: [ReportsService, ReportsRepository],
 })
@@ -9347,19 +10936,24 @@ export interface CreateReportInput {
   tokenCount: number;
   llmProvider: string;
   documentIds: string[];
+  userId: string;
 }
 
 @Injectable()
 export class ReportsRepository {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findByHash(documentIdsHash: string, reportType: string = 'NOTA_DINAS_BUPATI'): Promise<any | null> {
+  async findByHash(documentIdsHash: string, reportType: string = 'NOTA_DINAS_BUPATI', userId?: string): Promise<any | null> {
+    const whereClause: any = {
+      documentIdsHash,
+      reportType,
+      status: DocumentStatus.READY,
+    };
+    if (userId) {
+      whereClause.userId = userId;
+    }
     return this.prisma.generatedReport.findFirst({
-      where: {
-        documentIdsHash,
-        reportType,
-        status: DocumentStatus.READY,
-      },
+      where: whereClause,
       include: {
         sources: {
           include: {
@@ -9377,9 +10971,13 @@ export class ReportsRepository {
     });
   }
 
-  async findById(id: string): Promise<any | null> {
-    return this.prisma.generatedReport.findUnique({
-      where: { id },
+  async findById(id: string, userId?: string): Promise<any | null> {
+    const whereClause: any = { id };
+    if (userId) {
+      whereClause.userId = userId;
+    }
+    return this.prisma.generatedReport.findFirst({
+      where: whereClause,
       include: {
         sources: {
           include: {
@@ -9394,8 +10992,13 @@ export class ReportsRepository {
     });
   }
 
-  async findAll(): Promise<any[]> {
+  async findAll(userId?: string): Promise<any[]> {
+    const whereClause: any = {};
+    if (userId) {
+      whereClause.userId = userId;
+    }
     return this.prisma.generatedReport.findMany({
+      where: whereClause,
       include: {
         sources: {
           include: {
@@ -9417,11 +11020,12 @@ export class ReportsRepository {
   }
 
   async create(input: CreateReportInput): Promise<any> {
-    const { documentIds, ...reportData } = input;
+    const { documentIds, userId, ...reportData } = input;
 
     return this.prisma.generatedReport.create({
       data: {
         ...reportData,
+        userId,
         status: DocumentStatus.READY,
         sources: {
           create: documentIds.map((docId) => ({
@@ -9445,7 +11049,15 @@ export class ReportsRepository {
     });
   }
 
-  async delete(id: string): Promise<GeneratedReport> {
+  async delete(id: string, userId?: string): Promise<GeneratedReport> {
+    const whereClause: any = { id };
+    if (userId) {
+      whereClause.userId = userId;
+    }
+    const exists = await this.prisma.generatedReport.findFirst({ where: whereClause });
+    if (!exists) {
+      throw new Error('Laporan tidak ditemukan atau Anda tidak memiliki akses untuk menghapusnya.');
+    }
     return this.prisma.generatedReport.delete({
       where: { id },
     });
@@ -9483,9 +11095,9 @@ export class ReportsService {
     return sorted.join('|');
   }
 
-  async checkCache(documentIds: string[], reportType: string = 'NOTA_DINAS_BUPATI') {
+  async checkCache(documentIds: string[], reportType: string = 'NOTA_DINAS_BUPATI', userId?: string) {
     const hash = this.generateDocumentIdsHash(documentIds);
-    const cachedReport = await this.reportsRepository.findByHash(hash, reportType);
+    const cachedReport = await this.reportsRepository.findByHash(hash, reportType, userId);
 
     if (cachedReport) {
       return {
@@ -9505,12 +11117,12 @@ export class ReportsService {
     };
   }
 
-  async generateReport(dto: GenerateReportDto) {
-    const { documentIds, reportType = 'NOTA_DINAS_BUPATI', title, forceRegenerate = false } = dto;
+  async generateReport(dto: GenerateReportDto & { userId: string }) {
+    const { documentIds, reportType = 'NOTA_DINAS_BUPATI', title, forceRegenerate = false, userId } = dto;
     const documentIdsHash = this.generateDocumentIdsHash(documentIds);
 
     if (!forceRegenerate) {
-      const cached = await this.reportsRepository.findByHash(documentIdsHash, reportType);
+      const cached = await this.reportsRepository.findByHash(documentIdsHash, reportType, userId);
       if (cached) {
         this.logger.log(
           `[Report Cache HIT] Laporan untuk hash '${documentIdsHash}' ditemukan di DB. Mengembalikan cache (0 Token LLM).`,
@@ -9660,6 +11272,7 @@ ${EDITORIAL_STYLE_GUIDE}
       tokenCount: tokensUsed,
       llmProvider,
       documentIds,
+      userId,
     });
 
     this.logger.log(
@@ -9683,8 +11296,8 @@ ${EDITORIAL_STYLE_GUIDE}
     };
   }
 
-  async getAllReports() {
-    const reports = await this.reportsRepository.findAll();
+  async getAllReports(userId?: string) {
+    const reports = await this.reportsRepository.findAll(userId);
     return reports.map((r: any) => ({
       id: r.id,
       title: r.title,
@@ -9698,8 +11311,8 @@ ${EDITORIAL_STYLE_GUIDE}
     }));
   }
 
-  async getReportById(id: string) {
-    const report = await this.reportsRepository.findById(id);
+  async getReportById(id: string, userId?: string) {
+    const report = await this.reportsRepository.findById(id, userId);
     if (!report) {
       throw new NotFoundException(`Laporan dengan ID '${id}' tidak ditemukan.`);
     }
@@ -9716,9 +11329,25 @@ ${EDITORIAL_STYLE_GUIDE}
     };
   }
 
-  async deleteReport(id: string) {
-    await this.getReportById(id);
-    return this.reportsRepository.delete(id);
+  async deleteReport(id: string, userId?: string) {
+    await this.getReportById(id, userId);
+    return this.reportsRepository.delete(id, userId);
+  }
+
+  async getSharedReportById(id: string) {
+    const report = await this.reportsRepository.findById(id);
+    if (!report) {
+      throw new NotFoundException(`Laporan dengan ID '${id}' tidak ditemukan.`);
+    }
+    return {
+      id: report.id,
+      title: report.title,
+      reportType: report.reportType,
+      executiveSummary: report.executiveSummary,
+      contentPayload: report.contentPayload,
+      createdAt: report.createdAt,
+      sources: report.sources.map((s: any) => sanitizeDocument(s.document)),
+    };
   }
 }
 
@@ -9888,4 +11517,89 @@ export class CheckCacheDto {
   @IsOptional()
   @IsString()
   reportType?: string;
+}
+
+--- FILE: src\modules\system-setting\system-setting.controller.ts ---
+import { Controller, Get, Put, Body, Param, UseGuards } from '@nestjs/common';
+import { SystemSettingService } from './system-setting.service';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../auth/guards/roles.guard';
+import { Roles } from '../auth/decorators/roles.decorator';
+import { UserRole } from '@prisma/client';
+
+@Controller('admin')
+export class SystemSettingController {
+  constructor(private readonly settingService: SystemSettingService) {}
+
+  @Get('settings/public')
+  async getPublicSettings() {
+    const data = await this.settingService.getAllSettings();
+    return { success: true, data };
+  }
+
+  @Get('settings')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  async getAllSettings() {
+    const data = await this.settingService.getAllSettings();
+    return { success: true, data };
+  }
+
+  @Put('settings/:key')
+  @UseGuards(JwtAuthGuard, RolesGuard)
+  @Roles(UserRole.ADMIN)
+  async updateSetting(
+    @Param('key') key: string,
+    @Body() body: { value: string },
+  ) {
+    const data = await this.settingService.updateSetting(key, body.value);
+    return { success: true, data };
+  }
+}
+
+--- FILE: src\modules\system-setting\system-setting.module.ts ---
+import { Module } from '@nestjs/common';
+import { SystemSettingService } from './system-setting.service';
+import { SystemSettingController } from './system-setting.controller';
+import { PrismaModule } from '../../common/prisma/prisma.module';
+
+@Module({
+  imports: [PrismaModule],
+  providers: [SystemSettingService],
+  controllers: [SystemSettingController],
+  exports: [SystemSettingService],
+})
+export class SystemSettingModule {}
+
+--- FILE: src\modules\system-setting\system-setting.service.ts ---
+import { Injectable, NotFoundException } from '@nestjs/common';
+import { PrismaService } from '../../common/prisma/prisma.service';
+
+@Injectable()
+export class SystemSettingService {
+  constructor(private readonly prisma: PrismaService) {}
+
+  async getAllSettings() {
+    return this.prisma.systemSetting.findMany({
+      orderBy: { key: 'asc' },
+    });
+  }
+
+  async getSettingByKey(key: string) {
+    const setting = await this.prisma.systemSetting.findUnique({
+      where: { key },
+    });
+    if (!setting) {
+      throw new NotFoundException(`Pengaturan dengan key '${key}' tidak ditemukan.`);
+    }
+    return setting;
+  }
+
+  async updateSetting(key: string, value: string) {
+    return this.prisma.systemSetting.upsert({
+      where: { key },
+      update: { value },
+      create: { key, value },
+    });
+  }
 }

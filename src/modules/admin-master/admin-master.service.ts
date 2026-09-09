@@ -1,10 +1,37 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, OnModuleInit, Logger } from '@nestjs/common';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import * as bcrypt from 'bcrypt';
 
 @Injectable()
-export class AdminMasterService {
+export class AdminMasterService implements OnModuleInit {
+  private readonly logger = new Logger(AdminMasterService.name);
+
   constructor(private readonly prisma: PrismaService) {}
+
+  async onModuleInit() {
+    try {
+      const count = await this.prisma.oPD.count();
+      if (count === 0) {
+        const opdsData = [
+          { name: 'Badan Riset dan Inovasi Daerah', code: 'BRIDA', headName: 'Darius Sabon Rain, S.E., M.Ec.Dev.', headPhone: '628123456789' },
+          { name: 'Badan Perencanaan Pembangunan Daerah', code: 'BAPPEDA', headName: 'Ir. Yohana Paliling, M.Si.', headPhone: '628111111111' },
+          { name: 'Dinas Pendidikan', code: 'DISDIK', headName: 'Jenny O. Usmany, M.Pd.', headPhone: '628222222222' },
+          { name: 'Dinas Kesehatan', code: 'DINKES', headName: 'Reynold R. Ubra, S.KM., M.Epid.', headPhone: '628333333333' },
+          { name: 'Inspektorat Daerah', code: 'INSPEKTORAT', headName: 'Sihol Parningotan, S.H.', headPhone: '628444444444' },
+        ];
+        for (const opd of opdsData) {
+          await this.prisma.oPD.upsert({
+            where: { code: opd.code },
+            update: { name: opd.name, headName: opd.headName, headPhone: opd.headPhone },
+            create: { name: opd.name, code: opd.code, headName: opd.headName, headPhone: opd.headPhone },
+          });
+        }
+        this.logger.log('[AdminMaster] 5 Data Master OPD resmi Mimika berhasil diinisialisasi.');
+      }
+    } catch (err: any) {
+      this.logger.warn(`[AdminMaster] Init OPD error: ${err.message}`);
+    }
+  }
 
   // ==========================================
   // 1. OPD (Dinas) CRUD

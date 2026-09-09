@@ -397,7 +397,7 @@ async function main() {
   // 6. Seed System Settings (Bupati Profil)
   console.log('[Seeder] Memulai proses seeding SystemSettings...');
   const settings = [
-    { key: 'BUPATI_NAME', value: 'Darius Sabon Rain, S.E., M.Ec.Dev. (Pjs. Bupati)' },
+    { key: 'BUPATI_NAME', value: 'Johannes Rettob, S.Sos., M.M.' },
     { key: 'BUPATI_PHONE', value: '628123456789' },
   ];
 
