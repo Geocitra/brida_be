@@ -364,11 +364,29 @@ export class VendorLlmAdapter implements ILlmProvider {
    * Nilai valid: 'gemini' | 'openai'. Default: 'gemini'.
    */
   private getActiveProvider(): 'gemini' | 'openai' {
-    const raw = this.configService.get<string>('LLM_PROVIDER') || 'gemini';
-    const normalized = raw.trim().toLowerCase();
+    const raw = this.configService.get<string>('LLM_PROVIDER');
+    
+    // 1. Jika dikonfigurasi eksplisit di .env, patuhi konfigurasi
+    if (raw && raw.trim().length > 0) {
+      const normalized = raw.trim().toLowerCase();
+      if (normalized === 'openai') return 'openai';
+      if (normalized === 'gemini') return 'gemini';
+    }
 
-    if (normalized === 'openai') return 'openai';
-    return 'gemini'; // Default aman ke Gemini
+    // 2. Deteksi otomatis berbasis ketersediaan API Key (Single-Billing Protection)
+    const hasOpenAiKey = !!this.configService.get<string>('OPENAI_API_KEY');
+    const hasGeminiKey = !!this.configService.get<string>('GEMINI_API_KEY');
+
+    if (hasOpenAiKey && !hasGeminiKey) {
+      return 'openai';
+    }
+
+    if (hasGeminiKey && !hasOpenAiKey) {
+      return 'gemini';
+    }
+
+    // Default jika keduanya ada atau fallback
+    return hasOpenAiKey ? 'openai' : 'gemini';
   }
 
   private async mockVendorApiCall(): Promise<string> {

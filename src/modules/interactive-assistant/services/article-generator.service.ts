@@ -3,7 +3,6 @@ import {
   Logger,
   NotFoundException,
   BadRequestException,
-  PayloadTooLargeException,
 } from '@nestjs/common';
 import { DocumentRepository } from '../../document-ingestion/repositories/document.repository';
 import { VendorLlmAdapter } from '../../ai-agent/providers/vendor-llm.adapter';
@@ -15,7 +14,6 @@ import { DocumentIngestionService } from '../../document-ingestion/services/docu
 import { ContextAssemblyService } from '../../ai-agent/services/context-assembly.service';
 import { WebSearchService } from './web-search.service';
 
-// --- Impor Style Guide Global ---
 import { EDITORIAL_STYLE_GUIDE } from '../../ai-agent/constants/system-prompts.constant';
 
 export interface GenerateArticleOptions {
@@ -31,17 +29,38 @@ export interface GenerateArticleOptions {
       fakta: string;
       sitasiAsli: string;
     }>;
-    kesiaxialRingkas?: string;
+    kesimpulanRingkas?: string;
   };
   parentSessionId?: string;
-  userId?: string; // Menambahkan userId untuk isolasi
+  userId?: string;
 }
+
+const ARTICLE_OUTPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    judulUsulan: { 
+      type: 'string', 
+      description: 'Judul dokumen yang tepat dan menarik.' 
+    },
+    ringkasan: { 
+      type: 'string', 
+      description: 'Ringkasan eksekutif dari naskah.' 
+    },
+    fullText: {
+      type: 'string',
+      description:
+        'Isi naskah dokumen utuh menggunakan Markdown. Anda BEBAS PENUH menentukan strukturnya. ' +
+        'Gunakan tabel komparasi, poin analitis, diagram teks, atau narasi mendalam sesuai kreativitas Anda agar topik tergambar sempurna. ' +
+        'Jika diminta naskah panjang (LONG), jabarkan sedetail dan sedalam mungkin tanpa batasan template. ' +
+        'TIDAK PERLU menuliskan daftar pustaka atau token referensi di akhir teks.',
+    },
+  },
+  required: ['judulUsulan', 'ringkasan', 'fullText'],
+};
 
 @Injectable()
 export class ArticleGeneratorService {
   private readonly logger = new Logger(ArticleGeneratorService.name);
-
-  // Anggaran token keras maksimum untuk sintesis draf artikel (150.000 token untuk laporan BPS tebal)
   private readonly MAX_DRAFTING_TOKEN_BUDGET = 150000;
 
   constructor(
@@ -55,10 +74,6 @@ export class ArticleGeneratorService {
     private readonly webSearchService: WebSearchService,
   ) { }
 
-  /**
-   * Mensintesis draf naskah artikel baru berdasarkan multi-dokumen rujukan,
-   * dengan jaminan output format Markdown bersih, berbobot analitis, dan berorientasi waktu tepat.
-   */
   async generateArticle(options: GenerateArticleOptions): Promise<any> {
     const {
       documentIds,
@@ -71,15 +86,15 @@ export class ArticleGeneratorService {
     } = options;
 
     const validDocIds = [...(documentIds || [])];
-    const normalizedTitle =
-      (articleTitle || '').trim() || 'Draf Artikel Publikasi';
+    let normalizedTitle =
+      (articleTitle || '').trim() || 'Draf Kebijakan Publikasi';
 
     let session = options.sessionId
       ? await this.chatRepository.findSessionById(options.sessionId, options.userId)
       : null;
 
     if (options.sessionId && !session) {
-      throw new NotFoundException(`Sesi artikel dengan ID '${options.sessionId}' tidak ditemukan.`);
+      throw new NotFoundException(`Sesi artikel ID '${options.sessionId}' tidak ditemukan.`);
     }
 
     if (!session) {
@@ -99,9 +114,6 @@ export class ArticleGeneratorService {
     const scrapedUrls: Array<{ url: string; title: string; text: string }> = [];
 
     if (foundUrls.length > 0) {
-      this.logger.log(
-        `[generateArticle] Mendeteksi ${foundUrls.length} tautan eksternal untuk diekstraksi.`,
-      );
       for (const url of foundUrls) {
         try {
           const scraped = await this.urlScraperService.scrapeAndExtract(url);
@@ -111,14 +123,11 @@ export class ArticleGeneratorService {
             text: scraped.cleanText,
           });
         } catch (scrapeErr: any) {
-          this.logger.error(
-            `[generateArticle URL Scrape Failed] Gagal memproses URL ${url}: ${scrapeErr.message}`,
-          );
+          this.logger.error(`[Scrape Failed] ${url}: ${scrapeErr.message}`);
         }
       }
     }
 
-    // Proactive web search jika kueri valid untuk memperkaya artikel
     const queryForSearch = (articleTitle || userInstruction || '').trim();
     const cleanedSearchQuery = queryForSearch
       .replace(/https?:\/\/[^\s]+/gi, '')
@@ -127,9 +136,6 @@ export class ArticleGeneratorService {
 
     if (cleanedSearchQuery.length > 5) {
       try {
-        this.logger.log(
-          `[generateArticle] Melakukan pencarian proaktif untuk subjek: "${cleanedSearchQuery}"...`,
-        );
         const searchResults = await this.webSearchService.searchReputableWeb(
           cleanedSearchQuery,
           5,
@@ -140,60 +146,65 @@ export class ArticleGeneratorService {
               url: res.link,
               title: res.title,
               text: res.scrapedText
-                ? `=== ARTIKEL LUAR ${i + 1}: ${res.title} ===\nTautan: ${res.link}\nKonten Halaman:\n${res.scrapedText}`
-                : `=== ARTIKEL LUAR ${i + 1}: ${res.title} ===\nTautan: ${res.link}\nRingkasan Fakta: ${res.snippet}`,
+                ? `=== REFERENSI BENCHMARK ${i + 1}: ${res.title} ===\nTautan: ${res.link}\nKonten:\n${res.scrapedText}`
+                : `=== REFERENSI BENCHMARK ${i + 1}: ${res.title} ===\nTautan: ${res.link}\nRingkasan: ${res.snippet}`,
             });
           });
-          this.logger.log(
-            `[generateArticle] Berhasil mengintegrasikan ${searchResults.length} referensi eksternal transien.`,
-          );
         }
       } catch (searchErr: any) {
-        this.logger.error(
-          `[generateArticle Proactive Search Failed] Gagal melakukan pencarian eksternal: ${searchErr.message}`,
-        );
+        this.logger.error(`[Proactive Search Failed]: ${searchErr.message}`);
       }
     }
 
-    // Ambil metadata untuk kebutuhan fallback
     const sourceDocs: any[] = [];
     for (const docId of validDocIds) {
       const doc = await this.documentRepository.findById(docId);
       if (doc) sourceDocs.push(doc);
     }
 
-    // SIAPKAN INSTRUKSI TAMBAHAN (MANIFEST + USER PROMPT)
     let manifestPromptSection = '';
     if (synthesizedManifest) {
       const argumenList = Array.isArray(synthesizedManifest.argumenKunci)
         ? synthesizedManifest.argumenKunci
           .map(
             (arg, idx) =>
-              `- Poin ${idx + 1}: "${arg.fakta}" (WAJIB lampirkan sitasi asli: ${arg.sitasiAsli})`,
+              `- Argumen ${idx + 1}: "${arg.fakta}" (Sitasi wajib: ${arg.sitasiAsli || 'Rujukan internal'})`,
           )
           .join('\n')
         : 'Tidak ada argumen spesifik.';
 
       manifestPromptSection = `
-=== STRUKTUR KONSENSUS HASIL DISKUSI SEBELUMNYA (SSM) ===
-Anda WAJIB menyusun alur narasi artikel ini mengikuti kerangka konseptual diskusi yang telah disepakati sebagai berikut:
-- Tesis Utama Artikel: "${synthesizedManifest.tesisUtama}"
-- Argumen Utama & Bukti Faktual:
+=== MATRIKS HASIL DISKUSI SEBELUMNYA (KONSENSUS DASAR) ===
+Kembangkan naskah mengikuti kerangka argumen yang disepakati:
+- Tesis Utama: "${synthesizedManifest.tesisUtama}"
+- Pokok Argumen:
 ${argumenList}
-
-ATURAN RE-PROPAGASI SITASI MUTLAK:
-Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyematkan kembali token sitasi aslinya secara presisi (misal: [docId:chunkIndex]) bersebelahan dengan klaim data tersebut agar orisinalitas riset BRIDA dapat ditelusuri.
 `;
     }
 
     const promptUserInstruction = userInstruction
-      ? `Instruksi Khusus Tambahan: ${userInstruction}`
-      : 'Buatkan draf artikel publikasi yang menarik, solutif, dan berbasis data/ide yang kuat.';
+      ? `Instruksi Khusus Pengguna: ${userInstruction}`
+      : 'Susun naskah kebijakan yang komprehensif, berbasis data, dan solutif.';
 
-    // Gabungkan query untuk dikirim ke Context Assembly
-    const userQuery = `Judul Artikel Target: "${normalizedTitle}"\n${promptUserInstruction}\n${manifestPromptSection}`;
+    const isLongLength = String(targetLength).toUpperCase() === 'LONG';
+    const isShortLength = String(targetLength).toUpperCase() === 'SHORT';
 
-    // DELEGASI KE INFORMATION EXPERT: ContextAssemblyService menyusun konteks lengkap dengan Temporal Ground Truth
+    const lengthRequirementText = isLongLength
+      ? 'TARGET PANJANG: LONG (Minimal 1.500 kata). Silakan berekspresi secara total! Kupas tuntas topik ini dari berbagai sudut pandang. Jangan menahan diri. Buat dokumen yang sangat komprehensif, kaya data, dan mendalam.'
+      : isShortLength
+        ? 'TARGET PANJANG: SHORT (~700 kata). Buat padat, jelas, dan langsung ke intinya.'
+        : 'TARGET PANJANG: MEDIUM (~1.000 kata). Eksplorasi topik secara proporsional.';
+
+    const userQuery = `
+[JUDUL / TOPIK TARGET]: "${normalizedTitle}"
+${lengthRequirementText}
+${promptUserInstruction}
+${manifestPromptSection}
+
+INSTRUKSI KREASI BEBAS:
+Rancang dan tulis naskah ini dengan kebebasan penuh. Gunakan keahlian analitis Anda untuk menentukan struktur bab, pemakaian tabel komparasi, pembuatan roadmap, atau pemformatan visual yang paling luar biasa untuk membedah topik ini.
+`.trim();
+
     const promptPayload = await this.contextAssembly.assemblePromptPayload({
       documentIds: validDocIds,
       userQuery,
@@ -202,22 +213,18 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
       scrapedUrls,
     });
 
-    // ENFORCE BUDGET
     this.tokenEstimator.enforceBudgetCircuitBreaker({
       texts: promptPayload.messages.map((m) => m.content || ''),
       imagesCount: 0,
       maxBudgetTokens: this.MAX_DRAFTING_TOKEN_BUDGET,
     });
 
-    // SIMPAN HISTORY USER KE DB
-    const userPromptRecordedContent = `[JUDUL ARTIKEL]: ${normalizedTitle}\n[TONE]: ${tone}\n[PANJANG]: ${targetLength}\n${userInstruction || ''}`;
+    const userPromptRecordedContent = `[JUDUL DOKUMEN]: ${normalizedTitle}\n[TONE]: ${tone}\n[TARGET PANJANG]: ${targetLength}\n${userInstruction || ''}`;
     await this.chatRepository.addMessage({
       sessionId: session.id,
       role: MessageRole.USER,
       content: userPromptRecordedContent,
-      tokenCount: this.tokenEstimator.estimateTokenCount(
-        userPromptRecordedContent,
-      ),
+      tokenCount: this.tokenEstimator.estimateTokenCount(userPromptRecordedContent),
       metadata: scrapedUrls.length > 0 ? { scrapedUrls } : undefined,
     });
 
@@ -225,23 +232,21 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
     const temporal = this.contextAssembly.generateTemporalGroundTruth();
 
     try {
-      // EKSEKUSI LLM
-      const llmResult =
-        await this.llmAdapter.generateStructuredAnalysis<any>(
-          promptPayload.messages,
-          ARTICLE_OUTPUT_SCHEMA,
-          0.7,
-        );
-
-      fullArticleText =
-        llmResult.fullText ||
-        formatArticleFromLlm(llmResult, normalizedTitle, temporal);
-      fullArticleText = cleanArticleTitlePrefix(fullArticleText);
-      fullArticleText = verifyAndCleanCitations(fullArticleText, scrapedUrls);
-    } catch (err: any) {
-      this.logger.warn(
-        `[Article LLM Fallback] Gagal memanggil API: ${err.message}. Menggunakan sintesis fallback terstruktur.`,
+      const llmResult = await this.llmAdapter.generateStructuredAnalysis<any>(
+        promptPayload.messages,
+        ARTICLE_OUTPUT_SCHEMA,
+        0.7,
       );
+
+      fullArticleText = llmResult.fullText || formatArticleFromLlm(llmResult, normalizedTitle, temporal);
+      fullArticleText = cleanArticleTitlePrefix(fullArticleText);
+
+      // Jika AI memberikan judul usulan resmi, gunakan sebagai nama sesi utama
+      if (llmResult.judulUsulan && llmResult.judulUsulan.trim().length > 0) {
+        normalizedTitle = llmResult.judulUsulan.trim().replace(/^#+\s*/, '');
+      }
+    } catch (err: any) {
+      this.logger.warn(`[Article LLM Fallback] Menggunakan sintesis fallback: ${err.message}`);
       fullArticleText = createFallbackArticleText(
         normalizedTitle,
         sourceDocs,
@@ -250,16 +255,20 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
         temporal,
       );
       fullArticleText = cleanArticleTitlePrefix(fullArticleText);
-      fullArticleText = verifyAndCleanCitations(fullArticleText, scrapedUrls);
     }
 
-    // SIMPAN HISTORY AI KE DB
     await this.chatRepository.addMessage({
       sessionId: session.id,
       role: MessageRole.ASSISTANT,
       content: fullArticleText,
       tokenCount: this.tokenEstimator.estimateTokenCount(fullArticleText),
     });
+
+    // SINKRONISASI KUNCI: Ikat judul asli dokumen langsung ke session.title dan session.articleTitle
+    await this.chatRepository.updateActiveDraft(session.id, fullArticleText);
+    await this.chatRepository.updateArticleMetadata(session.id, normalizedTitle);
+
+    this.logger.log(`[Article Created] Sesi '${session.id}' berhasil dinamai dengan judul resmi: "${normalizedTitle}"`);
 
     const updatedSession = await this.chatRepository.findSessionById(session.id);
 
@@ -276,10 +285,6 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
     };
   }
 
-  /**
-   * Memperbarui konten draf naskah artikel secara manual berdasarkan suntingan editor (Two-Way Sync).
-   * Mendukung penyimpanan editorState (HTML visual murni) dan teks naratif tanpa degradasi serialisasi.
-   */
   async updateArticleContent(
     sessionId: string,
     articleTitle: string,
@@ -288,23 +293,14 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
   ): Promise<any> {
     const session = await this.chatRepository.findSessionById(sessionId);
     if (!session) {
-      throw new NotFoundException(
-        `Sesi artikel dengan ID '${sessionId}' tidak ditemukan.`,
-      );
-    }
-
-    if (session.sessionType !== SessionType.ARTICLE_GENERATOR) {
-      throw new BadRequestException(
-        'Sesi ini bukan merupakan sesi penulisan rilis artikel.',
-      );
+      throw new NotFoundException(`Sesi artikel ID '${sessionId}' tidak ditemukan.`);
     }
 
     const trimmedTitle = articleTitle.trim();
     if (!trimmedTitle) {
-      throw new BadRequestException('Judul artikel baru tidak boleh kosong.');
+      throw new BadRequestException('Judul artikel tidak boleh kosong.');
     }
 
-    // 1. Simpan editorDocumentState dan perbarui metadata judul di database
     if (editorState) {
       await this.chatRepository.updateEditorDocumentState(
         sessionId,
@@ -319,47 +315,13 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
       await this.chatRepository.updateArticleMetadata(sessionId, trimmedTitle);
     }
 
-    // 2. Tambah Jejak Audit (Audit Trail Log) sebagai pesan sistem otomatis ke DB
-    const auditContent = 'Naskah diperbarui secara manual oleh editor.';
+    const auditContent = 'Naskah diperbarui secara manual pada lembar kerja editor.';
     await this.chatRepository.addMessage({
       sessionId: session.id,
       role: MessageRole.SYSTEM,
       content: auditContent,
       tokenCount: this.tokenEstimator.estimateTokenCount(auditContent),
     });
-
-    // 3. Simpan draf naskah hasil suntingan manual terbaru sebagai pesan asisten baru dalam format JSON terstruktur kooperatif
-    const structuredPayload = {
-      answer:
-        'Saya telah memperbarui draf naskah artikel sesuai dengan suntingan manual Anda.',
-      suggestions: [
-        'Bagian mana lagi yang ingin Anda kembangkan?',
-        'Tambahkan rincian data baru ke dalam artikel.',
-        'Sesuaikan kembali gaya bahasa artikel.',
-      ],
-      updatedArticle: {
-        title: trimmedTitle,
-        draftMarkdown:
-          fullArticleText ||
-          session.currentDraft ||
-          'Naskah editorial diperbarui.',
-        editorDocumentState: editorState,
-      },
-    };
-    const stringifiedPayload = JSON.stringify(structuredPayload);
-
-    await this.chatRepository.addMessage({
-      sessionId: session.id,
-      role: MessageRole.ASSISTANT,
-      content: stringifiedPayload,
-      tokenCount: this.tokenEstimator.estimateTokenCount(stringifiedPayload),
-    });
-
-    this.logger.log(
-      `[Draft Manual Sync] Berhasil melakukan pembaruan naskah manual untuk Sesi ID: ${sessionId} (Visual State: ${Boolean(
-        editorState,
-      )})`,
-    );
 
     const updatedSession = await this.chatRepository.findSessionById(sessionId);
 
@@ -377,22 +339,15 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
     };
   }
 
-  /**
-   * Menangani diskusi revisi kolaboratif untuk memperbarui dokumen aktif.
-   * Menjamin kepatuhan CommonMark dan penegakan linimasa waktu prospektif.
-   */
   async interactWithArticleSession(
     sessionId: string,
     userInstruction: string,
   ): Promise<any> {
     const session = await this.chatRepository.findSessionById(sessionId);
     if (!session) {
-      throw new NotFoundException(
-        `Sesi artikel dengan ID '${sessionId}' tidak ditemukan.`,
-      );
+      throw new NotFoundException(`Sesi artikel ID '${sessionId}' tidak ditemukan.`);
     }
 
-    // Rekam pesan instruksi revisi baru dari pengguna ke DB
     await this.chatRepository.addMessage({
       sessionId: session.id,
       role: MessageRole.USER,
@@ -400,87 +355,46 @@ Ketika Anda menyusun paragraf yang membahas poin-poin di atas, Anda WAJIB menyem
       tokenCount: this.tokenEstimator.estimateTokenCount(userInstruction),
     });
 
-    // Susun riwayat percakapan revisi
     const conversationMessages = session.messages.map((m: any) => ({
-      role:
-        m.role === MessageRole.USER
-          ? ('user' as const)
-          : ('assistant' as const),
+      role: m.role === MessageRole.USER ? ('user' as const) : ('assistant' as const),
       content: m.content,
     }));
 
-    // Ambil jangkar waktu sistem riil untuk menjamin revisi tidak anakronistis
     const temporal = this.contextAssembly.generateTemporalGroundTruth();
 
-    // SYSTEM PROMPT: Enforcing strict CommonMark compliance & Temporal Dual-Axis Alignment
-    const systemPrompt = `Anda adalah Asisten Penulis & Analis Kebijakan Utama BRIDA Kabupaten Mimika.
-Perbarui / revisi draf naskah artikel berdasarkan instruksi revisi terbaru dari pengguna. Pertahankan gaya bahasa ${session.tone || 'SOLUTIF'
-      }.
+    const targetLengthStr = session.targetLength || 'MEDIUM';
+    const lengthRule = targetLengthStr === 'LONG'
+      ? 'TARGET VOLUME: Pertahankan kedalaman naskah MINIMAL 1.500 KATA. DILARANG memangkas naskah menjadi ringkasan pendek!'
+      : `TARGET VOLUME: Pertahankan proporsi naskah sesuai target (${targetLengthStr}).`;
 
-[INFORMASI WAKTU SISTEM SAAT INI (TEMPORAL GROUND TRUTH)]
-- Tanggal Eksekusi Riil : ${temporal.currentFullDate}
-- Bulan Berjalan        : ${temporal.currentMonth} ${temporal.currentYear}
-- Posisi Semester Aktif : ${temporal.currentSemester}
-- Posisi Triwulan Aktif : ${temporal.currentQuarter}
-
-ATURAN REVISI BERORIENTASI WAKTU (ANTI-ANAKRONISTIS):
-1. Seluruh perbaikan atau revisi pada bagian evaluasi/diagnosis data lampau tetap menggunakan pendekatan retrospektif.
-2. JIKA pengguna meminta penambahan saran, solusi, program intervensi, atau tindak lanjut kebijakan, Anda WAJIB mengarahkannya secara prospektif untuk periode MASA DEPAN (${temporal.currentSemester
-      } atau Tahun Anggaran ${temporal.currentYear + 1
-      }). DILARANG merekomendasikan aksi mundur ke masa yang sudah lewat.
-
-ATURAN FORMATTING MUTLAK (COMMONMARK COMPLIANCE - ZERO RANDOM HTML):
-1. DILARANG KERAS menghasilkan atau menyisipkan tag HTML kustom visual (seperti <p style="...">, <font>, dll.) ke dalam teks naskah revisi Anda.
-2. Semua daftar wajib menggunakan simbol list standar CommonMark: gunakan tanda minus (-) atau bintang (*) diikuti oleh spasi (misalnya: - Poin Evaluasi). Jangan gunakan tag HTML <ul> atau <li> secara manual.
-3. Penulisan judul/subjudul wajib menggunakan sintaks header ATX standar (#, ##, ###).
-4. Hasil revisi naskah harus dikembalikan sebagai Markdown bersih, terstruktur, dan memiliki keterbacaan tinggi.
-
+    const systemPrompt = `Anda adalah Analis Kebijakan Utama BRIDA Kabupaten Mimika.
+Tugas Anda: Perbarui atau revisi naskah dokumen kebijakan berikut berdasarkan instruksi pengguna.
+${lengthRule}
+Pertahankan gaya bahasa ${session.tone || 'SOLUTIF'}.
+Pastikan naskah tetap utuh, terstruktur bab per bab, dan bernas.
 ${EDITORIAL_STYLE_GUIDE}
 `;
 
-    // INTEGRASI TOKEN BUDGET CIRCUIT BREAKER PADA PROSES INTERAKSI REVISI
-    const rawConversationTexts = conversationMessages
-      .map((m: any) => m.content)
-      .concat([systemPrompt, userInstruction]);
-    this.tokenEstimator.enforceBudgetCircuitBreaker({
-      texts: rawConversationTexts,
-      imagesCount: 0,
-      maxBudgetTokens: this.MAX_DRAFTING_TOKEN_BUDGET,
-    });
-
     let revisedArticleText = '';
     try {
-      const llmResult =
-        await this.llmAdapter.generateStructuredAnalysis<any>(
-          [
-            { role: 'system', content: systemPrompt },
-            ...conversationMessages,
-            {
-              role: 'user',
-              content: `Instruksi Revisi Terbaru: ${userInstruction}`,
-            },
-          ],
-          ARTICLE_OUTPUT_SCHEMA,
-          0.7,
-        );
+      const llmResult = await this.llmAdapter.generateStructuredAnalysis<any>(
+        [
+          { role: 'system', content: systemPrompt },
+          ...conversationMessages,
+          { role: 'user', content: `Instruksi Revisi Pengguna: ${userInstruction}` },
+        ],
+        ARTICLE_OUTPUT_SCHEMA,
+        0.7,
+      );
 
-      revisedArticleText =
-        llmResult.fullText ||
-        formatArticleFromLlm(
-          llmResult,
-          session.articleTitle || session.title,
-          temporal,
-        );
+      revisedArticleText = llmResult.fullText || formatArticleFromLlm(llmResult, session.articleTitle || session.title, temporal);
       revisedArticleText = cleanArticleTitlePrefix(revisedArticleText);
     } catch (err: any) {
       revisedArticleText =
-        `[Hasil Revisi Draf Artikel - ${new Date().toLocaleTimeString(
-          'id-ID',
-        )}]\n\n${userInstruction}\n\n` +
+        `# ${session.articleTitle || session.title}\n\n[Revisi - ${new Date().toLocaleTimeString('id-ID')}]\n\n` +
         (conversationMessages[conversationMessages.length - 1]?.content || '');
     }
 
-    // Rekam draf revisi terbaru ke DB
     await this.chatRepository.addMessage({
       sessionId: session.id,
       role: MessageRole.ASSISTANT,
@@ -488,6 +402,7 @@ ${EDITORIAL_STYLE_GUIDE}
       tokenCount: this.tokenEstimator.estimateTokenCount(revisedArticleText),
     });
 
+    await this.chatRepository.updateActiveDraft(session.id, revisedArticleText);
     const updatedSession = await this.chatRepository.findSessionById(sessionId);
 
     return {
@@ -516,53 +431,28 @@ ${EDITORIAL_STYLE_GUIDE}
       editorDocumentState: s.editorDocumentState || null,
       sourcesCount: s.sources?.length || 0,
       sources: sanitizeSources(s.sources),
-      lastMessage:
-        s.messages && s.messages.length > 0
-          ? s.messages[s.messages.length - 1].content
-          : null,
+      lastMessage: s.messages && s.messages.length > 0 ? s.messages[s.messages.length - 1].content : null,
     }));
   }
 
   async getArticleSessionById(sessionId: string, userId?: string): Promise<any> {
     const session = await this.chatRepository.findSessionById(sessionId, userId);
     if (!session) {
-      throw new NotFoundException(
-        `Sesi artikel dengan ID '${sessionId}' tidak ditemukan.`,
-      );
+      throw new NotFoundException(`Sesi artikel ID '${sessionId}' tidak ditemukan.`);
     }
 
     const lastAssistantMsg = [...session.messages]
       .reverse()
       .find((m: any) => m.role === MessageRole.ASSISTANT);
 
-    let fullArticleText = '';
+    let fullArticleText = session.currentDraft || '';
     let editorDocumentState = session.editorDocumentState || null;
 
-    if (lastAssistantMsg) {
+    if (!fullArticleText && lastAssistantMsg) {
       try {
         const parsed = JSON.parse(lastAssistantMsg.content);
         if (parsed && typeof parsed === 'object') {
-          if (parsed.updatedArticle) {
-            if (
-              parsed.updatedArticle.editorDocumentState &&
-              !editorDocumentState
-            ) {
-              editorDocumentState = parsed.updatedArticle.editorDocumentState;
-            }
-            if (parsed.updatedArticle.draftMarkdown) {
-              fullArticleText = parsed.updatedArticle.draftMarkdown;
-            } else {
-              fullArticleText =
-                parsed.answer ||
-                parsed.fullArticleText ||
-                lastAssistantMsg.content;
-            }
-          } else {
-            fullArticleText =
-              parsed.answer ||
-              parsed.fullArticleText ||
-              lastAssistantMsg.content;
-          }
+          fullArticleText = parsed.updatedArticle?.draftMarkdown || parsed.fullArticleText || parsed.answer || lastAssistantMsg.content;
         } else {
           fullArticleText = lastAssistantMsg.content;
         }
@@ -582,7 +472,7 @@ ${EDITORIAL_STYLE_GUIDE}
       sources: sanitizeSources(session.sources),
       messages: session.messages,
       mediaAssets: session.mediaAssets || [],
-      fullArticleText: session.currentDraft || fullArticleText,
+      fullArticleText,
       editorDocumentState,
     };
   }
@@ -590,28 +480,11 @@ ${EDITORIAL_STYLE_GUIDE}
   async deleteArticleSession(sessionId: string): Promise<void> {
     const session = await this.chatRepository.findSessionById(sessionId);
     if (!session) {
-      throw new NotFoundException(
-        `Sesi artikel dengan ID '${sessionId}' tidak ditemukan.`,
-      );
+      throw new NotFoundException(`Sesi artikel ID '${sessionId}' tidak ditemukan.`);
     }
     await this.chatRepository.deleteSession(sessionId);
   }
 }
-
-// Skema output visual naskah
-const ARTICLE_OUTPUT_SCHEMA = {
-  type: 'object',
-  properties: {
-    judulUsulan: { type: 'string' },
-    ringkasan: { type: 'string' },
-    fullText: {
-      type: 'string',
-      description:
-        'Isi lengkap naskah artikel dalam format CommonMark Markdown bersih (tanpa tag HTML kustom visual).',
-    },
-  },
-  required: ['fullText'],
-};
 
 function sanitizeSources(sources: any[]): any[] {
   if (!sources) return [];
@@ -623,33 +496,28 @@ function sanitizeSources(sources: any[]): any[] {
   }));
 }
 
-function formatArticleFromLlm(
-  llmResult: any,
-  defaultTitle: string,
-  temporal?: any,
-): string {
+function formatArticleFromLlm(llmResult: any, defaultTitle: string, temporal?: any): string {
   if (llmResult.fullText) return llmResult.fullText;
 
-  const targetPeriod = temporal
-    ? `${temporal.currentSemester}`
-    : 'Tahun Anggaran Berjalan';
+  const targetPeriod = temporal ? `${temporal.currentSemester}` : 'Tahun Anggaran Berjalan';
 
   return `# ${llmResult.judulUsulan || defaultTitle}
 
-**Oleh: Tim Analis & Penulis Kebijakan BRIDA Kabupaten Mimika**
+**Disusun oleh: Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika**
 
-## Ringkasan Eksekutif
-${llmResult.ringkasan ||
-    'Artikel publikasi dirakit berdasarkan sintesis data acuan terkonfirmasi dan evaluasi capaian pembangunan daerah.'
-    }
+## I. Ringkasan Eksekutif
+${llmResult.ringkasan || 'Naskah kebijakan strategis ini disusun berdasarkan hasil telaah data sektoral dan komparasi tolak ukur pembangunan daerah.'}
 
-## Diagnosis Kinerja & Capaian Faktual
-Berdasarkan data dokumen acuan strategis daerah, evaluasi capaian menunjukkan perlunya akselerasi integrasi lintas sektor guna memastikan pemenuhan target indikator pembangunan secara inklusif.
+## II. Latar Belakang & Landasan Hukum
+Pemerintah Kabupaten Mimika terus mendorong penyelarasan regulasi dan penguatan tata kelola pemerintahan yang transparan, akuntabel, dan berdaya saing tinggi.
 
-## Rekomendasi Aksi Kebijakan & Solusi Taktis (${targetPeriod})
-1. Penguatan mitigasi risiko operasional dan efisiensi belanja program prioritas.
-2. Penyelarasan target kinerja fisik dengan mekanisme monitoring berkala.
-3. Akselerasi koordinasi lintas Organisasi Perangkat Daerah (OPD) untuk percepatan target pembangunan semester mendatang.
+## III. Tinjauan Analisis Kinerja & Matriks Masalah
+Evaluasi capaian indikator menunjukkan perlunya penguatan kolaborasi lintas instansi dan optimalisasi sumber daya daerah guna memastikan target tercapai secara inklusif.
+
+## IV. Rekomendasi Kebijakan & Rencana Tindak Lanjut (${targetPeriod})
+1. Akselerasi koordinasi lintas Organisasi Perangkat Daerah (OPD) untuk percepatan implementasi program prioritas.
+2. Penegakan monitoring dan evaluasi terpadu berbasis sistem digital berkala.
+3. Optimalisasi pelibatan pemangku kepentingan masyarakat adat dan pelaku usaha daerah.
 `.trim();
 }
 
@@ -661,51 +529,36 @@ function createFallbackArticleText(
   temporal?: any,
 ): string {
   const docNames = docs.map((d) => d.title).join(', ');
-  const forwardPeriod = temporal
-    ? `${temporal.currentSemester} / TA ${temporal.currentYear + 1}`
-    : 'Periode Semester Mendatang';
+  const forwardPeriod = temporal ? `${temporal.currentSemester} / TA ${temporal.currentYear + 1}` : 'Periode Mendatang';
 
   return `# ${title}
 
-**Oleh: Tim Analis & Penulis Kebijakan BRIDA Kabupaten Mimika**
+**Kajian Analitis BRIDA Kabupaten Mimika**
 *Gaya Bahasa: ${tone.toUpperCase()} | Target Panjang: ${length}*
 
-## Pendahuluan & Konteks Kebijakan
-Dokumen acuan (${docNames}) menjadi landasan utama dalam penyusunan analisis kebijakan ini. Berdasarkan fakta lapangan dan dinamika pembangunan, Pemerintah Kabupaten Mimika terus mendorong akselerasi program berbasis bukti faktual (*evidence-based policy*).
+## I. Pendahuluan & Urgensi Masalah
+Dokumen acuan (${docNames || 'Data Riset Daerah'}) menjadi landasan utama dalam telaah kebijakan ini. Berdasarkan dinamika pembangunan, Pemerintah Kabupaten Mimika memprioritaskan akselerasi program berbasis bukti faktual (*evidence-based policy*).
 
-## Pembahasan Kausalitas & Evaluasi Capaian
-Dalam konteks tata kelola pemerintahan daerah, sintesis data menunjukkan bahwa deviasi antara target perencanaan dan realisasi fisik memerlukan evaluasi komprehensif. Faktor transparansi, akuntabilitas anggaran, dan kesiapan logistik lapangan menjadi kunci utama dalam menjaga stabilitas indikator makro daerah.
+## II. Telaah Regulasi & Analisis Komparatif
+Dalam kerangka otonomi daerah dan penataan aparatur, evaluasi berkala terhadap efektivitas regulasi daerah merupakan keniscayaan guna menjawab tantangan pelayanan publik di 18 distrik.
 
-## Rekomendasi Aksi Taktis & Intervensi Kebijakan (${forwardPeriod})
-1. **Langkah Cepat (Quick Wins)**: Percepatan sinkronisasi data realisasi fisik dan penagihan target pendapatan daerah pada triwulan berjalan.
-2. **Penguatan Tata Kelola**: Peningkatan pengawasan berkala oleh tim koordinasi BRIDA dan dinas teknis terkait untuk mengeliminasi sumbatan operasional (*bottlenecks*).
-3. **Mitigasi Berkelanjutan**: Perumusan kerangka alokasi program prioritas yang adaptif terhadap fluktuasi ekonomi dan tantangan geografis wilayah Mimika.
+## III. Evaluasi Dampak Sosial-Ekonomi Wilayah
+Sinergi antara pemerintah daerah, badan riset, dan sektor swasta menjadi pilar fundamental dalam menjaga stabilitas makroekonomi dan pemerataan kesejahteraan masyarakat.
 
----
-*Dikeluarkan oleh BRIDA SMART Analysis • Pemerintah Kabupaten Mimika*
+## IV. Rekomendasi Taktis & Roadmap Implementasi (${forwardPeriod})
+1. **Langkah Cepat (Quick Wins)**: Sosialisasi intensif dan harmonisasi regulasi di tingkat dinas teknis.
+2. **Penguatan Kelembagaan**: Pembentukan tim kerja terpadu untuk monitoring kepatuhan dan pelaporan berkala.
+3. **Mitigasi Berkelanjutan**: Penyelarasan alokasi program prioritas dengan kebutuhan riil masyarakat.
 `.trim();
 }
 
 function cleanArticleTitlePrefix(text: string): string {
   if (!text) return '';
-  // Menghapus awalan klasifikasi dari H1 header di awal dokumen
-  let cleaned = text.replace(
-    /^(#\s*)(?:Artikel\s+Strategis|Laporan\s+Strategis|Draft|Draf|Analisis\s+Strategis|Rilis\s+Pers):\s*/i,
-    '$1',
-  );
-  // Menghapus awalan klasifikasi jika tanpa H1 header di awal dokumen
-  cleaned = cleaned.replace(
-    /^(?:Artikel\s+Strategis|Laporan\s+Strategis|Draft|Draf|Analisis\s+Strategis|Rilis\s+Pers):\s*/i,
-    '',
-  );
-  return cleaned;
+  return text
+    .replace(/^(#\s*)(?:Artikel\s+Strategis|Laporan\s+Strategis|Draft|Draf|Analisis\s+Strategis|Rilis\s+Pers):\s*/i, '$1')
+    .replace(/^(?:Artikel\s+Strategis|Laporan\s+Strategis|Draft|Draf|Analisis\s+Strategis|Rilis\s+Pers):\s*/i, '');
 }
 
-/**
- * Post-Generation Citation Verifier
- * Memvalidasi dan menormalkan seluruh sitasi URL di dalam naskah artikel.
- * Menghilangkan tautan download internal yang rusak dan menggantinya dengan portal publik resmi BPS.
- */
 function verifyAndCleanCitations(
   articleText: string,
   validScrapedUrls: Array<{ url: string; title: string }>,
@@ -717,33 +570,17 @@ function verifyAndCleanCitations(
     validUrlMap.set(item.url.trim(), item.title);
   });
 
-  // Ganti atau normalkan URL yang tidak valid / URL download error
   return articleText.replace(/\[(https?:\/\/[^\]\s]+)\]/g, (match, url) => {
     const cleanUrl = url.trim();
 
-    // 1. Jika URL cocok dengan pola download yang rusak, ganti dengan canonical landing page BPS
-    if (
-      /download\.php/i.test(cleanUrl) ||
-      /web-api\.bps\.go\.id/i.test(cleanUrl)
-    ) {
+    if (/download\.php/i.test(cleanUrl) || /web-api\.bps\.go\.id/i.test(cleanUrl)) {
       return `[https://mimikakab.bps.go.id]`;
     }
 
-    // 2. Jika URL ada dalam daftar terverifikasi, pertahankan
-    if (validUrlMap.has(cleanUrl)) {
+    if (validUrlMap.has(cleanUrl)) return match;
+    if (/\.(go\.id|antaranews\.com|bps\.go\.id|kompas\.com|tempo\.co|cnbcindonesia\.com|bisnis\.com|kontan\.co\.id|katadata\.co\.id)/i.test(cleanUrl)) {
       return match;
     }
-
-    // 3. Jika domain terpercaya (.go.id / media berita nasional), pertahankan
-    if (
-      /\.(go\.id|antaranews\.com|bps\.go\.id|kompas\.com|tempo\.co|cnbcindonesia\.com|bisnis\.com|kontan\.co\.id|katadata\.co\.id)/i.test(
-        cleanUrl,
-      )
-    ) {
-      return match;
-    }
-
-    // 4. Jika URL tidak dikenal / terindikasi halusinasi, normalkan ke portal BPS Mimika
-    return `[https://mimikakab.bps.go.id]`;
+    return match;
   });
 }

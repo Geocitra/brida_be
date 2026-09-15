@@ -48,7 +48,7 @@ const TONE_AUDIENCE_STEERING_MAP: Record<
     focus:
       'Rekomendasi tindakan taktis ke depan, dampak makro-fiskal daerah, perumusan regulasi percepatan, serta penetapan langkah cepat (Quick Wins).',
     style:
-      'Eksekutif, berorientasi solusi, berwibawa, lugas, padat, dan mencerminkan kepemimpinan daerah.',
+      'Eksekutif, berorientasi solusi, berwibawa, lugas, padat, dan menyajikan tabel komparasi strategis.',
     vocabulary:
       'langkah konkret, percepatan pembangunan, aksi cepat (quick wins), implementasi kebijakan, efisiensi fiskal, dampak langsung.',
   },
@@ -57,25 +57,25 @@ const TONE_AUDIENCE_STEERING_MAP: Record<
     focus:
       'Audit kepatuhan tata kelola, evaluasi deviasi operasional sektoral dinas, transparansi anggaran, identifikasi sumbatan teknis (bottlenecks), dan mitigasi risiko ke depan.',
     style:
-      'Tajam, analitis, ketat, menuntut akuntabilitas teknis sektoral, serta berorientasi evaluatif-korektif.',
+      'Tajam, analitis, ketat, menuntut akuntabilitas teknis sektoral, serta membedah data menggunakan tabel deviasi.',
     vocabulary:
       'deviasi anggaran, sumbatan teknis (bottlenecks), kelemahan tata kelola, ketimpangan alokasi, audit kepatuhan, pemborosan sumber daya.',
   },
   akademis: {
-    target: 'Rekan Jurnalis Media Massa, Peneliti Badan Riset, Akademisi Perguruan Tinggi, dan LSM',
+    target: 'Rekan Peneliti Badan Riset, Akademisi Perguruan Tinggi, dan Mitra Pembangunan',
     focus:
-      'Metodologi evaluasi kebijakan, analisis kausalitas berbasis bukti faktual (*evidence-based*), komparasi indikator standar nasional, dan dekomposisi variabel ekonomi pembangunan.',
+      'Metodologi evaluasi kebijakan, analisis kausalitas berbasis bukti faktual (*evidence-based*), komparasi indikator standar nasional, dan dekomposisi statistik.',
     style:
-      'Rasional, metodologis, objektif, berimbang (*cover-both-sides*), serta menggunakan terminologi standar ilmiah.',
+      'Rasional, metodologis, objektif, berimbang (*cover-both-sides*), serta menyajikan tabel statistik lengkap.',
     vocabulary:
       'analisis kausalitas, bukti faktual (evidence-based), metodologi evaluasi, korelasi indikator standar, signifikansi statistik, postulat.',
   },
   populer: {
     target: 'Masyarakat Umum, Tokoh Adat, dan Publik Kabupaten Mimika',
     focus:
-      'Dampak nyata langsung kebijakan terhadap kehidupan warga, penyederhanaan istilah birokrasi, keterbukaan alokasi anggaran, dan manfaat fasilitas pembangunan.',
+      'Dampak nyata langsung kebijakan terhadap kehidupan warga, penyederhanaan istilah birokrasi, keterbukaan anggaran, dan manfaat fasilitas pembangunan.',
     style:
-      'Sederhana, naratif, mengalir, komunikatif, ramah pembaca (*highly readable*), serta menggunakan analogi kehidupan sehari-hari.',
+      'Komunikatif, mengalir, ramah pembaca, namun tetap dilengkapi sorotan angka statistik utama.',
     vocabulary:
       'manfaat nyata, kehidupan sehari-hari, transparansi publik, kemudahan layanan, uang rakyat, kesejahteraan keluarga.',
   },
@@ -91,25 +91,12 @@ export class ContextAssemblyService {
     private readonly tokenEstimator: TokenEstimatorUtil,
   ) { }
 
-  /**
-   * Menghasilkan titik jangkar waktu sistem saat ini secara otomatis (Information Expert)
-   */
   public generateTemporalGroundTruth(): TemporalMetadata {
     const now = new Date();
 
     const monthNamesIndo = [
-      'Januari',
-      'Februari',
-      'Maret',
-      'April',
-      'Mei',
-      'Juni',
-      'Juli',
-      'Agustus',
-      'September',
-      'Oktober',
-      'November',
-      'Desember',
+      'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+      'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember',
     ];
 
     const monthIndex = now.getMonth();
@@ -120,13 +107,9 @@ export class ContextAssemblyService {
     const currentFullDate = `${day} ${currentMonth} ${currentYear}`;
 
     let currentQuarter = 'Triwulan I (Q1)';
-    if (monthIndex >= 3 && monthIndex <= 5) {
-      currentQuarter = 'Triwulan II (Q2)';
-    } else if (monthIndex >= 6 && monthIndex <= 8) {
-      currentQuarter = 'Triwulan III (Q3)';
-    } else if (monthIndex >= 9) {
-      currentQuarter = 'Triwulan IV (Q4)';
-    }
+    if (monthIndex >= 3 && monthIndex <= 5) currentQuarter = 'Triwulan II (Q2)';
+    else if (monthIndex >= 6 && monthIndex <= 8) currentQuarter = 'Triwulan III (Q3)';
+    else if (monthIndex >= 9) currentQuarter = 'Triwulan IV (Q4)';
 
     const currentSemester =
       monthIndex < 6
@@ -143,9 +126,6 @@ export class ContextAssemblyService {
     };
   }
 
-  /**
-   * Merakit seluruh modalitas data menjadi prompt komposit multimodal dengan kepatuhan waktu mutlak
-   */
   async assemblePromptPayload(
     options: MultimodalAssembleOptions,
   ): Promise<MultimodalPromptPayload> {
@@ -233,20 +213,20 @@ export class ContextAssemblyService {
     }
 
     const localSection = localContextText
-      ? `=== DOKUMEN UTAMA (OTORITAS LOKAL - GROUND TRUTH BRIDA MIMIKA) ===\n\nGunakan dokumen di bawah ini sebagai sumber kebenaran utama fakta daerah:\n\n${localContextText}`
+      ? `=== DOKUMEN UTAMA (GROUND TRUTH LOKAL KABUPATEN MIMIKA) ===\n\nGunakan dokumen ini sebagai basis realitas capaian daerah Mimika:\n\n${localContextText}`
       : '';
 
     const externalSection = externalContextText
-      ? `=== DOKUMEN PENDUKUNG (PENGAYAAN EKSTERNAL / KOMPARASI NASIONAL) ===\n\nGunakan dokumen di bawah ini secara proaktif untuk komparasi, dasar hukum pusat, atau pengayaan analisis:\n\n${externalContextText}`
+      ? `=== DOKUMEN PENDUKUNG (REGULASI PUSAT / DATA STATISTIK) ===\n\nGunakan dokumen di bawah ini untuk pengayaan analisis:\n\n${externalContextText}`
       : '';
 
     const scrapedSection =
       scrapedUrls.length > 0
-        ? `=== DOKUMEN PENDUKUNG (SITASI WEB LANGSUNG) ===\n\nBerikut adalah konten dari tautan web atau hasil penelusuran eksternal resmi. Gunakan sebagai acuan pendukung analitis.\n\nATURAN SITASI WEB WAJIB: Sematkan sitasi URL aslinya menggunakan format kurung siku langsung: [URL] di sebelah setiap klaim fakta dari web tersebut.\n\n` +
+        ? `=== REFERENSI BENCHMARK DUNIA & DATA WEB EKSTERNAL ===\n\nBerikut adalah data dan artikel pembanding terkini dari internet. Gunakan sebagai tolak ukur (benchmark) komparasi makro.\n\nATURAN SITASI WEB: Sematkan sitasi [URL] persis di sebelah setiap klaim data yang dikutip.\n\n` +
         scrapedUrls
           .map(
             (page, idx) =>
-              `[SUMBER ${idx + 1}]:\nJudul: ${page.title}\nTautan: ${page.url}\nKonten:\n${page.text}`,
+              `[SUMBER BENCHMARK ${idx + 1}]:\nJudul: ${page.title}\nTautan: ${page.url}\nKonten:\n${page.text}`,
           )
           .join('\n\n')
         : '';
@@ -256,31 +236,27 @@ export class ContextAssemblyService {
       .join('\n\n');
 
     if (!contextPayloadText) {
-      this.logger.log(
-        '[Zero-Reference Mode] Tidak ada dokumen acuan terdaftar. AI berfokus pada draf & ketikan pengguna.',
-      );
       contextPayloadText =
-        'Sistem berjalan dalam mode mandiri. Gunakan draf ketikan pengguna dan pengetahuan internal Anda untuk menulis naskah.';
+        'Sistem beroperasi dalam mode pengetahuan umum. Gunakan draf pengguna dan pengetahuan internal Anda untuk menganalisis dan menyusun data.';
     }
 
     let lengthGuidance = `
-Target Panjang Teks: SHORT (~700 kata) - Ringkas & Padat.
-- Struktur Penulisan: Terbagi secara tegas dalam 2-3 bab/bagian utama yang langsung menyoroti inti permasalahan.
-- Kepadatan Paragraf: Setiap paragraf berbobot padat, dengan batasan maksimal 4-5 kalimat per paragraf.
-- Efisiensi Kata: Gunakan kalimat aktif dan hindari penjelasan bertele-tele.
-    `;
+Target Panjang Naskah: SHORT (~700 kata) - Padat & Terfokus.
+- Uraikan permasalahan pokok, pertimbangan regulasi, dan rekomendasi utama secara lugas dan jelas.
+`;
+
     if (targetLength === 'MEDIUM') {
       lengthGuidance = `
-Target Panjang Teks: MEDIUM (~1000 kata) - Sedang & Komprehensif.
-- Struktur Penulisan: Terbagi secara sistematis dalam 3-4 bab/bagian utama (contoh: Latar Belakang/Pendahuluan, Analisis Fakta Spasial, dan Rekomendasi Kebijakan).
-- Kepadatan Paragraf: Setiap paragraf menguraikan satu ide pokok dengan penjelasan pendukung yang relevan (sekitar 5-7 kalimat per paragraf).
-      `;
+Target Panjang Naskah: MEDIUM (~1.000 kata) - Komprehensif & Proporsional.
+- Eksplorasi topik secara proporsional dengan analisis yang runtut dan rapi.
+`;
     } else if (targetLength === 'LONG') {
       lengthGuidance = `
-Target Panjang Teks: LONG (~1500 kata) - Mendalam, Mendetail, & Analitis Formal.
-- Struktur Penulisan: Terbagi secara terstruktur penuh dalam 4-5 bab/bagian utama (contoh: Latar Belakang Kebijakan, Gambaran Umum Spasial Wilayah, Analisis Komparatif Indikator Pembangunan, Matriks Hambatan Sektoral, dan Rekomendasi Program Strategis). Sediakan pula sub-bagian (sub-headings) untuk masing-masing topik.
-- Kepadatan Paragraf: Pembahasan mendalam dengan rincian data sektoral, matriks program, dan rujukan historis kebijakan (sekitar 6-8 kalimat per paragraf).
-      `;
+Target Panjang Naskah: LONG (MINIMAL 1.500 KATA HINGGA 2.500 KATA PENUH) - Sangat Mendalam & Komprehensif.
+- Silakan berekspresi secara total! Kupas tuntas topik ini dari berbagai sudut pandang.
+- Anda DIBEBASKAN menggunakan format apa pun (tabel komparasi, poin analitis, diagram teks, atau narasi mendalam) yang paling logis dan menarik untuk topik ini.
+- Tidak perlu mencantumkan bab daftar pustaka di halaman belakang; manfaatkan seluruh kapasitas kata untuk menyajikan analisis mendalam yang berbobot.
+`;
     }
 
     const steering =
@@ -294,11 +270,10 @@ Target Panjang Teks: LONG (~1500 kata) - Mendalam, Mendetail, & Analitis Formal.
 - Posisi Semester Aktif : ${temporal.currentSemester}
 - Posisi Triwulan Aktif : ${temporal.currentQuarter}
 
-PANDUAN PENYELARASAN WAKTU WAJIB:
-1. Posisi waktu Anda saat ini adalah: ${temporal.currentFullDate} (${temporal.currentSemester}).
-2. Jika topik mengevaluasi periode sebelum ${temporal.currentMonth} ${temporal.currentYear} (misalnya Semester I ${temporal.currentYear} atau tahun-tahun sebelumnya), perlakukan periode tersebut sebagai HISTORIS (TELAH BERLALU).
-3. Evaluasi kinerja membedah data aktual yang sudah terjadi di periode lampau tersebut.
-4. SELURUH REKOMENDASI KEBIJAKAN, RENCANA AKSI, DAN SOLUSI TAKTIS WAJIB DITUJUKAN UNTUK PERIODE MASA DEPAN (${temporal.currentSemester} atau Tahun Anggaran ${temporal.currentYear + 1}). DILARANG merekomendasikan aksi mundur ke periode yang sudah selesai.
+PANDUAN PENYELARASAN WAKTU:
+1. Posisi waktu sistem Anda saat ini adalah: ${temporal.currentFullDate} (${temporal.currentSemester}).
+2. Evaluasi kinerja masa lalu diperlakukan secara retrospektif (fakta historis).
+3. SELURUH REKOMENDASI KEBIJAKAN DAN TINDAKAN OPERASIONAL WAJIB DITUJUKAN UNTUK PERIODE MASA DEPAN (${temporal.currentSemester} atau Tahun Anggaran ${temporal.currentYear + 1}). DILARANG merekomendasikan aksi mundur ke masa yang sudah lewat.
 `;
 
     const customSystemPersona = `
@@ -306,31 +281,23 @@ ${BRIDA_SYSTEM_PERSONA}
 
 ${temporalAnchorBlock.trim()}
 
-ATURAN TARGET AUDIENS GAYA BAHASA (TONE STEERING):
-- Artikel ini ditujukan kepada: **${steering.target}**
-- Fokus utama penulisan: ${steering.focus}
-- Gaya penyampaian bahasa: ${steering.style}
-- **Kosa Kata Fungsional Wajib (Vocabulary Steer):** Anda wajib menyisipkan istilah-istilah taktis berikut secara natural dalam naskah: *${steering.vocabulary}*
+ATURAN TARGET AUDIENS & MODULASI GAYA:
+- Sasaran Kebijakan: **${steering.target}**
+- Fokus Penulisan: ${steering.focus}
+- Gaya Bahasa: ${steering.style}
+- Istilah Taktis Wajib: *${steering.vocabulary}*
 
-ATURAN PRIORITAS SUMBER DATA (HIERARCHY OF TRUTH):
-1. Utamakan fakta dari [DOKUMEN UTAMA] sebagai kebenaran mutlak data daerah Kabupaten Mimika.
-2. Gunakan data dari [DOKUMEN PENDUKUNG] secara proaktif untuk komparasi nasional, berita terkini, atau dasar hukum kementerian.
-3. Sebutkan nama dokumen rujukan secara alami dan sematkan sitasi aslinya [docId:chunkIndex] atau [URL] di samping klaim data.
+PANDUAN CORONG TERBALIK (INVERTED FUNNEL):
+1. Mulai dengan konteks umum atau tolak ukur (benchmark) nasional/kementerian dari sumber eksternal.
+2. Sintesiskan dengan fakta riil dari [DOKUMEN UTAMA] Kabupaten Mimika.
+3. Rumuskan kesimpulan dan rekomendasi yang terapan khusus bagi Kabupaten Mimika.
 
-ATURAN FORMATTING & PARAGRAF (SPASI GANDA):
-- Setiap pergantian paragraf baru wajib dipisahkan menggunakan spasi ganda standar Markdown (double newline / '\\n\\n').
-
-ATURAN PANJANG NASKAH & BLUEPRINT DENSITAS STRUKTURAL:
+BLUEPRINT PANJANG NASKAH KANVAS:
 ${lengthGuidance}
-- Kembangkan pembahasan, analisis kausalitas, dan rekomendasi prospektif agar memenuhi target panjang di atas.
-
-ATURAN COLLABORATIVE CO-WRITING:
-- Jika pengguna menyertakan draf tulisan pribadinya, prioritas utama adalah memoles, menyempurnakan struktur kalimat, dan melanjutkan draf tersebut secara mulus (*seamless*) dengan mempertahankan ide orisinalnya.
 `;
 
     const userParts: any[] = [];
-
-    let userTextContent = `[INSTRUKSI / DRAF INPUT PENGGUNA]\n${userQuery}`;
+    let userTextContent = `[INSTRUKSI / PERTANYAAN PENGGUNA]\n${userQuery}`;
 
     if (currentDraft && currentDraft.trim().length > 0) {
       userTextContent += `\n\n[DRAF ARTIKEL AKTIF SAAT INI (PANE KANAN)]\n${currentDraft}`;
@@ -339,7 +306,7 @@ ATURAN COLLABORATIVE CO-WRITING:
 
     if (images.length > 0) {
       this.logger.log(
-        `[Multimodal Ingest] Memasukkan ${images.length} data biner visual ke prompt user parts.`,
+        `[Multimodal Ingest] Menyertakan ${images.length} data biner visual ke dalam prompt.`,
       );
       images.forEach((img) => {
         userParts.push({
@@ -358,7 +325,7 @@ ATURAN COLLABORATIVE CO-WRITING:
       },
       {
         role: 'system',
-        content: `[DOKUMEN TERLAMPIR - RUANG KONTEKS STATIS]\n${contextPayloadText}`,
+        content: `[DOKUMEN ACUAN TERDAFTAR]\n${contextPayloadText}`,
       },
       {
         role: 'user',
@@ -378,7 +345,7 @@ ATURAN COLLABORATIVE CO-WRITING:
       this.tokenEstimator.estimateArrayTokenCount(rawTextsForEstimation);
 
     this.logger.log(
-      `[ContextAssemblyBroker] Sukses merakit Composite Multimodal Prompt dengan Temporal Anchor ${temporal.currentFullDate} (Estimasi Input: ${estimatedTokens} tokens).`,
+      `[ContextAssemblyBroker] Sukses merakit Inverted Funnel Prompt Payload (${estimatedTokens} estimated input tokens).`,
     );
 
     return {
@@ -393,7 +360,7 @@ ATURAN COLLABORATIVE CO-WRITING:
     districts?: string[],
   ): Promise<string> {
     this.logger.log(
-      `[Hybrid Strategy A - Stuffed] Total tokens (${totalTokens}) < ${DYNAMIC_CONTEXT_TOKEN_THRESHOLD}. Menggunakan Full-Document Stuffing untuk ${validDocs.length} dokumen.`,
+      `[Stuffing Strategy] Total token (${totalTokens}) < ${DYNAMIC_CONTEXT_TOKEN_THRESHOLD}. Menyematkan dokumen utuh untuk ${validDocs.length} berkas.`,
     );
 
     const allChunksText: string[] = [];
@@ -418,7 +385,7 @@ ATURAN COLLABORATIVE CO-WRITING:
 
     return allChunksText.length > 0
       ? allChunksText.join('\n\n')
-      : 'Konteks dokumen rujukan yang relevan dengan topik pertanyaan tidak ditemukan untuk distrik yang dipilih.';
+      : 'Dokumen acuan terpilih tidak memiliki teks yang cocok untuk distrik yang diminta.';
   }
 
   private async executeDynamicRagStrategy(
@@ -430,7 +397,7 @@ ATURAN COLLABORATIVE CO-WRITING:
     districts?: string[],
   ): Promise<string> {
     this.logger.log(
-      `[Hybrid Strategy B - Dynamic RAG] Total tokens (${totalTokens}) >= ${DYNAMIC_CONTEXT_TOKEN_THRESHOLD}. Mengevaluasi kedekatan semantik kueri...`,
+      `[Dynamic RAG Strategy] Total token (${totalTokens}) >= ${DYNAMIC_CONTEXT_TOKEN_THRESHOLD}. Menjalankan pencarian semantik...`,
     );
 
     const retrievalTasks = validDocs.map((doc) =>
@@ -444,7 +411,7 @@ ATURAN COLLABORATIVE CO-WRITING:
         })
         .catch((err) => {
           this.logger.warn(
-            `Gagal mengambil chunks semantik untuk Dokumen ID '${doc.id}': ${err.message}`,
+            `Gagal mengambil chunk semantik untuk ID '${doc.id}': ${err.message}`,
           );
           return [];
         }),
@@ -458,52 +425,15 @@ ATURAN COLLABORATIVE CO-WRITING:
       .sort((a, b) => b.similarityScore - a.similarityScore)
       .slice(0, topK);
 
-    const swappedOutCount =
-      combinedFlatResults.length - highlyRelevantResults.length;
-
-    this.logger.log(
-      `[Dynamic Semantic Swapping] Selesai menyaring konteks. ${highlyRelevantResults.length} chunks relevan dimasukkan, ${swappedOutCount} chunks sampah dibuang.`,
-    );
-
     if (highlyRelevantResults.length > 0) {
       return highlyRelevantResults
         .map(
           (item, idx) =>
-            `--- CHUNK ${idx + 1} (Dokumen: ${item.documentId}, Indeks: ${item.chunkIndex
-            }, Skor Semantik: ${item.similarityScore.toFixed(3)}) ---\n${item.rawText
-            }`,
+            `--- CHUNK RELEVAN ${idx + 1} (Dokumen: ${item.documentId}, Indeks: ${item.chunkIndex}, Skor: ${item.similarityScore.toFixed(3)}) ---\n${item.rawText}`,
         )
         .join('\n\n');
     }
 
-    return 'Konteks dokumen rujukan yang relevan dengan topik pertanyaan tidak ditemukan.';
-  }
-
-  async assembleSpatialDensityManifest(documentIds: string[]): Promise<string> {
-    const manifestParts: string[] = [];
-
-    for (const id of documentIds) {
-      const doc = await this.repository.findById(id);
-      if (doc) {
-        const density = await this.repository.getDocumentDistrictDensity(id);
-
-        const densityLines = Object.entries(density)
-          .map(
-            ([district, count]) =>
-              `- Distrik ${district}: Disebut sebanyak ${count} kali dalam dokumen`,
-          )
-          .join('\n');
-
-        manifestParts.push(
-          `=== PROFIL KERAPATAN SPASIAL DOKUMEN: ${doc.title} ===\n` +
-          `Laporan mencatat intensitas pembahasan distrik sebagai berikut:\n` +
-          `${densityLines ||
-          'Tidak ada spesifikasi penyebutan nama distrik secara eksplisit.'
-          }`,
-        );
-      }
-    }
-
-    return manifestParts.join('\n\n');
+    return 'Konteks dokumen rujukan yang relevan dengan pertanyaan tidak ditemukan.';
   }
 }

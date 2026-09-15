@@ -9,11 +9,10 @@ import { DocxParserAdapter } from './parsers/docx-parser.adapter';
 import { TxtParserAdapter } from './parsers/txt-parser.adapter';
 import { ParserFactory } from './parsers/parser.factory';
 
-// Embedding & Batching
 import { ExternalEmbeddingAdapter } from './providers/external-embedding.adapter';
 import { EmbeddingBatchProcessor } from './utils/embedding-batch-processor.util';
+import { OpenAiVisionOcrService } from './services/openai-vision-ocr.service';
 
-// Sanitizers Pipeline
 import { UnicodeNormalizerFilter } from './utils/sanitizers/unicode-normalizer.filter';
 import { WhitespaceTrimmerFilter } from './utils/sanitizers/whitespace-trimmer.filter';
 import { HeaderFooterRemoverFilter } from './utils/sanitizers/header-footer-remover.filter';
@@ -30,10 +29,11 @@ import { TextSanitizerPipeline } from './utils/sanitizers/text-sanitizer.pipelin
     DocxParserAdapter,
     TxtParserAdapter,
     ParserFactory,
-    // Embedding & Batching Providers
+    OpenAiVisionOcrService,
+
     ExternalEmbeddingAdapter,
     EmbeddingBatchProcessor,
-    // Sanitizers
+
     UnicodeNormalizerFilter,
     WhitespaceTrimmerFilter,
     HeaderFooterRemoverFilter,
@@ -47,6 +47,7 @@ import { TextSanitizerPipeline } from './utils/sanitizers/text-sanitizer.pipelin
     SemanticChunkerService,
     ExternalEmbeddingAdapter,
     EmbeddingBatchProcessor,
+    OpenAiVisionOcrService,
   ],
 })
 export class DocumentIngestionModule { }

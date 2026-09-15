@@ -1,138 +1,61 @@
 import { Injectable, UnprocessableEntityException, Logger } from '@nestjs/common';
 import pdfParse from 'pdf-parse';
 import { IDocumentParser, ParsedDocumentOutput } from '../interfaces/document-parser.interface';
+import { OpenAiVisionOcrService } from '../services/openai-vision-ocr.service';
 
 @Injectable()
 export class PdfParserAdapter implements IDocumentParser {
   private readonly logger = new Logger(PdfParserAdapter.name);
+
+  constructor(private readonly openAiVisionOcr: OpenAiVisionOcrService) {}
 
   supports(mimeType: string): boolean {
     return mimeType === 'application/pdf';
   }
 
   async parse(buffer: Buffer): Promise<ParsedDocumentOutput> {
-    try {
-      const apiKey = process.env.LLAMA_CLOUD_API_KEY;
-      if (apiKey && apiKey.trim().length > 0) {
-        this.logger.log(`[PdfParserAdapter] Memulai ekstraksi Layout-Aware ke Markdown menggunakan LlamaParse...`);
-        const markdownText = await this.extractToMarkdownWithTablePreservation(buffer, apiKey);
-        
-        if (markdownText && markdownText.trim().length > 0) {
-          const estimatedPages = Math.max(1, Math.ceil(markdownText.length / 3000));
-          return {
-            rawText: markdownText,
-            pageCount: estimatedPages,
-          };
-        }
-        this.logger.warn(`[PdfParserAdapter] LlamaParse mengembalikan hasil kosong atau gagal. Jatuh ke parser standar.`);
-      }
+    let pageCount = 1;
+    let rawText = '';
 
-      this.logger.log(`[PdfParserAdapter] Menggunakan pdf-parse standar.`);
+    // 1. Ekstraksi Cepat Lokal Menggunakan pdf-parse
+    try {
       const data = await pdfParse(buffer);
-      const rawText = data.text ? data.text.trim() : '';
+      pageCount = data.numpages || 1;
+      rawText = data.text ? data.text.trim() : '';
+      this.logger.log(`[PdfParserAdapter] pdf-parse membaca ${pageCount} halaman (${rawText.length} karakter).`);
+    } catch (parseErr: any) {
+      this.logger.warn(`[PdfParserAdapter] pdf-parse gagal membaca teks: ${parseErr.message}`);
+    }
 
-      if (!rawText || rawText.length === 0) {
-        throw new UnprocessableEntityException(
-          'Tidak ada teks yang dapat diekstraksi dari PDF. Dokumen mungkin berupa scan gambar murni tanpa lapisan OCR.',
+    // 2. SENSOR DETEKSI DOKUMEN SCAN (Jika teks kosong atau < 150 karakter)
+    const isScannedDocument = !rawText || rawText.length < 150;
+
+    if (isScannedDocument) {
+      this.logger.warn(
+        `[SCAN PDF TERDETEKSI] Dokumen PDF berupa scan fotokopi/gambar (hanya ${rawText.length} karakter terbaca). Mengaktifkan OpenAI Vision OCR Engine...`,
+      );
+
+      const ocrText = await this.openAiVisionOcr.extractTextFromPdfScan(buffer, 'document_scan.pdf');
+
+      if (ocrText && ocrText.trim().length > 100) {
+        this.logger.log(
+          `[OpenAI OCR Berhasil] Sukses mentranskripsikan ${ocrText.length} karakter dari berkas scan fisik via OpenAI!`,
         );
+        return {
+          rawText: ocrText.trim(),
+          pageCount: pageCount || Math.max(1, Math.ceil(ocrText.length / 3000)),
+        };
       }
 
-      this.logger.log(`[PdfParserAdapter] Berhasil mengekstraksi ${data.numpages} halaman PDF (${rawText.length} karakter).`);
-
-      return {
-        rawText,
-        pageCount: data.numpages || 1,
-      };
-    } catch (err: any) {
-      if (err instanceof UnprocessableEntityException) {
-        throw err;
-      }
-      if (err.message && err.message.toLowerCase().includes('password')) {
-        throw new UnprocessableEntityException('PDF terproteksi kata sandi.');
-      }
-      this.logger.error(`Error pada PdfParserAdapter: ${err.message}`);
-      throw new UnprocessableEntityException(`Gagal membaca struktur PDF: ${err.message}`);
+      // Jika OpenAI Vision juga tidak dapat mengenali tulisan
+      throw new UnprocessableEntityException(
+        'Dokumen berupa scan gambar dan OpenAI Vision tidak berhasil mengekstraksi teks. Pastikan tulisan pada scan terbaca jelas.',
+      );
     }
-  }
 
-  private async extractToMarkdownWithTablePreservation(buffer: Buffer, apiKey: string): Promise<string> {
-    try {
-      const formData = new FormData();
-      const blob = new Blob([new Uint8Array(buffer)], { type: 'application/pdf' });
-      formData.append('file', blob, 'document.pdf');
-
-      this.logger.log(`[LlamaParse] Mengunggah dokumen ke LlamaCloud...`);
-      const uploadResponse = await fetch('https://api.cloud.llamaindex.ai/api/v2/parse/upload', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-        },
-        body: formData,
-      });
-
-      if (!uploadResponse.ok) {
-        const errorText = await uploadResponse.text();
-        throw new Error(`Unggah LlamaParse gagal: ${errorText}`);
-      }
-
-      const uploadResult: any = await uploadResponse.json();
-      const jobId = uploadResult.id;
-      this.logger.log(`[LlamaParse] Unggah sukses. Job ID: ${jobId}. Memulai polling status...`);
-
-      let status = 'PENDING';
-      let checkResult: any = null;
-      const maxRetries = 60; // 2 menit maksimal
-      
-      for (let i = 0; i < maxRetries; i++) {
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        
-        const checkResponse = await fetch(`https://api.cloud.llamaindex.ai/api/v2/parse/${jobId}`, {
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-          },
-        });
-
-        if (!checkResponse.ok) {
-          throw new Error(`Polling status LlamaParse gagal: ${await checkResponse.text()}`);
-        }
-
-        checkResult = await checkResponse.json();
-        status = checkResult.status;
-        this.logger.log(`[LlamaParse] Polling #${i + 1}: Status = ${status}`);
-
-        if (status === 'SUCCESS') {
-          break;
-        }
-        if (status === 'ERROR') {
-          throw new Error(`Job LlamaParse gagal di server: ${checkResult.error || 'Unknown error'}`);
-        }
-      }
-
-      if (status !== 'SUCCESS') {
-        throw new Error('Timeout tercapai saat menunggu proses LlamaParse selesai.');
-      }
-
-      this.logger.log(`[LlamaParse] Proses selesai. Mengambil data hasil Markdown...`);
-      const markdownResponse = await fetch(`https://api.cloud.llamaindex.ai/api/v2/parse/${jobId}?expand=markdown`, {
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-        },
-      });
-
-      if (!markdownResponse.ok) {
-        throw new Error(`Gagal mengambil hasil markdown: ${await markdownResponse.text()}`);
-      }
-
-      const finalResult: any = await markdownResponse.json();
-      const markdownText = finalResult.markdown?.full_markdown 
-        || finalResult.markdown?.pages?.map((p: any) => p.markdown).join('\n\n')
-        || '';
-
-      this.logger.log(`[LlamaParse] Sukses mengambil Markdown (${markdownText.length} karakter).`);
-      return markdownText;
-    } catch (err: any) {
-      this.logger.error(`[LlamaParse Error] Gagal melakukan ekstraksi: ${err.message}`);
-      return ''; // Mengembalikan teks kosong agar jatuh ke fallback parser
-    }
+    return {
+      rawText,
+      pageCount,
+    };
   }
 }

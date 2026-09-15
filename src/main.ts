@@ -23,9 +23,13 @@ async function bootstrap() {
 
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
-  // Serve static assets for uploaded media
+  // Serve static assets for uploaded media with explicit CORS headers
   app.useStaticAssets(join(process.cwd(), 'uploads'), {
     prefix: '/uploads',
+    setHeaders: (res) => {
+      res.setHeader('Access-Control-Allow-Origin', '*');
+      res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin');
+    },
   });
 
   // Enable CORS for PWA Frontend

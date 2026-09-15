@@ -1,4 +1,4 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
@@ -18,10 +18,8 @@ import { ChatRepository } from '../repositories/chat.repository';
 import { UrlScraperService } from '../services/url-scraper.service';
 import { WebSearchService } from '../services/web-search.service';
 
-// --- Impor Style Guide Global ---
 import { EDITORIAL_STYLE_GUIDE } from '../../ai-agent/constants/system-prompts.constant';
 
-// Skema Respons Obrolan Kolaboratif Dual-Pane dengan Penegakan Temporal & Kausalitas
 const DUAL_PANE_COOPERATIVE_SCHEMA = {
   type: 'object',
   required: ['answer'],
@@ -29,26 +27,28 @@ const DUAL_PANE_COOPERATIVE_SCHEMA = {
     answer: {
       type: 'string',
       description:
-        `Conversational feedback/thought process dalam Bahasa Indonesia yang menjelaskan analisis data, diagnosis deviasi, serta tindak lanjut kebijakan. Format WAJIB menggunakan Markdown kaya (header ##, teks tebal, bullet list, dan tabel perbandingan data jika relevan). Sematkan sitasi [docId:chunkIndex] atau [URL] bersebelahan dengan klaim data. Jika memberikan rekomendasi atau rencana intervensi aksi, WAJIB mengarahkannya secara prospektif untuk periode MASA DEPAN (bukan merekomendasikan aksi mundur ke masa lalu). WAJIB patuhi panduan berikut:\n\n${EDITORIAL_STYLE_GUIDE}`,
+        'Respons interaktif untuk ruang obrolan (Saluran 1). Bebas bereksplorasi! Jawab layaknya ChatGPT yang cerdas dan luwes. ' +
+        'Gunakan format tabel, bullet points, teks tebal, atau paragraf mengalir sesuka Anda, bergantung pada format apa yang paling pas untuk menjawab pengguna secara informatif.\n\n' +
+        EDITORIAL_STYLE_GUIDE,
     },
     suggestions: {
       type: 'array',
       items: { type: 'string' },
-      description:
-        'Hasilkan tepat 3 opsi pertanyaan lanjutan atau topik diskusi taktis yang relevan untuk memandu pengguna melanjutkan pembahasan.',
+      description: '3 saran pertanyaan atau topik eksplorasi lanjutan.',
     },
     updatedArticle: {
       type: 'object',
       properties: {
         title: {
           type: 'string',
-          description:
-            'Judul artikel naskah publikasi yang diperbarui atau baru dibuat. DILARANG menggunakan awalan seperti "Artikel Strategis:" atau "Judul:".',
+          description: 'Judul resmi dokumen naskah.',
         },
         draftMarkdown: {
           type: 'string',
           description:
-            `Teks naskah artikel utuh yang diperbarui atau baru dibuat dalam format CommonMark Markdown bersih. Jika pengguna hanya bertanya tanpa meminta penulisan/pembaruan naskah, kembalikan currentDraft tanpa modifikasi atau kosongkan. JIKA MENGHASILKAN TEKS BARU: Evaluasi data lampau dilakukan secara retrospektif, sedangkan seluruh rekomendasi dan rencana aksi WAJIB dialokasikan ke masa depan (Forward-Looking Actions). WAJIB PATUHI:\n\n${EDITORIAL_STYLE_GUIDE}`,
+            'Draf dokumen utuh untuk Kanvas Cetak A4 (Saluran 2). DIBEBASKAN SEPENUHNYA menggunakan format struktur apa pun (Tabel Matriks, Bab, Narasi, Diagram Alir Teks) yang paling relevan. ' +
+            'Eksplorasi materi seluas-luasnya secara komprehensif tanpa batasan template sempit. TIDAK PERLU mencantumkan referensi sitasi yang membuang kuota kata. ' +
+            'Kosongkan properti ini jika pengguna hanya menyapa santai atau tidak meminta pembuatan naskah dokumen.',
         },
       },
     },
@@ -63,7 +63,6 @@ export class QaIntentHandler implements IIntentHandler {
   );
   private readonly tempDir = path.join(this.uploadDir, 'temp');
 
-  // Pola Regular Expression untuk menangkap URL HTTP/HTTPS secara aman
   private readonly URL_REGEX = /https?:\/\/[^\s]+/gi;
 
   constructor(
@@ -82,18 +81,16 @@ export class QaIntentHandler implements IIntentHandler {
   }
 
   canHandle(query: string): boolean {
-    return true; // Fallback utama obrolan umum & kolaborasi penulisan
+    return true;
   }
 
   async execute(payload: IntentExecutionPayload): Promise<any> {
     this.logger.log(
-      `[QaIntentHandler] Memproses kolaborasi tanya-jawab untuk Sesi ID: ${payload.sessionId}...`,
+      `[QaIntentHandler] Memproses kueri adaptif untuk Sesi ID: ${payload.sessionId}...`,
     );
 
-    // 1. Sanitasi prompt dari pola serangan Prompt Injection
     const sanitizedQuery = this.sanitizer.sanitize(payload.query);
 
-    // Scraping URL proaktif jika ada tautan dalam query pengguna
     const foundUrls = sanitizedQuery.match(this.URL_REGEX) || [];
     const currentScrapedUrls: Array<{ url: string; title: string; text: string }> =
       [];
@@ -126,7 +123,6 @@ export class QaIntentHandler implements IIntentHandler {
       }
     }
 
-    // 2. Rekam pesan pengguna ke dalam database obrolan (dengan metadata scrapedUrls jika ada)
     await this.chatMemory.recordUserMessage(
       payload.sessionId,
       sanitizedQuery,
@@ -135,22 +131,19 @@ export class QaIntentHandler implements IIntentHandler {
         : undefined,
     );
 
-    // 3. Ambil sliding window memory sesi aktif
     const memory = await this.chatMemory.getActiveSlidingWindowMemory(
       payload.sessionId,
     );
 
-    // 4. Resolusi Lampiran Berkas (Bypass Ingest untuk PDF/DOCX & Base64 untuk Screenshots)
     const documentIds = [...(memory.documentIds || [])];
     const images: Array<{ mimeType: string; base64Data: string }> = [];
 
     if (payload.attachments && payload.attachments.length > 0) {
       for (const att of payload.attachments) {
         if (att.classification) {
-          // Kasus A: Lampiran dokumen kebijakan (Jalankan Ingestion Bypass)
           try {
             this.logger.log(
-              `[Bypass Ingest] Menjalankan bypass pendaftaran dokumen untuk ID berkas sementara: ${att.fileId}`,
+              `[Bypass Ingest] Menjalankan pendaftaran dokumen untuk berkas sementara: ${att.fileId}`,
             );
 
             const categoryMap = {
@@ -173,18 +166,16 @@ export class QaIntentHandler implements IIntentHandler {
 
             documentIds.push(ingestedDoc.id);
 
-            // Tautkan dokumen baru ini ke sesi obrolan aktif secara dinamis
             await this.chatRepository.linkDocumentSource(
               payload.sessionId,
               ingestedDoc.id,
             );
           } catch (ingestErr: any) {
             this.logger.error(
-              `[Bypass Ingest Failed] Gagal mendaftarkan dokumen sementara ke repositori: ${ingestErr.message}`,
+              `[Bypass Ingest Failed] Gagal mendaftarkan dokumen sementara: ${ingestErr.message}`,
             );
           }
         } else {
-          // Kasus B: Lampiran gambar screenshot dari clipboard (Ctrl+V)
           try {
             const files = fs.readdirSync(this.tempDir);
             const targetFile = files.find((f) => f.startsWith(att.fileId));
@@ -213,7 +204,6 @@ export class QaIntentHandler implements IIntentHandler {
       }
     }
 
-    // 5. PENANGANAN PROAKTIF EKSTERNAL (Web Scraping & Search)
     const proactiveScrapedUrls: Array<{
       url: string;
       title: string;
@@ -221,16 +211,17 @@ export class QaIntentHandler implements IIntentHandler {
     }> = [];
     let isProactiveSearch = false;
 
+    // Filter agar kueri sapaan/tes tidak memicu pencarian web yang tidak perlu
     const isAnalyticalQuery =
-      sanitizedQuery.length > 12 &&
-      !/^(halo|hi|hai|pagi|siang|sore|malam|terima kasih|thanks|p|tes|test)/i.test(
-        sanitizedQuery,
+      sanitizedQuery.length > 8 &&
+      !/^(halo|hi|hai|pagi|siang|sore|malam|terima kasih|thanks|p|tes|test|oke|siap)$/i.test(
+        sanitizedQuery.trim(),
       );
 
     if (isAnalyticalQuery) {
       try {
         this.logger.log(
-          `[Proactive Search] Kueri analitis terdeteksi. Melakukan pengayaan eksternal secara proaktif...`,
+          `[Proactive Search] Kueri analitis terdeteksi. Menjalankan penelusuran benchmark eksternal...`,
         );
         const searchResults = await this.webSearchService.searchReputableWeb(
           sanitizedQuery,
@@ -244,14 +235,12 @@ export class QaIntentHandler implements IIntentHandler {
               url: res.link,
               title: res.title,
               text: res.scrapedText
-                ? `=== ARTIKEL LUAR ${i + 1}: ${res.title} ===\nTautan: ${res.link
-                }\nKonten Halaman:\n${res.scrapedText}`
-                : `=== ARTIKEL LUAR ${i + 1}: ${res.title} ===\nTautan: ${res.link
-                }\nRingkasan Fakta: ${res.snippet}`,
+                ? `=== REFERENSI BENCHMARK ${i + 1}: ${res.title} ===\nTautan: ${res.link}\nKonten Halaman:\n${res.scrapedText}`
+                : `=== REFERENSI BENCHMARK ${i + 1}: ${res.title} ===\nTautan: ${res.link}\nRingkasan Fakta: ${res.snippet}`,
             });
           });
           this.logger.log(
-            `[Proactive Search] Konteks eksternal tervalidasi berhasil diintegrasikan secara transien.`,
+            `[Proactive Search] Berhasil mengintegrasikan ${searchResults.length} sumber referensi eksternal.`,
           );
         }
       } catch (searchErr: any) {
@@ -261,7 +250,6 @@ export class QaIntentHandler implements IIntentHandler {
       }
     }
 
-    // Format riwayat obrolan jangka pendek untuk prompt, dan kumpulkan scrapedUrls yang ada di metadata
     const scrapedUrlsFromHistory: Array<{
       url: string;
       title: string;
@@ -280,14 +268,12 @@ export class QaIntentHandler implements IIntentHandler {
       },
     );
 
-    // Satukan seluruh scrapedUrls transien
     const allScrapedUrls = [
       ...scrapedUrlsFromHistory,
       ...currentScrapedUrls,
       ...proactiveScrapedUrls,
     ];
 
-    // 6. Rakit Prompt Payload Multimodal Terpadu via Context Broker (Menyuntikkan Temporal Ground Truth otomatis)
     const promptPayload = await this.contextAssembly.assemblePromptPayload({
       documentIds,
       images,
@@ -299,16 +285,14 @@ export class QaIntentHandler implements IIntentHandler {
       scrapedUrls: allScrapedUrls,
     });
 
-    // Sisipkan sejarah obrolan dan ringkasan episodik jangka panjang ke dalam prompt payload
     promptPayload.messages.splice(2, 0, ...historyMessages);
     if (memory.runningSummary) {
       promptPayload.messages.splice(1, 0, {
         role: 'system',
-        content: `[RINGKASAN EPISODIK OBROLAN SEBELUMNYA]\nBerikut adalah ringkasan jalannya obrolan sebelumnya untuk memicu ingatan jangka panjang Anda: ${memory.runningSummary}`,
+        content: `[RINGKASAN EPISODIK OBROLAN SEBELUMNYA]\nBerikut adalah ringkasan jalannya obrolan sebelumnya: ${memory.runningSummary}`,
       });
     }
 
-    // 7. Eksekusi Model LLM Multimodal terpadu
     const analysisResult =
       await this.llmAdapter.generateStructuredAnalysis<any>(
         promptPayload.messages,
@@ -332,7 +316,7 @@ export class QaIntentHandler implements IIntentHandler {
       );
     }
 
-    // 8. Proteksi Guardrail: Mencegah teks penolakan/obrolan AI menimpa draf artikel asli
+    // Guardrail: Pastikan draf tidak terisi sembarangan jika pengguna hanya mengobrol kasual
     if (
       analysisResult.updatedArticle &&
       analysisResult.updatedArticle.draftMarkdown
@@ -346,20 +330,13 @@ export class QaIntentHandler implements IIntentHandler {
         draft.includes('belum bisa ditulis') ||
         draft.includes('belum menemukan isi artikel') ||
         draft.includes('tidak memiliki akses');
-      const isShortNonArticle = !draft.startsWith('#') && draft.length < 400;
+      const isShortNonArticle = !draft.startsWith('#') && draft.length < 250;
 
       if (isIdenticalToAnswer || isRefusalKeyword || isShortNonArticle) {
-        this.logger.warn(
-          `[Guardrail] Mencegah pembaruan draf dengan teks penolakan/obrolan AI. Teks dicegah: "${draft.slice(
-            0,
-            100,
-          )}..."`,
-        );
         delete analysisResult.updatedArticle;
       }
     }
 
-    // 8.5 Sinkronisasi State Naskah Draf ke Database (Pane Kanan)
     if (
       analysisResult.updatedArticle &&
       analysisResult.updatedArticle.draftMarkdown
@@ -380,11 +357,10 @@ export class QaIntentHandler implements IIntentHandler {
       );
 
       this.logger.log(
-        `[State Sync] Draf naskah dan judul artikel aktif berhasil disinkronkan ke PostgreSQL.`,
+        `[State Sync] Draf naskah A4 berhasil disinkronkan ke PostgreSQL.`,
       );
     }
 
-    // 9. Simpan balasan AI Agent ke dalam riwayat obrolan
     const assistantResponseContent = JSON.stringify(analysisResult);
     await this.chatMemory.recordAssistantMessage(
       payload.sessionId,
@@ -394,7 +370,6 @@ export class QaIntentHandler implements IIntentHandler {
         : undefined,
     );
 
-    // 10. Kompresi Memori Latar Belakang (Asynchronous Compaction Guard)
     if (
       this.chatMemory.shouldTriggerCompaction(
         memory.prunedMessagesCount,
@@ -437,8 +412,8 @@ export class QaIntentHandler implements IIntentHandler {
     const compactionPrompt: MultimodalChatMessage[] = [
       {
         role: 'system',
-        content: `Anda adalah asisten pencatat memori kognitif BRIDA Mimika. 
-Tugas Anda: Perbarui [RINGKASAN EPISODIK OBROLAN] secara padat dan kronologis (maksimal 200 kata). 
+        content: `Anda adalah asisten pencatat memori kognitif BRIDA Mimika.
+Tugas Anda: Perbarui [RINGKASAN EPISODIK OBROLAN] secara padat dan kronologis (maksimal 200 kata).
 Gabungkan ringkasan sebelumnya dengan obrolan baru tanpa pengantar apa pun.
 WAJIB patuhi gaya bahasa berikut saat meringkas:\n${EDITORIAL_STYLE_GUIDE}`,
       },
@@ -484,10 +459,6 @@ WAJIB patuhi gaya bahasa berikut saat meringkas:\n${EDITORIAL_STYLE_GUIDE}`,
   }
 }
 
-/**
- * Normalizer & Verifier Sitasi Eksternal
- * Memastikan tautan dalam jawaban Q&A tidak mengandung endpoint download yang rusak.
- */
 function cleanCitationsText(
   text: string,
   validScrapedUrls: Array<{ url: string; title: string }>,
@@ -521,6 +492,6 @@ function cleanCitationsText(
       return match;
     }
 
-    return `[https://mimikakab.bps.go.id]`;
+    return match;
   });
 }

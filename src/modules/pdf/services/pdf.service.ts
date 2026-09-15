@@ -1,4 +1,10 @@
-import { Injectable, InternalServerErrorException, Logger, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+  OnModuleInit,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { join } from 'path';
 import { existsSync, readFileSync } from 'fs';
 import * as puppeteer from 'puppeteer-core';
@@ -9,9 +15,8 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PdfService.name);
   private browser: puppeteer.Browser | null = null;
 
-  // Pemetaan font ke berkas TTF lokal di assets/fonts
   private readonly fontFileMap = {
-    'Calibri': {
+    Calibri: {
       normal: 'calibri.ttf',
       bold: 'calibrib.ttf',
       italic: 'calibrii.ttf',
@@ -23,13 +28,13 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
       italic: 'timesi.ttf',
       boldItalic: 'timesbi.ttf',
     },
-    'Verdana': {
+    Verdana: {
       normal: 'verdana.ttf',
       bold: 'verdanab.ttf',
       italic: 'verdanai.ttf',
       boldItalic: 'verdanaz.ttf',
     },
-    'Arial': {
+    Arial: {
       normal: 'arial.ttf',
       bold: 'arialbd.ttf',
       italic: 'ariali.ttf',
@@ -38,17 +43,19 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
   };
 
   async onModuleInit() {
-    this.logger.log('Menginisialisasi PdfService - Menyiapkan Singleton Browser...');
+    this.logger.log('Menginisialisasi PdfService - Menyiapkan Singleton Browser Chromium...');
     try {
       await this.getBrowser();
-      this.logger.log('Singleton Browser berhasil di-boot dan stand-by.');
+      this.logger.log('Singleton Browser Chromium siap beroperasi.');
     } catch (err: any) {
-      this.logger.warn(`Gagal meluncurkan browser saat startup: ${err.message}. Browser akan diluncurkan sesuai kebutuhan (lazy-load).`);
+      this.logger.warn(
+        `Gagal meluncurkan browser saat bootstrap: ${err.message}. Browser akan diluncurkan saat dibutuhkan (Lazy-load).`,
+      );
     }
   }
 
   async onModuleDestroy() {
-    this.logger.log('Menutup PdfService - Menghentikan Singleton Browser...');
+    this.logger.log('Menghentikan Singleton Browser Chromium...');
     if (this.browser) {
       try {
         await this.browser.close();
@@ -59,24 +66,20 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  /**
-   * Mengembalikan instance browser yang sedang berjalan, atau meluncurkan yang baru jika belum ada/bermasalah.
-   */
   private async getBrowser(): Promise<puppeteer.Browser> {
     if (this.browser && this.browser.connected) {
       return this.browser;
     }
 
-    // Jika instance tidak aktif atau terputus, pastikan kita close dulu
     if (this.browser) {
       try {
         await this.browser.close();
-      } catch { }
+      } catch {}
       this.browser = null;
     }
 
     const executablePath = this.getExecutablePath();
-    this.logger.log(`Meluncurkan instance Chromium baru menggunakan: ${executablePath}`);
+    this.logger.log(`Meluncurkan instance Chromium baru: ${executablePath}`);
 
     this.browser = await puppeteer.launch({
       executablePath,
@@ -88,25 +91,21 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
         '--disable-gpu',
         '--no-first-run',
         '--no-zygote',
-        '--single-process', // Hemat RAM di VPS
+        '--single-process',
         '--disable-extensions',
       ],
     });
 
-    // Auto-recovery jika browser crash/close tak terduga
     this.browser.on('disconnected', () => {
-      this.logger.warn('Koneksi Chromium terputus. Instance akan di-reset.');
+      this.logger.warn('Koneksi Chromium terputus. Instance akan di-reset otomatis.');
       this.browser = null;
     });
 
     return this.browser;
   }
 
-  /**
-   * Menemukan executable Chromium/Chrome secara dinamis berdasarkan OS
-   */
   private getExecutablePath(): string {
-    let executablePath = '/usr/bin/chromium'; // Default Linux / Docker
+    let executablePath = '/usr/bin/chromium';
 
     if (process.platform === 'win32') {
       const winPaths = [
@@ -125,9 +124,6 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
     return executablePath;
   }
 
-  /**
-   * Membaca font lokal dan mengonversinya ke Base64 string
-   */
   private getFontBase64(filename: string): string {
     const isProd = process.env.NODE_ENV === 'production';
     const fontsDir = join(process.cwd(), isProd ? 'dist/assets/fonts' : 'src/assets/fonts');
@@ -141,10 +137,6 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
     return readFileSync(filePath).toString('base64');
   }
 
-  /**
-   * Mengonversi referensi gambar lokal /uploads/media/ menjadi data URI Base64 langsung dari disk server
-   * Menjamin pemuatan 100% instan dan deterministik di dalam container Docker tanpa loopback HTTP.
-   */
   private resolveLocalImagesToInline(html: string): string {
     if (!html) return '';
 
@@ -155,7 +147,14 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
           const filePath = join(process.cwd(), 'uploads', 'media', filename);
           if (existsSync(filePath)) {
             const ext = filename.split('.').pop()?.toLowerCase() || 'png';
-            const mime = ext === 'jpg' || ext === 'jpeg' ? 'image/jpeg' : ext === 'webp' ? 'image/webp' : ext === 'svg' ? 'image/svg+xml' : 'image/png';
+            const mime =
+              ext === 'jpg' || ext === 'jpeg'
+                ? 'image/jpeg'
+                : ext === 'webp'
+                  ? 'image/webp'
+                  : ext === 'svg'
+                    ? 'image/svg+xml'
+                    : 'image/png';
             const base64Data = readFileSync(filePath).toString('base64');
             return `${prefix}data:${mime};base64,${base64Data}${suffix}`;
           }
@@ -163,35 +162,32 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
           this.logger.warn(`[PdfService] Gagal membaca gambar lokal '${filename}': ${err.message}`);
         }
         return match;
-      }
+      },
     );
   }
 
-  /**
-   * Core generator PDF menggunakan Puppeteer dengan Singleton Browser
-   */
   async generatePdf(dto: GeneratePdfDto): Promise<Buffer> {
     const { htmlContent, fontFamily, fontSize, lineSpacing, marginCm } = dto;
-    const selectedFonts = this.fontFileMap[fontFamily as keyof typeof this.fontFileMap] || this.fontFileMap['Calibri'];
+    const selectedFonts =
+      this.fontFileMap[fontFamily as keyof typeof this.fontFileMap] || this.fontFileMap['Calibri'];
 
-    this.logger.log(`Memulai proses pencetakan PDF dengan font ${fontFamily}, size ${fontSize}pt, margin ${marginCm}cm`);
+    this.logger.log(
+      `[Puppeteer A4 Engine] Memulai kompilasi PDF (Font: ${fontFamily} ${fontSize}pt, LineSpacing: ${lineSpacing}, Margin: ${marginCm}cm)...`,
+    );
 
     let page: puppeteer.Page | null = null;
 
     try {
-      // 1. Load Base64 untuk 4 varian font terpilih
       const fontNormal = this.getFontBase64(selectedFonts.normal);
       const fontBold = this.getFontBase64(selectedFonts.bold);
       const fontItalic = this.getFontBase64(selectedFonts.italic);
       const fontBoldItalic = this.getFontBase64(selectedFonts.boldItalic);
 
-      // 2. Resolusi gambar lokal langsung dari disk untuk keandalan Docker
       const resolvedHtmlContent = this.resolveLocalImagesToInline(htmlContent);
 
-      // 3. Susun HTML dengan stylesheet @font-face base64
       const fullHtmlContent = `
         <!DOCTYPE html>
-        <html>
+        <html lang="id">
         <head>
           <meta charset="utf-8">
           <style>
@@ -220,11 +216,20 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
               font-style: italic;
             }
 
+            /* ── PENGATURAN HALAMAN FISIK KERTAS A4 ── */
+            @page {
+              size: A4 portrait;
+              margin-top: ${marginCm}cm;
+              margin-bottom: ${marginCm}cm;
+              margin-left: ${marginCm}cm;
+              margin-right: ${marginCm}cm;
+            }
+
             * {
               box-sizing: border-box;
             }
 
-            body, p, ul, ol, li, table, td, th {
+            body, p, ul, ol, li, table, td, th, blockquote {
               font-family: '${fontFamily}', sans-serif;
               font-size: ${fontSize}pt;
               line-height: ${lineSpacing};
@@ -234,7 +239,7 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
               margin: 0;
               padding: 0;
               background: white;
-              color: #000000;
+              color: #0f172a;
               word-wrap: break-word;
               white-space: pre-wrap;
               tab-size: 48px;
@@ -244,92 +249,150 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
               margin-top: 0;
               margin-bottom: 12px;
               text-align: justify;
+              text-justify: inter-word;
             }
+
+            /* ── PENCEGAHAN ORPHAN PADA HEADING ── */
+            h1, h2, h3, h4 {
+              color: #0f172a;
+              font-weight: 700;
+              page-break-after: avoid !important;
+              break-after: avoid !important;
+            }
+
+            h1 { font-size: 1.4em; margin-top: 20px; margin-bottom: 10px; }
+            h2 { font-size: 1.2em; margin-top: 16px; margin-bottom: 8px; }
+            h3 { font-size: 1.05em; margin-top: 14px; margin-bottom: 6px; }
 
             ul, ol {
               margin-top: 0;
               margin-bottom: 12px;
-              padding-left: 20px;
+              padding-left: 22px;
             }
 
             li {
               margin-bottom: 4px;
             }
 
-            div[data-type="page-break"] {
-              page-break-after: always;
-              break-after: page;
-              height: 0;
-              overflow: hidden;
-            }
-
-            div[data-auto-page-spacer], .no-print {
-              display: none !important;
-              height: 0 !important;
-              margin: 0 !important;
-              padding: 0 !important;
-            }
-
-            img {
-              max-width: 100%;
-              height: auto;
-            }
-
-            img[data-align="float-left"] {
-              float: left !important;
-              margin: 8px 24px 12px 0 !important;
-              display: inline-block !important;
-            }
-
-            img[data-align="float-right"] {
-              float: right !important;
-              margin: 8px 0 12px 24px !important;
-              display: inline-block !important;
-            }
-
-            img[data-align="left"] {
-              display: block !important;
-              margin: 16px auto 16px 0 !important;
-              clear: both !important;
-            }
-
-            img[data-align="right"] {
-              display: block !important;
-              margin: 16px 0 16px auto !important;
-              clear: both !important;
-            }
-
-            img[data-align="center"] {
-              display: block !important;
-              margin: 16px auto !important;
-              clear: both !important;
-            }
-
-            figcaption, .img-caption {
-              text-align: center;
-              font-size: 9pt;
-              font-style: italic;
-              color: #475569;
-              margin-top: 6px;
-              margin-bottom: 12px;
-            }
-
-            /* --- INJEKSI CSS TABEL --- */
+            /* ── STANDAR TABEL ANTI-OVERFLOW (LEBAR AMAN ~606PX) ── */
             table {
-              width: 100%;
-              border-collapse: collapse;
-              margin-top: 10px;
+              width: 100% !important;
+              max-width: 100% !important;
+              table-layout: fixed !important;
+              border-collapse: collapse !important;
+              margin-top: 12px;
               margin-bottom: 16px;
+              page-break-inside: auto;
             }
+
+            thead {
+              display: table-header-group; /* Otomatis mengulang header jika tabel berlanjut ke hal berikutnya */
+            }
+
+            tr {
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+            }
+
             th, td {
               border: 1px solid #cbd5e1;
               padding: 6px 10px;
               text-align: left;
               vertical-align: top;
+              word-break: break-word !important;
+              overflow-wrap: break-word !important;
+              font-size: 0.95em;
             }
+
             th {
-              background-color: #f8fafc;
+              background-color: #f8fafc !important;
               font-weight: bold;
+              color: #0f172a;
+            }
+
+            /* ── STANDAR BLOCKQUOTE CALLOUT KEBIJAKAN ── */
+            blockquote {
+              border-left: 3px solid #0d9488 !important;
+              background-color: #f0fdfa !important;
+              padding: 8px 14px !important;
+              margin: 12px 0 16px 0 !important;
+              color: #134e4a !important;
+              font-style: normal !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+            }
+
+            blockquote p {
+              margin-bottom: 0 !important;
+            }
+
+            /* ── PENGATURAN GAMBAR & TEKS WRAPPING ── */
+            img {
+              max-width: 100% !important;
+              height: auto !important;
+              object-fit: contain;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+            }
+
+            img[data-align="float-left"] {
+              float: left !important;
+              margin: 8px 18px 12px 0 !important;
+              display: inline-block !important;
+              clear: none !important;
+            }
+
+            img[data-align="float-right"] {
+              float: right !important;
+              margin: 8px 0 12px 18px !important;
+              display: inline-block !important;
+              clear: none !important;
+            }
+
+            img[data-align="left"] {
+              display: block !important;
+              margin: 14px auto 14px 0 !important;
+              clear: both !important;
+            }
+
+            img[data-align="right"] {
+              display: block !important;
+              margin: 14px 0 14px auto !important;
+              clear: both !important;
+            }
+
+            img[data-align="center"] {
+              display: block !important;
+              margin: 14px auto !important;
+              clear: both !important;
+            }
+
+            figcaption {
+              text-align: center;
+              font-size: 9pt;
+              font-style: italic;
+              color: #64748b;
+              margin-top: 4px;
+              margin-bottom: 12px;
+            }
+
+            /* ── KONTROL PEMUTUS HALAMAN ── */
+            div[data-type="page-break"] {
+              page-break-after: always !important;
+              break-after: page !important;
+              height: 0 !important;
+              margin: 0 !important;
+              padding: 0 !important;
+            }
+
+            /* ── PEMBERSIHAN ELEMEN SISTEM ── */
+            div[data-auto-page-spacer],
+            .no-print,
+            .citation-url-node {
+              display: none !important;
+              height: 0 !important;
+              margin: 0 !important;
+              padding: 0 !important;
             }
           </style>
         </head>
@@ -339,28 +402,31 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
         </html>
       `;
 
-      // 3. Dapatkan instance browser singleton dan buka halaman baru
       const browser = await this.getBrowser();
       page = await browser.newPage();
 
-      // Gunakan domcontentloaded untuk efisiensi RAM/waktu proses di VPS
-      await page.setContent(fullHtmlContent, { waitUntil: 'domcontentloaded' as any });
+      await page.setContent(fullHtmlContent, {
+        waitUntil: 'domcontentloaded',
+      });
 
-      // Pastikan semua gambar (terutama Base64 hasil copy-paste) selesai dimuat dan dirender sebelum mencetak
+      // Menunggu seluruh aset gambar dan font eksternal selesai termuat sebelum pencetakan
       await page.evaluate(async () => {
+        if ((document as any).fonts?.ready) {
+          await (document as any).fonts.ready;
+        }
+
         const images = Array.from(document.querySelectorAll('img'));
         await Promise.all(
           images.map((img) => {
-            if (img.complete) return;
+            if (img.complete) return Promise.resolve();
             return new Promise((resolve) => {
               img.onload = resolve;
               img.onerror = resolve;
             });
-          })
+          }),
         );
       });
 
-      // 4. Generate PDF buffer
       const marginPoints = `${marginCm}cm`;
       const pdfBuffer = await page.pdf({
         format: 'A4',
@@ -380,11 +446,10 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
         `,
       });
 
-      this.logger.log(`PDF berhasil dibuat, ukuran: ${pdfBuffer.length} bytes`);
+      this.logger.log(`[Puppeteer Success] Dokumen PDF berhasil dirakit (${pdfBuffer.length} bytes).`);
       return Buffer.from(pdfBuffer);
-
     } catch (error) {
-      this.logger.error('Error saat membuat PDF via Puppeteer:', error);
+      this.logger.error('Gagal merakit PDF via Puppeteer Engine:', error);
       const errMsg = error instanceof Error ? error.message : String(error);
       throw new InternalServerErrorException(`Failed to generate PDF: ${errMsg}`);
     } finally {
@@ -392,7 +457,7 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
         try {
           await page.close();
         } catch (err) {
-          this.logger.error('Gagal menutup tab halaman:', err);
+          this.logger.error('Gagal menutup tab Puppeteer:', err);
         }
       }
     }

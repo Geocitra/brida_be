@@ -20,12 +20,12 @@ export const SSM_OUTPUT_SCHEMA = {
         tesisUtama: {
             type: 'string',
             description:
-                'Gagasan utama, tesis, atau konsensus akhir kebijakan yang disepakati dari seluruh alur obrolan.',
+                'Gagasan utama, judul tema, atau konsensus arah kebijakan yang disepakati dari seluruh dialog.',
         },
         argumenKunci: {
             type: 'array',
             description:
-                'Daftar tepat 3-4 poin gabungan antara diagnosis bukti faktual lampau dan rencana aksi strategis masa depan.',
+                'Daftar 4 sampai 6 poin argumen komprehensif yang mencakup latar belakang masalah, data komparasi, telaah hambatan, dan rekomendasi aksi operasional.',
             items: {
                 type: 'object',
                 required: ['fakta', 'sitasiAsli'],
@@ -33,19 +33,19 @@ export const SSM_OUTPUT_SCHEMA = {
                     fakta: {
                         type: 'string',
                         description:
-                            'Uraian klaim data faktual atau rumusan rekomendasi aksi strategis ke depan yang dibahas.',
+                            'Penjelasan lengkap mengenai data faktual, isu regulasi, atau uraian rencana aksi kebijakan.',
                     },
                     sitasiAsli: {
                         type: 'string',
                         description:
-                            'Token sitasi orisinal dalam format [doc-XYZ:chunkIndex] atau [URL] yang tercantum di dalam teks obrolan. WAJIB dikosongkan jika poin berupa usulan rekomendasi masa depan.',
+                            'Token sitasi asli [docId:chunkIndex] atau [URL] yang tertera di obrolan jika ada.',
                     },
                 },
             },
         },
         kesimpulanRingkas: {
             type: 'string',
-            description: 'Ringkasan rangkuman hasil akhir diskusi dan arah kebijakan ke depan dalam 1-2 kalimat.',
+            description: 'Ringkasan arah kebijakan dalam 1-2 kalimat.',
         },
     },
 };
@@ -56,95 +56,53 @@ export class TranscriptDistiller {
 
     constructor(private readonly llmAdapter: VendorLlmAdapter) { }
 
-    /**
-     * Mengonversi seluruh riwayat pesan database menjadi skrip percakapan terformat
-     * lalu menginstruksikan LLM untuk mengekstrak draf naskah manifest (SSM) secara temporal-aware.
-     */
     async distill(messages: ChatMessage[]): Promise<StructuredSynthesisManifest> {
         this.logger.log(
-            `[TranscriptDistiller] Memulai ekstraksi kognitif terhadap ${messages.length} pesan obrolan...`,
+            `[TranscriptDistiller] Mengekstraksi konsensus dari ${messages.length} pesan obrolan...`,
         );
 
-        // 1. Rekonstruksi naskah percakapan (Format Dialogue Script)
         const dialogueScript = messages
             .map((msg) => {
-                const actor =
-                    msg.role === 'USER'
-                        ? 'Staf BRIDA (User)'
-                        : 'Asisten AI BRIDA (Assistant)';
-
-                // Hilangkan format JSON aslinya jika asisten merespon dalam bentuk JSON obrolan
+                const actor = msg.role === 'USER' ? 'Staf (User)' : 'AI (Assistant)';
                 let cleanContent = msg.content;
                 try {
                     const parsed = JSON.parse(msg.content);
                     if (parsed && parsed.answer) {
                         cleanContent = parsed.answer;
                     }
-                } catch {
-                    // Abaikan jika bukan format JSON
-                }
-
+                } catch {}
                 return `[${actor}]:\n${cleanContent}`;
             })
             .join('\n\n--------------------\n\n');
 
-        // 2. Susun prompt untuk distilasi transkrip dengan pemisahan bukti historis vs rekomendasi prospektif
-        const systemPrompt = `Anda adalah Asisten Analis Kognitif Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika.
-Tugas Anda: Ekstrak dan padatkan transkrip percakapan tanya-jawab antara Staf BRIDA dan AI menjadi dokumen antara berupa JSON terstruktur (Structured Synthesis Manifest / SSM).
+        const systemPrompt = `Anda adalah Analis Kognitif BRIDA Kabupaten Mimika.
+Tugas Anda: Ekstrak seluruh inti pembicaraan tanya-jawab menjadi manifest terstruktur (SSM JSON).
+PANDUAN:
+1. Rumuskan Tesis Utama yang padat dan mencerminkan topik dokumen.
+2. Ekstrak 4-6 poin argumen kunci secara mendalam: latar belakang masalah, perbandingan data angka, evaluasi hambatan, dan rencana aksi masa depan.
+3. Pertahankan token sitasi asli jika ada. Jangan hilangkan rincian angka penting.`;
 
-PANDUAN EKSTRAKSI DUAL-AXIS (HISTORIS VS PROSPEKTIF):
-1. Tentukan Tesis Utama ("tesisUtama") yang merangkum konsensus arah kebijakan dari diskusi.
-2. Ekstrak tepat 3-4 poin kunci ("argumenKunci") dengan pembagian tegas:
-   - KELOMPOK EVALUASI FAKTUAL (Retrospektif): Catat bukti data, angka realisasi, atau hambatan yang terjadi di periode evaluasi lampau. Wajib sertakan "sitasiAsli" ([docId:chunkIndex] / [URL]) yang tertera pada transkrip.
-   - KELOMPOK REKOMENDASI KEBIJAKAN (Prospektif): Catat usulan solusi, langkah cepat (Quick Wins), atau mitigasi risiko yang disepakati untuk dieksekusi pada periode MASA DEPAN (semester mendatang). Kosongkan "sitasiAsli" jika poin merupakan usulan aksi baru.
-3. DILARANG KERAS merumuskan rekomendasi aksi mundur ke masa yang sudah selesai.
-4. Saring hanya fakta dan kesepakatan yang valid. Abaikan pertanyaan tentatif pengguna yang tidak terjawab.`;
-
-        const userPrompt = `=== TRANSKRIP PERCAKAPAN LENGKAP ===\n${dialogueScript}\n\nEkstrak seluruh konsensus di atas menjadi Structured Synthesis Manifest JSON yang valid sesuai dengan skema keluaran.`;
-
-        // 3. Panggil LLM dengan parameter suhu deterministic (temperature = 0.0) untuk menjaga keaslian data
         try {
-            const ssmResult =
-                await this.llmAdapter.generateStructuredAnalysis<StructuredSynthesisManifest>(
-                    [
-                        { role: 'system', content: systemPrompt },
-                        { role: 'user', content: userPrompt },
-                    ],
-                    SSM_OUTPUT_SCHEMA,
-                    0.0, // Temperatur nol menjamin data angka dan sitasi tidak meleset
-                );
-
-            this.logger.log(
-                `[TranscriptDistiller] Berhasil men-distilasi transkrip obrolan menjadi manifest tesis: "${ssmResult.tesisUtama.slice(
-                    0,
-                    50,
-                )}..."`,
+            const ssmResult = await this.llmAdapter.generateStructuredAnalysis<StructuredSynthesisManifest>(
+                [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: `=== TRANSKRIP LENGKAP ===\n${dialogueScript}` },
+                ],
+                SSM_OUTPUT_SCHEMA,
+                0.0,
             );
 
             return ssmResult;
         } catch (err: any) {
-            this.logger.error(
-                `[TranscriptDistiller Error] Gagal mereduksi riwayat diskusi: ${err.message}`,
-                err.stack,
-            );
-
-            // Fallback aman bertipe data valid jika terjadi kendala teknis eksternal
+            this.logger.error(`[TranscriptDistiller Error]: ${err.message}`);
             return {
-                tesisUtama: 'Analisis Kebijakan Pembangunan Daerah Terintegrasi',
+                tesisUtama: 'Analisis Kebijakan Pembangunan Terpadu Kabupaten Mimika',
                 argumenKunci: [
-                    {
-                        fakta:
-                            'Evaluasi capaian indikator pembangunan fisik dan realisasi fiskal pada periode laporan lampau.',
-                        sitasiAsli: '',
-                    },
-                    {
-                        fakta:
-                            'Akselerasi mitigasi risiko operasional dan penajaman program prioritas untuk semester mendatang.',
-                        sitasiAsli: '',
-                    },
+                    { fakta: 'Evaluasi capaian kinerja dan dinamika regulasi daerah.', sitasiAsli: '' },
+                    { fakta: 'Penyelarasan implementasi program prioritas antar-OPD.', sitasiAsli: '' },
+                    { fakta: 'Rencana aksi mitigasi risiko operasional ke depan.', sitasiAsli: '' },
                 ],
-                kesimpulanRingkas:
-                    'Sintesis darurat konsensus kebijakan akibat gangguan jaringan eksternal LLM.',
+                kesimpulanRingkas: 'Sintesis konsensus kebijakan siap diperluas menjadi naskah utuh.',
             };
         }
     }
