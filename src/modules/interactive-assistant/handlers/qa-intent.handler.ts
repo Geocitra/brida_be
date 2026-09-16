@@ -20,6 +20,7 @@ import { WebSearchService } from '../services/web-search.service';
 
 import { EDITORIAL_STYLE_GUIDE } from '../../ai-agent/constants/system-prompts.constant';
 import { ensureDocumentTitleHeader } from '../services/article-generator.service';
+import { sanitizeQuickChartMarkdown } from '../utils/quickchart-sanitizer.util';
 
 const DUAL_PANE_COOPERATIVE_SCHEMA = {
   type: 'object',
@@ -49,11 +50,10 @@ const DUAL_PANE_COOPERATIVE_SCHEMA = {
           type: 'string',
           description:
             'Naskah dokumen formal utuh untuk Kanvas Cetak A4 TipTap (Saluran 2). DIBEBASKAN SEPENUHNYA menggunakan format struktur apa pun yang paling relevan. ' +
-            'ATURAN KEPADATAN STRUKTURAL MUTLAK: ' +
-            'Setiap bab atau sub-bagian pembahasan (##) WAJIB diuraikan MINIMAL 150 KATA dalam 2 sampai 4 paragraf tebal (tiap paragraf 4-7 kalimat). ' +
-            'DILARANG KERAS memecah naskah menjadi banyak sub-heading kecil yang hanya berisi 1-2 kalimat pendek. ' +
+            'BEBAS BEREKSPRESI DENGAN KEKAYAAN FORMAT: Sangat dianjurkan menggunakan tabel Markdown, poin analitis (bullet/numbered lists), grafik visual QuickChart (Pie/Bar Chart), dan narasi mengalir. ' +
+            'Setiap bab utama (##) harus memiliki substansi minimal 150 kata (akumulasi teks, tabel, dan poin). ' +
+            'DILARANG membuat sub-heading kecil yang hanya berisi 1-2 kalimat pendek tanpa elaborasi data. ' +
             'Eksplorasi materi seluas-luasnya sesuai target volume (SHORT: ~750 kata, MEDIUM: ~1.500 kata, LONG: MINIMAL 3.000 KATA PENUH). ' +
-            'WAJIB sertakan grafik visual QuickChart (Pie/Bar Chart) jika ada data komparatif. ' +
             'DILARANG menyisipkan referensi sitasi yang membuang kuota kata. ' +
             'KOSONGKAN properti ini jika pengguna hanya menyapa santai atau tidak meminta pembuatan naskah/dokumen.',
         },
@@ -312,6 +312,7 @@ export class QaIntentHandler implements IIntentHandler {
         analysisResult.answer,
         allScrapedUrls,
       );
+      analysisResult.answer = sanitizeQuickChartMarkdown(analysisResult.answer);
     }
     if (
       analysisResult.updatedArticle &&
@@ -320,6 +321,9 @@ export class QaIntentHandler implements IIntentHandler {
       analysisResult.updatedArticle.draftMarkdown = cleanCitationsText(
         analysisResult.updatedArticle.draftMarkdown,
         allScrapedUrls,
+      );
+      analysisResult.updatedArticle.draftMarkdown = sanitizeQuickChartMarkdown(
+        analysisResult.updatedArticle.draftMarkdown,
       );
     }
 

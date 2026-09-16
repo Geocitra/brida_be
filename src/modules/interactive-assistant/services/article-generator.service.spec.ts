@@ -38,14 +38,14 @@ describe('Article Generation Density & Length Constraint Suite (Phase 4 Validati
   });
 
   describe('1. Verifikasi System Persona & Editorial Style Guide Constraints', () => {
-    it('harus memuat aturan kepadatan minimal 150 kata per bab', () => {
+    it('harus memuat aturan kepadatan minimal 150 kata per bab dan kebebasan format', () => {
       expect(EDITORIAL_STYLE_GUIDE).toContain('MINIMAL 150 KATA');
-      expect(EDITORIAL_STYLE_GUIDE).toContain('2 sampai 4 paragraf tebal');
+      expect(EDITORIAL_STYLE_GUIDE).toContain('KEKAYAAN FORMAT & STRUKTUR VISUAL');
     });
 
-    it('harus memuat larangan tegas fragmentasi sub-heading kecil', () => {
-      expect(EDITORIAL_STYLE_GUIDE).toContain('LARANGAN FRAGMENTASI HEADING');
-      expect(EDITORIAL_STYLE_GUIDE).toContain('DILARANG KERAS memecah naskah');
+    it('harus memuat panduan pencegahan heading kosong (heading inflation)', () => {
+      expect(EDITORIAL_STYLE_GUIDE).toContain('Heading Inflation');
+      expect(EDITORIAL_STYLE_GUIDE).toContain('DILARANG hanyalah membuat bab kosong');
     });
   });
 

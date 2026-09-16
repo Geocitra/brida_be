@@ -15,6 +15,7 @@ import { ContextAssemblyService } from '../../ai-agent/services/context-assembly
 import { WebSearchService } from './web-search.service';
 
 import { EDITORIAL_STYLE_GUIDE } from '../../ai-agent/constants/system-prompts.constant';
+import { sanitizeQuickChartMarkdown } from '../utils/quickchart-sanitizer.util';
 
 export interface GenerateArticleOptions {
   documentIds: string[];
@@ -54,9 +55,9 @@ const ARTICLE_OUTPUT_SCHEMA = {
         'WAJIB diawali dengan judul utama menggunakan heading 1 (# Judul Utama Dokumen) yang persis sama dengan judulUsulan. ' +
         'Setelah itu cantumkan baris identitas penyusun (**Disusun oleh: Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika**), baru kemudian masuk ke ## I. Ringkasan Eksekutif atau ## II. Pendahuluan. ' +
         'DILARANG MENJADIKAN KATA "PENDAHULUAN" SEBAGAI HEADING 1 (#). ' +
-        'ATURAN KEPADATAN STRUKTURAL MUTLAK: ' +
-        'Setiap bab atau sub-bagian pembahasan (##) WAJIB diuraikan MINIMAL 150 KATA dalam 2 sampai 4 paragraf tebal (tiap paragraf berisi 4-7 kalimat berbobot). ' +
-        'DILARANG KERAS memecah naskah menjadi banyak sub-heading kecil (###) yang hanya berisi 1-2 kalimat pendek. ' +
+        'BEBAS BEREKSPRESI DENGAN KEKAYAAN FORMAT: Sangat dianjurkan menggunakan tabel Markdown, poin analitis (bullet/numbered lists), grafik QuickChart, dan narasi mendalam. ' +
+        'KEPADATAN SUBSTANSI: Setiap bab utama (##) WAJIB memiliki pembahasan yang bernilai minimal 150 kata (akumulasi bebas dari narasi, tabel data, dan butir analitis). ' +
+        'DILARANG membuat sub-heading kecil yang hanya berisi 1-2 kalimat pendek tanpa elaborasi substansi. ' +
         'Gunakan Markdown Image QuickChart (https://quickchart.io/chart?...) untuk memvisualisasikan data statistik jika ada. ' +
         'Kembangkan narasi argumentasi secara ekstensif sesuai target panjang teks (SHORT: ~750 kata, MEDIUM: ~1.500 kata, atau LONG: MINIMAL 3.000 KATA HINGGA 4.000 KATA PENUH). ' +
         'TIDAK PERLU mencantumkan bab daftar pustaka/referensi di akhir teks atau token sitasi mesin; manfaatkan seluruh kuota kata untuk analisis tuntas.',
@@ -198,14 +199,14 @@ ${argumenList}
 
     const lengthRequirementText = isLongLength
       ? 'TARGET PANJANG NASKAH: MINIMAL 3.000 HINGGA 4.000 KATA PENUH (Sangat Mendalam & Ekstensif). ' +
-        'Susun dalam 5–7 Bab utama (##). KETENTUAN KEPADATAN MUTLAK: Setiap bab/bagian WAJIB memiliki minimal 450–600 kata yang diuraikan dalam 3–5 paragraf tebal dan berbobot. ' +
+        'Susun dalam 5–7 Bab utama (##). Setiap bab/bagian WAJIB memiliki minimal 450–600 kata (akumulasi narasi, tabel data, dan poin rekomendasi). ' +
         'DILARANG KERAS membuat naskah pendek atau memecah teks menjadi belasan sub-heading kecil satu kalimat. ' +
-        'Silakan berekspresi secara total, kupas tuntas topik dari berbagai sudut pandang, dan wajib sertakan grafik visual QuickChart jika ada komparasi data.'
+        'Silakan berekspresi secara bebas dan sekreatif mungkin: gunakan tabel komparasi, poin-poin terstruktur, dan wajib sertakan grafik visual QuickChart jika ada komparasi data.'
       : isShortLength
         ? 'TARGET PANJANG NASKAH: ~750 KATA PENUH (Padat, Bernas & Terfokus). ' +
-          'Susun dalam 3–4 Bab utama (##). Setiap bagian WAJIB memiliki minimal 150–250 kata yang diuraikan dalam 2–3 paragraf tebal.'
+          'Susun dalam 3–4 Bab utama (##). Setiap bagian WAJIB memiliki minimal 150–250 kata (kombinasi narasi, poin, atau tabel).'
         : 'TARGET PANJANG NASKAH: ~1.500 KATA PENUH (Komprehensif, Proporsional & Mendalam). ' +
-          'Susun dalam 4–5 Bab utama (##). Setiap bagian WAJIB memiliki minimal 300–400 kata yang diuraikan dalam 2–4 paragraf tebal.';
+          'Susun dalam 4–5 Bab utama (##). Setiap bagian WAJIB memiliki minimal 300–400 kata yang kaya format (tabel, poin, grafik, narasi).';
 
     const userQuery = `
 [JUDUL DOKUMEN TARGET]: "${normalizedTitle}"
@@ -252,6 +253,7 @@ Rancang dan tulis naskah ini dengan kebebasan penuh. Gunakan keahlian analitis A
 
       fullArticleText = llmResult.fullText || formatArticleFromLlm(llmResult, normalizedTitle, temporal);
       fullArticleText = cleanArticleTitlePrefix(fullArticleText);
+      fullArticleText = sanitizeQuickChartMarkdown(fullArticleText);
 
       // Jika AI memberikan judul usulan resmi, gunakan sebagai nama sesi utama
       if (llmResult.judulUsulan && llmResult.judulUsulan.trim().length > 0) {
@@ -391,7 +393,8 @@ Rancang dan tulis naskah ini dengan kebebasan penuh. Gunakan keahlian analitis A
     const systemPrompt = `Anda adalah Analis Kebijakan Utama BRIDA Kabupaten Mimika.
 Tugas Anda: Perbarui atau revisi naskah dokumen kebijakan berikut berdasarkan instruksi pengguna.
 ${lengthRule}
-ATURAN KEPADATAN: Setiap bab/bagian (##) harus memiliki minimal 150 kata yang tersusun dalam 2-4 paragraf tebal. Dilarang membuat heading tipis 1-2 kalimat.
+KEKAYAAN FORMAT: Bebas gunakan tabel Markdown, bullet/numbered lists, dan grafik QuickChart jika memperjelas data.
+ATURAN KEPADATAN: Setiap bab/bagian (##) harus memiliki substansi minimal 150 kata (akumulasi narasi, tabel, dan butir analitis). Dilarang membuat heading kosong 1-2 kalimat.
 Pertahankan gaya bahasa ${session.tone || 'SOLUTIF'}.
 Pastikan naskah tetap utuh, terstruktur bab per bab, dan bernas.
 ${EDITORIAL_STYLE_GUIDE}
@@ -413,6 +416,7 @@ ${EDITORIAL_STYLE_GUIDE}
       revisedArticleText = llmResult.fullText || formatArticleFromLlm(llmResult, resolvedTitle, temporal);
       revisedArticleText = cleanArticleTitlePrefix(revisedArticleText);
       revisedArticleText = ensureDocumentTitleHeader(revisedArticleText, resolvedTitle);
+      revisedArticleText = sanitizeQuickChartMarkdown(revisedArticleText);
     } catch (err: any) {
       const fallbackRaw =
         `# ${resolvedTitle}\n\n[Revisi - ${new Date().toLocaleTimeString('id-ID')}]\n\n` +
