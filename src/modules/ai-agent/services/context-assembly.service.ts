@@ -240,21 +240,29 @@ export class ContextAssemblyService {
         'Sistem beroperasi dalam mode pengetahuan umum. Gunakan draf pengguna dan pengetahuan internal Anda untuk menganalisis dan menyusun data.';
     }
 
+    // --- PENENTUAN PANDUAN PANJANG NASKAH & KEPADATAN STRUKTURAL ---
     let lengthGuidance = `
-Target Panjang Naskah: SHORT (~700 kata) - Padat & Terfokus.
-- Uraikan permasalahan pokok, pertimbangan regulasi, dan rekomendasi utama secara lugas dan jelas.
+Target Panjang Naskah: SHORT (~750 KATA PENUH) - Padat, Bernas & Terfokus.
+- Susun dalam 3–4 Bab/Bagian utama (##).
+- Setiap bagian WAJIB memiliki minimal 150–250 kata yang diuraikan dalam 2–3 paragraf tebal.
+- Uraikan permasalahan pokok, pertimbangan regulasi, dan rekomendasi utama secara mendalam tanpa sub-bab kecil yang dangkal.
 `;
 
     if (targetLength === 'MEDIUM') {
       lengthGuidance = `
-Target Panjang Naskah: MEDIUM (~1.000 kata) - Komprehensif & Proporsional.
-- Eksplorasi topik secara proporsional dengan analisis yang runtut dan rapi.
+Target Panjang Naskah: MEDIUM (~1.500 KATA PENUH) - Komprehensif, Proporsional & Mendalam.
+- Susun dalam 4–5 Bab/Bagian utama (##).
+- Setiap bagian WAJIB memiliki minimal 300–400 kata yang diuraikan dalam 2–4 paragraf tebal (4-7 kalimat per paragraf).
+- Eksplorasi akar masalah, analisis data/indikator daerah, dan strategi tindak lanjut secara runtut dan komprehensif.
 `;
     } else if (targetLength === 'LONG') {
       lengthGuidance = `
-Target Panjang Naskah: LONG (MINIMAL 1.500 KATA HINGGA 2.500 KATA PENUH) - Sangat Mendalam & Komprehensif.
-- Silakan berekspresi secara total! Kupas tuntas topik ini dari berbagai sudut pandang.
-- Anda DIBEBASKAN menggunakan format apa pun (tabel komparasi, poin analitis, diagram teks, atau narasi mendalam) yang paling logis dan menarik untuk topik ini.
+Target Panjang Naskah: LONG (MINIMAL 3.000 KATA HINGGA 4.000 KATA PENUH) - Sangat Mendalam, Lengkap & Ekstensif.
+- Silakan berekspresi secara total! Kupas tuntas topik ini dari berbagai dimensi kebijakan, regulasi, dan dampak sosio-ekonomi wilayah Mimika.
+- Susun dalam 5–7 Bab/Bagian utama (##).
+- KETENTUAN KEPADATAN MUTLAK: Setiap bab/bagian WAJIB memiliki minimal 450–600 kata yang diuraikan dalam 3–5 paragraf tebal dan berbobot.
+- DILARANG KERAS membuat naskah pendek atau memecah teks menjadi belasan sub-heading kecil satu kalimat!
+- Anda DIBEBASKAN menggunakan format tabel komparasi, diagram alur teks, dan WAJIB menyertakan grafik visual QuickChart (Pie/Bar/Line).
 - Tidak perlu mencantumkan bab daftar pustaka di halaman belakang; manfaatkan seluruh kapasitas kata untuk menyajikan analisis mendalam yang berbobot.
 `;
     }

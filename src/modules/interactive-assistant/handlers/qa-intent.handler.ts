@@ -19,6 +19,7 @@ import { UrlScraperService } from '../services/url-scraper.service';
 import { WebSearchService } from '../services/web-search.service';
 
 import { EDITORIAL_STYLE_GUIDE } from '../../ai-agent/constants/system-prompts.constant';
+import { ensureDocumentTitleHeader } from '../services/article-generator.service';
 
 const DUAL_PANE_COOPERATIVE_SCHEMA = {
   type: 'object',
@@ -27,28 +28,34 @@ const DUAL_PANE_COOPERATIVE_SCHEMA = {
     answer: {
       type: 'string',
       description:
-        'Respons interaktif untuk ruang obrolan (Saluran 1). Bebas bereksplorasi! Jawab layaknya ChatGPT yang cerdas dan luwes. ' +
-        'Gunakan format tabel, bullet points, teks tebal, atau paragraf mengalir sesuka Anda, bergantung pada format apa yang paling pas untuk menjawab pengguna secara informatif.\n\n' +
+        'Jawaban interaktif di panel obrolan (Saluran 1). Bersifat bebas dan luwes layaknya ChatGPT! ' +
+        'Jika Anda ingin menampilkan grafik, gunakan Markdown Image QuickChart. ' +
+        'Jawab dengan gaya yang natural, informatif, dan mendalam tanpa terikat template baku.\n\n' +
         EDITORIAL_STYLE_GUIDE,
     },
     suggestions: {
       type: 'array',
       items: { type: 'string' },
-      description: '3 saran pertanyaan atau topik eksplorasi lanjutan.',
+      description: 'Tepat 3 opsi pertanyaan lanjutan atau topik eksplorasi berikutnya.',
     },
     updatedArticle: {
       type: 'object',
       properties: {
         title: {
           type: 'string',
-          description: 'Judul resmi dokumen naskah.',
+          description: 'Judul resmi dokumen naskah publikasi.',
         },
         draftMarkdown: {
           type: 'string',
           description:
-            'Draf dokumen utuh untuk Kanvas Cetak A4 (Saluran 2). DIBEBASKAN SEPENUHNYA menggunakan format struktur apa pun (Tabel Matriks, Bab, Narasi, Diagram Alir Teks) yang paling relevan. ' +
-            'Eksplorasi materi seluas-luasnya secara komprehensif tanpa batasan template sempit. TIDAK PERLU mencantumkan referensi sitasi yang membuang kuota kata. ' +
-            'Kosongkan properti ini jika pengguna hanya menyapa santai atau tidak meminta pembuatan naskah dokumen.',
+            'Naskah dokumen formal utuh untuk Kanvas Cetak A4 TipTap (Saluran 2). DIBEBASKAN SEPENUHNYA menggunakan format struktur apa pun yang paling relevan. ' +
+            'ATURAN KEPADATAN STRUKTURAL MUTLAK: ' +
+            'Setiap bab atau sub-bagian pembahasan (##) WAJIB diuraikan MINIMAL 150 KATA dalam 2 sampai 4 paragraf tebal (tiap paragraf 4-7 kalimat). ' +
+            'DILARANG KERAS memecah naskah menjadi banyak sub-heading kecil yang hanya berisi 1-2 kalimat pendek. ' +
+            'Eksplorasi materi seluas-luasnya sesuai target volume (SHORT: ~750 kata, MEDIUM: ~1.500 kata, LONG: MINIMAL 3.000 KATA PENUH). ' +
+            'WAJIB sertakan grafik visual QuickChart (Pie/Bar Chart) jika ada data komparatif. ' +
+            'DILARANG menyisipkan referensi sitasi yang membuang kuota kata. ' +
+            'KOSONGKAN properti ini jika pengguna hanya menyapa santai atau tidak meminta pembuatan naskah/dokumen.',
         },
       },
     },
@@ -341,15 +348,21 @@ export class QaIntentHandler implements IIntentHandler {
       analysisResult.updatedArticle &&
       analysisResult.updatedArticle.draftMarkdown
     ) {
-      const updatedDraft = analysisResult.updatedArticle.draftMarkdown;
       const updatedTitle =
         analysisResult.updatedArticle.title ||
         memory.articleTitle ||
-        memory.title;
+        memory.title ||
+        'Draf Kebijakan Publikasi';
+
+      // Pastikan draftMarkdown yang dikirim ke panel kanan diawali dengan Judul Resmi
+      analysisResult.updatedArticle.draftMarkdown = ensureDocumentTitleHeader(
+        analysisResult.updatedArticle.draftMarkdown,
+        updatedTitle,
+      );
 
       await this.chatRepository.updateActiveDraft(
         payload.sessionId,
-        updatedDraft,
+        analysisResult.updatedArticle.draftMarkdown,
       );
       await this.chatRepository.updateArticleMetadata(
         payload.sessionId,
@@ -357,7 +370,7 @@ export class QaIntentHandler implements IIntentHandler {
       );
 
       this.logger.log(
-        `[State Sync] Draf naskah A4 berhasil disinkronkan ke PostgreSQL.`,
+        `[State Sync] Draf naskah A4 berhasil disinkronkan ke PostgreSQL dengan H1 Judul Resmi.`,
       );
     }
 

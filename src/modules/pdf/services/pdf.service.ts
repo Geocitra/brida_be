@@ -260,8 +260,41 @@ export class PdfService implements OnModuleInit, OnModuleDestroy {
               break-after: avoid !important;
             }
 
-            h1 { font-size: 1.4em; margin-top: 20px; margin-bottom: 10px; }
-            h2 { font-size: 1.2em; margin-top: 16px; margin-bottom: 8px; }
+            /* Styling H1 khusus Judul Dokumen di A4 */
+            h1 {
+              font-size: 1.5em !important;
+              font-weight: 800 !important;
+              text-align: center !important;
+              text-transform: uppercase !important;
+              margin-top: 10px !important;
+              margin-bottom: 6px !important;
+              letter-spacing: -0.01em !important;
+              color: #0f172a !important;
+              line-height: 1.25 !important;
+            }
+
+            /* Sub-judul instansi di bawah H1 */
+            h1 + p strong,
+            h1 + p {
+              text-align: center !important;
+              font-size: 0.9em !important;
+              color: #475569 !important;
+              margin-bottom: 24px !important;
+              display: block;
+            }
+
+            /* H2 untuk Bab Dokumen (Pendahuluan, Analisis, Rekomendasi) */
+            h2 {
+              font-size: 1.15em !important;
+              font-weight: 700 !important;
+              text-transform: uppercase !important;
+              margin-top: 20px !important;
+              margin-bottom: 8px !important;
+              color: #0f172a !important;
+              border-bottom: 1px solid #e2e8f0;
+              padding-bottom: 4px;
+            }
+
             h3 { font-size: 1.05em; margin-top: 14px; margin-bottom: 6px; }
 
             ul, ol {

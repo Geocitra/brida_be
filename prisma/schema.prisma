@@ -63,6 +63,7 @@ model ReportDocument {
   chatSessionSources     ChatSessionSourceRef[]
   baselines              IndicatorBaseline[]
   realizations           IndicatorRealization[]
+  infographicSessions    InfographicSession[]
 
   @@map("report_documents")
 }
@@ -348,6 +349,7 @@ model User {
   opd              OPD?              @relation(fields: [opdId], references: [id], onDelete: SetNull)
   chatSessions     ChatSession[]
   generatedReports GeneratedReport[]
+  infographicSessions InfographicSession[]
 
   @@map("users")
 }
@@ -403,3 +405,39 @@ model SystemSetting {
 
   @@map("system_settings")
 }
+
+// ── MODEL BARU: Sesi Percakapan Pembuatan Poster ──
+model InfographicSession {
+  id          String              @id @default(uuid()) @db.Uuid
+  userId      String?             @db.Uuid
+  documentId  String?             @db.Uuid
+  title       String              @default("Sesi Poster Baru")
+  topic       String              @db.Text
+  aspectRatio String              @default("9:16")
+  createdAt   DateTime            @default(now())
+  updatedAt   DateTime            @updatedAt
+
+  user        User?               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  document    ReportDocument?     @relation(fields: [documentId], references: [id], onDelete: SetNull)
+  posters     InfographicPoster[]
+
+  @@map("infographic_sessions")
+}
+
+// ── MODEL BARU: Riwayat Versi Gambar Poster (v1, v2, revisi) ──
+model InfographicPoster {
+  id            String             @id @default(uuid()) @db.Uuid
+  sessionId     String             @db.Uuid
+  versionNumber Int                @default(1)
+  userPrompt    String             @db.Text
+  revisedPrompt String?            @db.Text
+  aiCommentary  String?            @db.Text
+  imageUrl      String             @db.VarChar(1024)
+  aspectRatio   String             @default("9:16")
+  createdAt     DateTime           @default(now())
+
+  session       InfographicSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId, versionNumber])
+  @@map("infographic_posters")
+}

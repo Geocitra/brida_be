@@ -10,6 +10,7 @@ import { AuthModule } from './modules/auth/auth.module';
 import { PdfModule } from './modules/pdf/pdf.module';
 import { AdminMasterModule } from './modules/admin-master/admin-master.module';
 import { SystemSettingModule } from './modules/system-setting/system-setting.module';
+import { InfographicModule } from './modules/infographic/infographic.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { SystemSettingModule } from './modules/system-setting/system-setting.mod
     PdfModule,
     AdminMasterModule,
     SystemSettingModule,
+    InfographicModule,
   ],
 })
 export class AppModule {}
