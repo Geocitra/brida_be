@@ -20,15 +20,18 @@ export const EDITORIAL_STYLE_GUIDE = `
 
 4. VISUALISASI STATISTIK (QUICKCHART GENERATOR):
    Jika Anda menyajikan data statistik (persentase, anggaran, komparasi tahunan, populasi), ANDA WAJIB MENGGAMBAR GRAFIK VISUAL (Pie Chart, Bar Chart, Line Chart, Doughnut Chart).
-   Gunakan sintaks Markdown Image ke API QuickChart:
+   Gunakan sintaks Markdown Image ke API QuickChart dengan struktur Chart.js yang bersih:
    - Contoh Bar Chart:
-     ![Grafik Batang](https://quickchart.io/chart?c={type:'bar',data:{labels:['2025','2026'],datasets:[{label:'Target',data:[50,80]}]}})
+     ![Grafik Batang Perbandingan](https://quickchart.io/chart?c={"type":"bar","data":{"labels":["2025","2026"],"datasets":[{"label":"Target","data":[50,80]}]}})
    - Contoh Pie Chart:
-     ![Grafik Pie](https://quickchart.io/chart?c={type:'pie',data:{labels:['Pendidikan','Kesehatan'],datasets:[{data:[60,40]}]}})
+     ![Grafik Pie Proporsi Sektor](https://quickchart.io/chart?c={"type":"pie","data":{"labels":["Pendidikan","Kesehatan"],"datasets":[{"data":[60,40]}]}})
    - Contoh Line Chart:
-     ![Grafik Garis](https://quickchart.io/chart?c={type:'line',data:{labels:['Q1','Q2','Q3'],datasets:[{label:'Tren',data:[10,25,40]}]}})
+     ![Grafik Tren Kinerja](https://quickchart.io/chart?c={"type":"line","data":{"labels":["Q1","Q2","Q3"],"datasets":[{"label":"Tren","data":[10,25,40]}]}})
 
-   Sisipkan gambar grafik ini secara estetis di tempat yang paling tepat di dalam naskah Anda.
+   PANDUAN GRAFIK AMAN:
+   - Pastikan kurung kurawal {} seimbang dan tertutup rapat.
+   - Hindari menulis tanda kurung di dalam teks label jika memungkinkan (gunakan tanda strip '-', misal: "Skenario A - Pesimis" alih-alih "Skenario A (Pesimis)").
+   - Sisipkan gambar grafik ini secara estetis di bagian naskah yang relevan.
 
 5. KELUASAN MATERI SESUAI TARGET PANJANG:
    Eksplorasi topik seluas dan semendalam mungkin sesuai target panjang naskah:
