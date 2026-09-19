@@ -284,10 +284,10 @@ ATURAN STRUKTURAL REKAYASA PROMPT VISUAL ("imagePrompt"):
 6. SELURUH TEKS, JUDUL, DAN LABEL PADA GAMBAR WAJIB 100% DALAM BAHASA INDONESIA RESMI.
 7. DILARANG memunculkan logo, lambang, cap, atau watermark apapun.
 8. VARIASI VISUAL: Jangan render setiap zone sebagai rectangular card. Campurkan full-width photography, metric strips, charts, maps, timelines, diagrams, icons, callout numbers, dan photographic panels.
-9. WAJIB: Sisakan area KOSONG PUTIH BERSIH selebar ${headerPct}% di bagian PALING ATAS kanvas (0% hingga ${headerPct}% dari atas) — TANPA gambar, grafik, teks, maupun dekorasi apapun. Area ini adalah tempat bar header resmi instansi (tinggi persis ${headerPct}% dari kanvas).
-10. WAJIB: Sisakan area KOSONG PUTIH BERSIH selebar ${footerPct}% di bagian PALING BAWAH kanvas (${100 - footerPct}% hingga 100% dari atas) — TANPA gambar, grafik, teks, maupun dekorasi apapun. Area ini adalah tempat bar footer resmi instansi (tinggi persis ${footerPct}% dari kanvas).
+9. WAJIB: Sisakan area KOSONG PUTIH BERSIH selebar ${topReserved}% di bagian PALING ATAS kanvas (0% hingga ${topReserved}% dari atas) — TANPA gambar, grafik, teks, maupun dekorasi apapun. Area ini adalah tempat bar header resmi instansi (tinggi ${headerPct}% dari kanvas + ruang aman).
+10. WAJIB: Sisakan area KOSONG PUTIH BERSIH selebar ${bottomReserved}% di bagian PALING BAWAH kanvas (${100 - bottomReserved}% hingga 100% dari atas) — TANPA gambar, grafik, teks, maupun dekorasi apapun. Area ini adalah tempat bar footer resmi instansi (tinggi ${footerPct}% dari kanvas + ruang aman).
 11. Semua konten infografis (foto, chart, peta, teks) HANYA boleh menempati zona tengah: dari ${topReserved}% hingga ${100 - bottomReserved}% tinggi kanvas.
-12. Tutup prompt DALL-E dengan: "Ultra-sharp 8k resolution, dense editorial grid layout, professional vector typography strictly in Indonesian language, no logos, no watermarks, high information density, official government report style, STRICT ${headerPct}% blank white top margin (0-${headerPct}% of canvas height) reserved for official letterhead overlay, STRICT ${footerPct}% blank white bottom margin (${100 - footerPct}-100% of canvas height) reserved for official footer overlay, all infographic content strictly between ${topReserved}% and ${100 - bottomReserved}% of canvas height, balanced visual rhythm."`;
+12. Tutup prompt DALL-E dengan: "Ultra-sharp 8k resolution, dense editorial grid layout, professional vector typography strictly in Indonesian language, no logos, no watermarks, high information density, official government report style, STRICT ${topReserved}% blank white top margin (0-${topReserved}% of canvas height) reserved for official letterhead overlay, STRICT ${bottomReserved}% blank white bottom margin (${100 - bottomReserved}-100% of canvas height) reserved for official footer overlay, all infographic content strictly between ${topReserved}% and ${100 - bottomReserved}% of canvas height, balanced visual rhythm."`;
 
     const userMessage = `[TOPIK INFOGRAFIS]: ${options.topic}
 
@@ -310,6 +310,8 @@ Rancang konsep infografis pemerintah PADAT INFORMASI yang memenuhi seluruh kanva
       ART_DIRECTOR_OUTPUT_SCHEMA,
       0.3,
     );
+
+    result.imagePrompt = this.enforceCanvasMargins(result.imagePrompt, options.aspectRatio);
 
     return result;
   }
@@ -382,6 +384,42 @@ Perbarui konsep visual dan hasilkan prompt terevolusi dalam skema JSON. Pastikan
       0.3,
     );
 
+    result.imagePrompt = this.enforceCanvasMargins(result.imagePrompt, options.aspectRatio);
+
     return result;
   }
+
+  /**
+   * Memastikan secara mutlak bahwa imagePrompt yang dikirim ke DALL-E / OpenAI
+   * diawali dan diakhiri dengan instruksi batas margin kosong atas dan bawah
+   * tanpa kompromi, sehingga model AI tidak pernah menaruh teks/gambar di area tersebut.
+   */
+  private enforceCanvasMargins(imagePrompt: string, aspectRatio?: string): string {
+    const safeArea = getSafeAreaForAspectRatio(aspectRatio || '9:16');
+    const topPct = safeArea.topReservedPercent;        // e.g. 12.0
+    const bottomPct = safeArea.bottomReservedPercent;  // e.g. 6.0
+    const headerBarPct = safeArea.headerBarPercent;    // e.g. 9.5
+    const footerBarPct = safeArea.footerBarPercent;    // e.g. 4.0
+
+    const prefix = `[MANDATORY CANVAS MARGIN RULES - STRICT PRIORITY 1]:
+1. TOP MARGIN: The top ${topPct}% of the image canvas (from y=0% down to y=${topPct}%) MUST BE 100% COMPLETELY BLANK, SOLID PURE UNTEXTURED WHITE (#FFFFFF) with ABSOLUTELY ZERO text, zero titles, zero banners, zero photography, and zero graphics. This clean white space is strictly reserved for official government letterhead overlay (height ${headerBarPct}%).
+2. BOTTOM MARGIN: The bottom ${bottomPct}% of the canvas (from y=${100 - bottomPct}% to y=100%) MUST BE 100% COMPLETELY BLANK, SOLID PURE UNTEXTURED WHITE (#FFFFFF) with zero text, zero sources, and zero graphics (reserved for official footer overlay).
+3. CONTENT BOUNDARIES: ALL infographic elements, hero photography, main titles, charts, maps, and illustrations MUST start strictly below y=${topPct}% and end strictly above y=${100 - bottomPct}%.
+
+`;
+
+    const suffix = `
+
+[FINAL VERIFICATION]: Double check that the top ${topPct}% of the canvas is completely untouched, solid white void with zero visual elements, and the bottom ${bottomPct}% is solid white void. All graphics and text are strictly contained between y=${topPct}% and y=${100 - bottomPct}%.`;
+
+    // Bersihkan frasa yang berpotensi memicu AI menaruh elemen di 0%
+    let cleaned = imagePrompt
+      .replace(/ZONE HERO \(0-20%\)/gi, `ZONE HERO (${topPct}%-${topPct + 20}%)`)
+      .replace(/from the very top/gi, `starting below the top ${topPct}% white margin`)
+      .replace(/at the very top/gi, `below the top ${topPct}% white margin`)
+      .replace(/at the top edge/gi, `below the top ${topPct}% white margin`);
+
+    return `${prefix}${cleaned}${suffix}`;
+  }
 }
+
