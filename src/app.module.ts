@@ -8,6 +8,7 @@ import { ReportsModule } from './modules/reports/reports.module';
 import { AnalysisModule } from './modules/analysis/analysis.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { PdfModule } from './modules/pdf/pdf.module';
+import { DocxModule } from './modules/docx/docx.module';
 import { AdminMasterModule } from './modules/admin-master/admin-master.module';
 import { SystemSettingModule } from './modules/system-setting/system-setting.module';
 import { InfographicModule } from './modules/infographic/infographic.module';
@@ -25,6 +26,7 @@ import { InfographicModule } from './modules/infographic/infographic.module';
     AnalysisModule,
     AuthModule,
     PdfModule,
+    DocxModule,
     AdminMasterModule,
     SystemSettingModule,
     InfographicModule,
