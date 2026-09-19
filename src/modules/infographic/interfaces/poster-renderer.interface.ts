@@ -17,6 +17,10 @@ export interface RenderPosterOptions {
     footerBgColor?: string;
     footerTextColor?: string;
     footerAlignment?: 'center' | 'left' | 'right';
+    headerFontSize?: 'compact' | 'normal' | 'large';
+    footerFontSize?: 'compact' | 'normal' | 'large';
+    logoPosition?: 'left' | 'right' | 'center';
+    logoSize?: 'compact' | 'normal' | 'large';
   };
 }
 

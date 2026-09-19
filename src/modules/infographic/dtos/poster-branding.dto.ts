@@ -35,6 +35,26 @@ export class PosterLayoutConfigDto {
   @IsString()
   @IsIn(['center', 'left', 'right'])
   footerAlignment?: 'center' | 'left' | 'right';
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['compact', 'normal', 'large'])
+  headerFontSize?: 'compact' | 'normal' | 'large';
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['compact', 'normal', 'large'])
+  footerFontSize?: 'compact' | 'normal' | 'large';
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['left', 'right', 'center'])
+  logoPosition?: 'left' | 'right' | 'center';
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['compact', 'normal', 'large'])
+  logoSize?: 'compact' | 'normal' | 'large';
 }
 
 export class UpsertPosterBrandingDto {

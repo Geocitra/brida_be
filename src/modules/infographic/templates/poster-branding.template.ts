@@ -1,10 +1,20 @@
 import { RenderPosterOptions } from '../interfaces/poster-renderer.interface';
 
+export interface PosterBrandingMetricsOptions {
+  headerFontSize?: 'compact' | 'normal' | 'large';
+  footerFontSize?: 'compact' | 'normal' | 'large';
+  logoSize?: 'compact' | 'normal' | 'large';
+}
+
 /**
  * Menghitung metrik branding proporsional adaptif berbasis aspek rasio kanvas
  * Menjamin header dan footer tidak memenggal konten AI dan tidak terlalu tebal di landscape.
  */
-export function getPosterBrandingMetrics(width: number, height: number) {
+export function getPosterBrandingMetrics(
+  width: number,
+  height: number,
+  options?: PosterBrandingMetricsOptions,
+) {
   const ratio = width / height;
   let headerPercent: number;
   let footerPercent: number;
@@ -31,6 +41,13 @@ export function getPosterBrandingMetrics(width: number, height: number) {
     footerPercent = 0.04;
   }
 
+  const headerFontMultiplier =
+    options?.headerFontSize === 'compact' ? 0.85 : options?.headerFontSize === 'large' ? 1.18 : 1.0;
+  const footerFontMultiplier =
+    options?.footerFontSize === 'compact' ? 0.85 : options?.footerFontSize === 'large' ? 1.18 : 1.0;
+  const logoSizeMultiplier =
+    options?.logoSize === 'compact' ? 0.58 : options?.logoSize === 'large' ? 0.88 : 0.74;
+
   const headerHeightPx = Math.round(height * headerPercent);
   const footerHeightPx = Math.round(height * footerPercent);
 
@@ -39,10 +56,10 @@ export function getPosterBrandingMetrics(width: number, height: number) {
     footerPercent,
     headerHeightPx,
     footerHeightPx,
-    titleFontSizePx: Math.max(13, Math.round(headerHeightPx * 0.28)),
-    subTitleFontSizePx: Math.max(10, Math.round(headerHeightPx * 0.20)),
-    footerFontSizePx: Math.max(10, Math.round(footerHeightPx * 0.36)),
-    logoHeightPx: Math.round(headerHeightPx * 0.74),
+    titleFontSizePx: Math.max(12, Math.round(headerHeightPx * 0.28 * headerFontMultiplier)),
+    subTitleFontSizePx: Math.max(9, Math.round(headerHeightPx * 0.20 * headerFontMultiplier)),
+    footerFontSizePx: Math.max(9, Math.round(footerHeightPx * 0.36 * footerFontMultiplier)),
+    logoHeightPx: Math.round(headerHeightPx * logoSizeMultiplier),
   };
 }
 
@@ -65,14 +82,21 @@ export function generatePosterBrandingHtml(options: RenderPosterOptions): string
 
   const headerBgColor = layoutConfig.headerBgColor || '#FFFFFF';
   const headerTextColor = layoutConfig.headerTextColor || (isDarkColor(headerBgColor) ? '#FFFFFF' : '#0F1E36');
-  const headerAlignment = layoutConfig.headerAlignment || 'left_with_logo';
+  const logoPosition = layoutConfig.logoPosition || (layoutConfig.headerAlignment === 'center' ? 'center' : 'left');
+  const headerFontSize = layoutConfig.headerFontSize || 'normal';
+  const footerFontSize = layoutConfig.footerFontSize || 'normal';
+  const logoSize = layoutConfig.logoSize || 'normal';
 
   const footerBgColor = layoutConfig.footerBgColor || '#0F1E36';
   const footerTextColor = layoutConfig.footerTextColor || (isDarkColor(footerBgColor) ? '#F8FAFC' : '#0F1E36');
   const footerAlignment = layoutConfig.footerAlignment || 'center';
 
-  // Perhitungan skala proporsional dinamis berbasis tinggi kanvas dan aspek rasio
-  const metrics = getPosterBrandingMetrics(width, height);
+  // Perhitungan skala proporsional dinamis berbasis tinggi kanvas, aspek rasio, dan layoutConfig
+  const metrics = getPosterBrandingMetrics(width, height, {
+    headerFontSize,
+    footerFontSize,
+    logoSize,
+  });
   const {
     headerHeightPx,
     footerHeightPx,
@@ -81,6 +105,22 @@ export function generatePosterBrandingHtml(options: RenderPosterOptions): string
     footerFontSizePx,
     logoHeightPx,
   } = metrics;
+
+  const headerJustify =
+    logoPosition === 'center'
+      ? 'center'
+      : logoPosition === 'right'
+      ? 'space-between'
+      : 'flex-start';
+  const headerTextAlign = logoPosition === 'center' ? 'center' : 'left';
+  const logoOrder = logoPosition === 'right' ? 2 : 1;
+  const textOrder = logoPosition === 'right' ? 1 : 2;
+  const textFlex = logoPosition === 'center' ? '0 1 auto' : '1';
+  const textAlignItems = logoPosition === 'center' ? 'center' : 'flex-start';
+  const logoMargin =
+    logoPosition === 'right'
+      ? `margin-left: ${Math.round(width * 0.02)}px; margin-right: 0;`
+      : `margin-right: ${Math.round(width * 0.02)}px; margin-left: 0;`;
 
   return `<!DOCTYPE html>
 <html lang="id">
@@ -139,7 +179,8 @@ export function generatePosterBrandingHtml(options: RenderPosterOptions): string
       align-items: center;
       padding: 0 ${Math.round(width * 0.04)}px;
       border-bottom: 2px solid ${isDarkColor(headerBgColor) ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)'};
-      ${headerAlignment === 'center' ? 'justify-content: center; text-align: center;' : 'justify-content: flex-start;'}
+      justify-content: ${headerJustify};
+      text-align: ${headerTextAlign};
     }
 
     .header-logo {
@@ -147,7 +188,8 @@ export function generatePosterBrandingHtml(options: RenderPosterOptions): string
       width: auto;
       max-width: ${Math.round(width * 0.18)}px;
       object-fit: contain;
-      margin-right: ${Math.round(width * 0.025)}px;
+      order: ${logoOrder};
+      ${logoMargin}
       flex-shrink: 0;
     }
 
@@ -155,9 +197,11 @@ export function generatePosterBrandingHtml(options: RenderPosterOptions): string
       display: flex;
       flex-direction: column;
       justify-content: center;
+      align-items: ${textAlignItems};
       line-height: 1.15;
       min-width: 0;
-      flex: 1;
+      flex: ${textFlex};
+      order: ${textOrder};
       overflow: hidden;
     }
 
