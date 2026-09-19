@@ -155,13 +155,16 @@ export function generatePosterBrandingHtml(options: RenderPosterOptions): string
       overflow: hidden;
     }
 
+    /* ── BASE AI IMAGE: Menempati ZONA KONTEN saja (antara header dan footer) ── */
+    /* PENTING: Gambar TIDAK mengisi 100% kanvas — header/footer mendapat ruang BERSIH sendiri */
     .base-canvas-image {
       position: absolute;
-      top: 0;
+      top: ${headerEnabled ? headerHeightPx : 0}px;
       left: 0;
       width: 100%;
-      height: 100%;
-      object-fit: fill;
+      height: calc(100% - ${headerEnabled ? headerHeightPx : 0}px - ${footerEnabled ? footerHeightPx : 0}px);
+      object-fit: cover;
+      object-position: center top;
       z-index: 1;
     }
 
