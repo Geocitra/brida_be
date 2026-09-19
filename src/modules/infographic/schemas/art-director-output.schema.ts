@@ -3,8 +3,15 @@ export interface ArtDirectorOutputDto {
   posterTitle: string;
   visualMetaphor: string;
   colorScheme: string;
-  extractedKeyFacts: string[];
+  extractedKeyFacts: ExtractedKeyFact[];
   imagePrompt: string;
+}
+
+export interface ExtractedKeyFact {
+  value: string;
+  label: string;
+  source: string;
+  confidence: 'grounded' | 'estimated';
 }
 
 export const ART_DIRECTOR_OUTPUT_SCHEMA = {
@@ -21,31 +28,52 @@ export const ART_DIRECTOR_OUTPUT_SCHEMA = {
     aiCommentary: {
       type: 'string',
       description:
-        'Respon penjelasan singkat, solutif, dan profesional dalam Bahasa Indonesia (maksimal 2-3 kalimat) mengenai konsep visual dan data yang dirangkum. DILARANG mengajukan pertanyaan klarifikasi balik!',
+        'Penjelasan singkat dalam Bahasa Indonesia (2-3 kalimat) mengenai arsitektur informasi visual, zone composition strategy, dan angka penting yang disintesis dari data riil. DILARANG mengajukan pertanyaan balik.',
     },
     posterTitle: {
       type: 'string',
-      description: 'Judul resmi poster 100% Bahasa Indonesia (maksimal 6-8 kata, formal dan padat).',
+      description: 'Judul resmi poster 100% Bahasa Indonesia formal (maksimal 6-8 kata).',
     },
     visualMetaphor: {
       type: 'string',
       description:
-        'Penjelasan konsep gaya visual metafora yang dipilih (misal: 3D Minimal Healthcare/Nutrition, Corporate Financial, atau Civil Engineering).',
+        'Penjelasan gaya tata letak infografis yang dipilih (misal: Dense Editorial Data Infographic, Documentary-Driven Government Report, dll.).',
     },
     colorScheme: {
       type: 'string',
-      description: 'Palet warna dominan (misal: Warm Teal & Gold, Deep Navy & Champagne Gold).',
+      description: 'Palet warna dominan yang digunakan (misal: Deep Navy #0F1E36, Teal #0D9488, Amber #F59E0B).',
     },
     extractedKeyFacts: {
       type: 'array',
-      items: { type: 'string' },
-      description: 'Daftar 2-3 angka atau fakta kunci riil yang dikutip dari dokumen BRIDA atau data internet.',
+      items: {
+        type: 'object',
+        required: ['value', 'label', 'source', 'confidence'],
+        properties: {
+          value: {
+            type: 'string',
+            description: 'Nilai numerik atau persentase fakta kunci (misal: "24.2%", "Rp 1.3 Triliun", "487 km").',
+          },
+          label: {
+            type: 'string',
+            description: 'Label deskriptif singkat Bahasa Indonesia (misal: "Prevalensi Stunting", "Pagu APBD Infrastruktur").',
+          },
+          source: {
+            type: 'string',
+            description: 'Sumber asal data (misal: "BPS Mimika 2025", "Laporan Ketahanan Pangan BRIDA", "Estimasi indikator baku").',
+          },
+          confidence: {
+            type: 'string',
+            enum: ['grounded', 'estimated'],
+            description: '"grounded" jika diambil langsung dari data yang disediakan. "estimated" jika merupakan estimasi wajar karena data eksak tidak tersedia.',
+          },
+        },
+      },
+      description: 'Daftar 3-6 fakta angka kunci dengan provenance (sumber, tingkat kepercayaan). Setiap angka yang muncul pada gambar WAJIB terdaftar di sini.',
     },
     imagePrompt: {
       type: 'string',
       description:
-        'Prompt visual Bahasa Inggris sangat detail untuk DALL-E 3 yang memuat komposisi, tipografi utama berbahasa Indonesia, pencahayaan studio 8k, dan metafora visual yang relevan.',
+        'Prompt visual detail dalam Bahasa Inggris untuk DALL-E 3 / Image AI yang memuat: (1) komposisi 7 visual zones beserta alokasi tinggi kanvas, (2) palet warna tematik, (3) instruksi teks 100% Bahasa Indonesia pada gambar, (4) instruksi tanpa logo/watermark, dan (5) instruksi penutup resolusi 8k. Prompt harus menghasilkan komposisi dense yang memenuhi 92-97% kanvas.',
     },
   },
 };
-

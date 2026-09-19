@@ -8,6 +8,12 @@ import {
   ArtDirectorOutputDto,
 } from '../schemas/art-director-output.schema';
 import { PosterAspectRatio } from '../interfaces/image-generator.interface';
+import {
+  MASTER_DESIGN_SYSTEM,
+  resolveTopicInformationArchitecture,
+  resolveCanvasComposition,
+  ArchetypeDefinition,
+} from '../constants/infographic-design-system.constant';
 
 export interface InitialPromptCraftOptions {
   topic: string;
@@ -35,6 +41,17 @@ export class ArtDirectorPromptArchitect {
   ) {}
 
   /**
+   * Information Expert: Menentukan arketipe domain topik berdasarkan pencocokan leksikal kata kunci.
+   */
+  public resolveTopicArchetype(topic: string): {
+    archetype: ArchetypeDefinition;
+    formattedZones: string;
+    visualGrammarPrompt: string;
+  } {
+    return resolveTopicInformationArchitecture(topic);
+  }
+
+  /**
    * Mengambil data faktual riil dari SELURUH database arsip BRIDA Mimika
    */
   async searchDatabaseDocuments(topic: string, priorityDocId?: string): Promise<string> {
@@ -58,7 +75,6 @@ export class ArtDirectorPromptArchitect {
 
       this.logger.log(`[DB Grounding] Menelusuri seluruh DB dengan kata kunci: ${keywords.join(', ')}`);
 
-      // 1. Ambil chunks dari seluruh database yang mencocokkan kata kunci
       const chunks = await this.prisma.documentChunk.findMany({
         where: {
           OR: keywords.map((kw) => ({
@@ -74,7 +90,6 @@ export class ArtDirectorPromptArchitect {
       });
 
       if (chunks.length === 0) {
-        // Fallback: Ambil chunk terbaru dari arsip jika kata kunci belum terindeks
         const fallbackChunks = await this.prisma.documentChunk.findMany({
           take: 4,
           include: {
@@ -96,7 +111,6 @@ export class ArtDirectorPromptArchitect {
         return '';
       }
 
-      // 2. Beri bobot relevansi (prioritas dokumen yang dipilih + kecocokan kata kunci)
       const scored = chunks.map((chunk: any) => {
         let score = 0;
         if (priorityDocId && chunk.documentId === priorityDocId) {
@@ -140,7 +154,7 @@ export class ArtDirectorPromptArchitect {
 
     try {
       const cleanTopic = topic.replace(/(buatkan|poster|infografis|resmi|tolong|bikin)/gi, '').trim();
-      const query = `${cleanTopic} Kabupaten Mimika BPS data`;
+      const query = `${cleanTopic} Kabupaten Mimika BPS data statistik`;
       this.logger.log(`[Web Grounding] Menelusuri internet live Serper: "${query}"`);
 
       const controller = new AbortController();
@@ -191,56 +205,70 @@ export class ArtDirectorPromptArchitect {
   }
 
   /**
-   * Tahap 1: Merangkai Super-Prompt awal berdasarkan topik & fakta DARI SELURUH DB + INTERNET
+   * Tahap 1: Merangkai Super-Prompt dengan Canvas Composition + Visual Grammar + Data Provenance
    */
   async craftInitialPosterPrompt(
     options: InitialPromptCraftOptions,
   ): Promise<ArtDirectorOutputDto> {
     this.logger.log(
-      `[Art Director] Merumuskan konsep visual awal untuk topik: "${options.topic.substring(0, 50)}..."`,
+      `[Art Director] Merumuskan master brief infografis: "${options.topic.substring(0, 50)}..."`,
     );
 
-    // Ambil data faktual secara paralel dari SELURUH DB dan INTERNET
     const [databaseContext, internetContext] = await Promise.all([
       this.searchDatabaseDocuments(options.topic, options.documentId),
       this.searchInternetWeb(options.topic),
     ]);
 
-    const systemPrompt = `Anda adalah Art Director & Creative Prompt Architect Senior untuk BRIDA Kabupaten Mimika.
-Tugas Anda: Merancang konsep visual POSTER / INFOGRAFIS RESMI BERMUTU TINGGI untuk Pemerintah Daerah Mimika, lalu merangkai prompt visual dalam bahasa Inggris untuk DALL-E 3 / Modern Image AI.
+    const { archetype, formattedZones, visualGrammarPrompt } = this.resolveTopicArchetype(options.topic);
+    const canvasComposition = resolveCanvasComposition(options.aspectRatio);
+
+    const systemPrompt = `Anda adalah Art Director & Information Designer Senior BRIDA Kabupaten Mimika.
+Tugas Anda: Merancang konsep INFOGRAFIS PEMERINTAH BERMUTU TINGGI yang PADAT INFORMASI (Data-Dense Government Policy Infographic) menggunakan Master Design System Kabupaten Mimika, lalu merangkai prompt visual dalam bahasa Inggris untuk DALL-E 3 / Modern Image AI.
+
+PENTING: Ini adalah INFOGRAFIS DATA PEMERINTAH, BUKAN poster minimalis. Prioritaskan kepadatan informasi dan narasi visual, bukan minimalisme.
+
+${MASTER_DESIGN_SYSTEM}
+
+${canvasComposition}
+
+${visualGrammarPrompt}
+
+TOPIC-SPECIFIC VISUAL ZONES (${archetype.archetype}):
+Target Warna: Dominan ${archetype.primaryColor}, Sekunder ${archetype.secondaryColor}, Aksen ${archetype.accentColor}.
+Target Density: ${archetype.density.toUpperCase()}.
+
+${formattedZones}
 
 ATURAN UTAMA EKSEKUSI LANGSUNG (ZERO-CLARIFICATION DIRECTIVE):
 1. DILARANG mengajukan pertanyaan balik atau meminta klarifikasi pada pengguna! Langsung tentukan konsep terbaik dan eksekusi.
-2. DILARANG memberikan basa-basi pembuka atau penutup. Langsung berikan penjelasan singkat (maksimal 2-3 kalimat pada 'aiCommentary') mengenai konsep visual dan data angka kunci yang disintesis.
-3. Seluruh judul, label diagram, dan teks pada visual WAJIB 100% DALAM BAHASA INDONESIA RESMI (DILARANG KERAS menggunakan istilah bahasa Inggris pada teks yang dicetak di gambar!).
+2. Langsung berikan penjelasan singkat (maksimal 2-3 kalimat pada 'aiCommentary') mengenai arsitektur informasi, zone composition, dan angka penting yang disintesis.
+3. Seluruh judul, label diagram, dan teks pada visual WAJIB 100% DALAM BAHASA INDONESIA RESMI.
+4. DILARANG membuat atau mencantumkan logo/lambang/watermark apapun.
 
 SUMBER DATA ACUAN GANDA (DUAL-SOURCE GROUNDING):
 Anda dibekali data riil dari 2 sumber:
 1. ARSIP SELURUH DATABASE BRIDA KABUPATEN MIMIKA
 2. DATA RIIL INTERNET / BPS / BERITA PEMDA TERKINI
-TUGAS ANDA:
-- Kaji data angka persentase, rasio, target, dan indikator riil dari kedua sumber data tersebut.
-- Ekstrak 2 sampai 4 fakta angka kunci tersebut ke dalam array 'extractedKeyFacts' (misal: "Prevalensi stunting Mimika: 24.2% (BPS)", "Target penurunan nasional: 14%").
-- Jelaskan pada 'aiCommentary' dalam Bahasa Indonesia secara singkat dan padat (maksimal 2-3 kalimat) bagaimana data ini diterjemahkan ke dalam komposisi visual infografis.
 
-KEBEBASAN GAYA VISUAL OTONOM (STYLE-AGNOSTIC CREATIVE AUTONOMY):
-Pilihlah gaya visual yang PALING TEPAT secara otonom berdasarkan kebutuhan topik dan instruksi pengguna:
-1. GAYA INFOGRAFIS DATA 2D (FLAT VECTOR DATA INFOGRAPHIC) - SANGAT DIREKOMENDASIKAN untuk topik data, statistik, persentase, perbandingan, iklim/cuaca, APBD, stunting, atau laporan sektoral:
-   - Visual: 2D modern flat editorial infographic layout, clean vector data charts, bar graphs, clean circular percentage indicators, minimalist statistics cards, crisp data tables, flat outline iconography, high data-to-ink ratio, clear visual hierarchy, Swiss graphic design aesthetic.
-   - PENTING: DILARANG menyelipkan kata kunci "3D isometric, volumetric shapes, floating islands, 3D boxes" pada gaya ini agar tidak menjadi pulau/kotak 3D mengambang!
-2. GAYA POSTER KONSEPTUAL / KAMPANYE VISUAL - Jika pengguna meminta poster kampanye tematik, kesadaran publik, atau perayaan:
-   - Visual: Bold editorial concept poster, striking focal imagery, rich cinematic lighting or vector illustration, prominent headline typography.
-3. WARNA & KOMPOSISI:
-   - Sesuaikan palet warna dengan topik (misal: Teal & Amber Gold untuk Kesehatan/Stunting, Executive Deep Navy Blue & Gold untuk Fiskal/APBD, Emerald Slate untuk Spasial/Infrastruktur, Terra-cotta & Indigo untuk Iklim/Bencana).
+DATA PROVENANCE ENFORCEMENT:
+- Setiap angka yang Anda tempatkan pada gambar WAJIB terdaftar di array 'extractedKeyFacts' beserta sumber dan tingkat kepercayaan ('grounded' atau 'estimated').
+- Tandai 'grounded' jika angka diambil langsung dari data yang disediakan.
+- Tandai 'estimated' jika merupakan estimasi wajar karena data eksak tidak tersedia.
+- DILARANG membuat pie/donut chart kecuali data yang disajikan secara eksplisit merepresentasikan komponen dari satu keseluruhan yang berjumlah 100%.
+- DILARANG mengubah persentase-persentase yang tidak saling berhubungan menjadi satu pie chart.
 
-ATURAN MUTLAK BAHASA INDONESIA UNTUK SELURUH TEKS PADA GAMBAR:
-1. 'posterTitle': Judul resmi sesi poster WAJIB 100% DALAM BAHASA INDONESIA FORMAL (maksimal 6-8 kata).
-2. 'imagePrompt': Walaupun prompt visual ditulis dalam Bahasa Inggris deskriptif untuk generator AI, SELURUH LABEL DATA, ANGKA, DAN HEADLINE YANG AKAN DICETAK PADA GAMBAR WAJIB MURNI DALAM BAHASA INDONESIA.
-   - DILARANG menggunakan kata bahasa Inggris: "CURRENT RATE", "TARGET", "INFOGRAPHIC", "HEALTH REPORT", "DATA OVERVIEW".
-   - WAJIB gunakan padanan resmi Bahasa Indonesia: "PREVALENSI SAAT INI", "TARGET CAPAIAN", "TAHUN 2026", "KABUPATEN MIMIKA", "DATA STATISTIK RESMI".
-   - Wajib sertakan instruksi penutup tegas di dalam prompt DALL-E: "All typography, data labels, and headers printed on the graphic must be strictly in Indonesian language. No English words on the graphic. Professional editorial typography, clean visual hierarchy, award-winning vector infographic design, pristine crisp resolution."`;
+ATURAN STRUKTURAL REKAYASA PROMPT VISUAL ("imagePrompt"):
+1. Susun instruksi visual bahasa Inggris yang sangat presisi untuk model generasi gambar.
+2. Terapkan secara eksplisit 7 VISUAL ZONES sesuai arsitektur di atas, lengkap dengan alokasi persentase tinggi kanvas.
+3. ZONE HERO (0-20%) harus berupa foto/visual FULL-WIDTH edge-to-edge yang langsung memenuhi area atas. DILARANG menyisakan area putih kosong di atas hero. Overlay judul dan subjudul di atas hero menggunakan kontras kuat.
+4. PETA/MAP harus berukuran besar dan dominan (~18% kanvas), BUKAN peta kecil di dalam kartu. Sertakan label distrik, legenda, dan 2-4 callout anotasi data.
+5. Tetapkan palet warna tegas: Dominan ${archetype.primaryColor}, Sekunder ${archetype.secondaryColor}, Aksen ${archetype.accentColor} di atas latar belakang putih bersih (#FFFFFF).
+6. SELURUH TEKS, JUDUL, DAN LABEL PADA GAMBAR WAJIB 100% DALAM BAHASA INDONESIA RESMI.
+7. DILARANG memunculkan logo, lambang, cap, atau watermark apapun.
+8. VARIASI VISUAL: Jangan render setiap zone sebagai rectangular card. Campurkan full-width photography, metric strips, charts, maps, timelines, diagrams, icons, callout numbers, dan photographic panels.
+9. Tutup prompt DALL-E dengan: "Ultra-sharp 8k resolution, dense editorial grid layout filling 95% of vertical canvas, professional vector typography strictly in Indonesian language, no logos, no watermarks, high information density, official government report style, controlled whitespace, full-canvas composition, balanced visual rhythm, no large unused areas."`;
 
-    const userMessage = `[TOPIK POSTER]: ${options.topic}
+    const userMessage = `[TOPIK INFOGRAFIS]: ${options.topic}
 
 [SUMBER DATA 1 - ARSIP SELURUH DATABASE BRIDA MIMIKA]:
 ${databaseContext || 'Arsip dokumen BRIDA belum memuat bab khusus topik ini, gunakan data rujukan resmi umum.'}
@@ -248,10 +276,10 @@ ${databaseContext || 'Arsip dokumen BRIDA belum memuat bab khusus topik ini, gun
 [SUMBER DATA 2 - PENELUSURAN LIVE INTERNET (BPS / PEMDA / BERITA RESMI)]:
 ${internetContext || 'Penelusuran web tidak menemukan artikel spesifik, gunakan estimasi indikator baku.'}
 
-[ASPEK RASIO]: ${options.aspectRatio}
-${options.customInstructions ? `[INSTRUKSI KHUSUS]: ${options.customInstructions}` : ''}
+[ASPEK RASIO TARGET]: ${options.aspectRatio}
+${options.customInstructions ? `[INSTRUKSI KHUSUS PENGGUNA]: ${options.customInstructions}` : ''}
 
-Rancang konsep poster infografis resmi dengan mengintegrasikan data riil di atas dan pastikan semua judul dan teks pada poster dalam Bahasa Indonesia resmi. Hasilkan output JSON sesuai skema.`;
+Rancang konsep infografis pemerintah PADAT INFORMASI yang memenuhi seluruh kanvas. Integrasikan data riil di atas. Pastikan semua teks dalam Bahasa Indonesia resmi. Setiap angka yang muncul pada gambar wajib terdaftar di extractedKeyFacts beserta sumbernya. Hasilkan output JSON sesuai skema.`;
 
     const result = await this.llmAdapter.generateStructuredAnalysis<ArtDirectorOutputDto>(
       [
@@ -259,34 +287,45 @@ Rancang konsep poster infografis resmi dengan mengintegrasikan data riil di atas
         { role: 'user', content: userMessage },
       ],
       ART_DIRECTOR_OUTPUT_SCHEMA,
-      0.4,
+      0.3,
     );
 
     return result;
   }
 
   /**
-   * Tahap 2: Prompt Evolution — Mengubah prompt visual berdasarkan instruksi revisi obrolan pengguna
+   * Tahap 2: Prompt Evolution — Revisi visual berdasarkan instruksi chat pengguna
    */
   async evolvePosterPrompt(options: PromptEvolutionOptions): Promise<ArtDirectorOutputDto> {
     this.logger.log(
       `[Prompt Evolution] Menganalisis permintaan revisi: "${options.userRevisionQuery}"`,
     );
 
-    // Ambil konteks tambahan jika revisi meminta data baru
     const [databaseContext, internetContext] = await Promise.all([
       this.searchDatabaseDocuments(`${options.topic} ${options.userRevisionQuery}`),
       this.searchInternetWeb(`${options.topic} ${options.userRevisionQuery}`),
     ]);
 
-    const systemPrompt = `Anda adalah Art Director AI BRIDA Kabupaten Mimika yang sedang berdialog dengan pengguna untuk merevisi poster infografis.
+    const { archetype, visualGrammarPrompt } = this.resolveTopicArchetype(`${options.topic} ${options.userRevisionQuery}`);
+    const canvasComposition = resolveCanvasComposition(options.aspectRatio);
+
+    const systemPrompt = `Anda adalah Art Director AI BRIDA Kabupaten Mimika yang sedang berdialog dengan pengguna untuk merevisi infografis.
+
+${MASTER_DESIGN_SYSTEM}
+
+${canvasComposition}
+
+${visualGrammarPrompt}
+
 Tugas Anda:
-1. Pahami instruksi revisi pengguna dari kueri chat (misal: menambah pie chart, mengganti warna jadi hijau, mengubah teks angka, menambah data sektoral, dsb).
-2. Perbarui prompt visual DALL-E 3 ("imagePrompt") sebelumnya dengan menerapkan perubahan yang diminta secara konsisten tanpa merusak elemen inti yang tidak diminta diubah.
-3. Tetap pertahankan gaya 2D Flat Vector Data Layout jika pengguna meminta penyajian data/grafik, tanpa memunculkan pulau 3D atau kubus mengambang liar kecuali jika pengguna secara eksplisit meminta elemen 3D.
-4. Seluruh judul, label data, dan teks pada gambar WAJIB 100% DALAM BAHASA INDONESIA RESMI (DILARANG menggunakan bahasa Inggris pada teks gambar).
-5. Berikan komentar dialog dalam Bahasa Indonesia ("aiCommentary") yang menjelaskan secara ramah dan profesional revisi apa saja yang telah diterapkan pada poster baru, termasuk angka/fakta yang diperbarui.
-6. Format output wajib berupa JSON sesuai skema.`;
+1. Pahami instruksi revisi pengguna (menambah chart, mengganti warna, mengubah angka, menambah data sektoral, memperbesar peta, dsb).
+2. Perbarui prompt visual DALL-E 3 ("imagePrompt") sebelumnya dengan menerapkan perubahan yang diminta secara konsisten tanpa merusak Canvas Composition dan Visual Grammar induk.
+3. Pertahankan CANVAS OCCUPANCY 92-97%. Jangan membuat poster menjadi lebih kosong.
+4. Pertahankan palet warna tematik (Dominan: ${archetype.primaryColor}, Sekunder: ${archetype.secondaryColor}, Aksen: ${archetype.accentColor}) di atas latar belakang bersih (#FFFFFF).
+5. Seluruh teks pada gambar WAJIB 100% BAHASA INDONESIA RESMI.
+6. DILARANG memunculkan logo, lambang, atau watermark apapun.
+7. Setiap angka baru yang ditambahkan WAJIB terdaftar di extractedKeyFacts beserta sumber dan confidence.
+8. Berikan komentar dialog ("aiCommentary") yang menjelaskan revisi apa yang diterapkan. DILARANG bertanya balik.`;
 
     const userMessage = `[PROMPT DALL-E SEBELUMNYA]:
 ${options.previousPrompt}
@@ -303,7 +342,7 @@ ${internetContext.substring(0, 1000)}
 
 [ASPEK RASIO]: ${options.aspectRatio}
 
-Perbarui konsep visual dan hasilkan prompt DALL-E 3 terevolusi dalam skema JSON. Pastikan seluruh teks pada poster dalam Bahasa Indonesia resmi.`;
+Perbarui konsep visual dan hasilkan prompt terevolusi dalam skema JSON. Pastikan seluruh teks dalam Bahasa Indonesia dan canvas occupancy tetap 92-97%.`;
 
     const result = await this.llmAdapter.generateStructuredAnalysis<ArtDirectorOutputDto>(
       [
@@ -317,5 +356,3 @@ Perbarui konsep visual dan hasilkan prompt DALL-E 3 terevolusi dalam skema JSON.
     return result;
   }
 }
-
-

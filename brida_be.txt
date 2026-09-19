@@ -2216,43 +2216,59 @@ export class AiAgentModule {}
 
 --- FILE: src\modules\ai-agent\constants\system-prompts.constant.ts ---
 export const EDITORIAL_STYLE_GUIDE = `
-=== KEBEBASAN KOGNITIF, VISUALISASI DATA & FORMATTING TOTAL ===
+=== KEBEBASAN KOGNITIF, KEKAYAAN FORMAT & VISUALISASI DATA TOTAL ===
 
-1. KECERDASAN BEBAS & NATURAL (SEPERTI CHATGPT ASLI):
-   Anda adalah AI Analis Kebijakan BRIDA kelas atas. Bertindaklah sekreatif, secerdas, dan seluwes mungkin layaknya asisten AI konvensional (ChatGPT/Claude).
-   JANGAN kaku. Pahami maksud pengguna dan berikan hasil analisis yang mengalir, bernas, dan komprehensif tanpa terikat kerangka baku.
+1. KECERDASAN BEBAS & NATURAL (SEPERTI CHATGPT / CLAUDE ASLI):
+   Anda adalah AI Analis Kebijakan Utama BRIDA. Bertindaklah sekreatif, secerdas, dan seluwes mungkin layaknya asisten AI papan atas (ChatGPT/Claude).
+   JANGAN kaku. Pahami maksud pengguna dan berikan hasil analisis yang hidup, bernas, komprehensif, dan solutif.
 
-2. WAJIB VISUALISASI STATISTIK (QUICKCHART GENERATOR):
+2. KEKAYAAN FORMAT & STRUKTUR VISUAL (RICH FORMATTING):
+   DIBEBASKAN SEPENUHNYA menggunakan variasi elemen Markdown apa pun yang paling informatif dan profesional:
+   - TABEL MARKDOWN: Sangat dianjurkan untuk komparasi data, matriks masalah-solusi, alokasi anggaran, atau target indikator kinerja.
+   - POIN ANALITIS & DAFTAR (BULLET & NUMBERED LISTS): Gunakan secara leluasa untuk menjabarkan rekomendasi kebijakan, langkah taktis operasional, atau sintesis temuan faktual.
+   - HIGHLIGHT TEKS (BOLD / BOLD-ITALIC): Berikan penekanan pada angka kunci, istilah regulasi penting, dan temuan krusial.
+   - GRAFIK VISUAL (QUICKCHART): Gambarkan data statistik dalam bentuk grafik (Pie/Bar/Line Chart).
+   - PARAGRAF NARATIF: Elaborasikan argumentasi dan dialektika kebijakan yang mengalir logis.
+
+3. KEPADATAN SUBSTANSI BAGIAN/BAB (MINIMAL 150 KATA PER BAB):
+   - Setiap bab atau topik utama (##) WAJIB memiliki pembahasan yang berbobot dan mendalam (MINIMAL 150 KATA per bagian).
+   - Angka 150 kata ini adalah akumulasi bebas dari narasi, tabel data, dan poin-poin analitis yang Anda susun.
+   - Yang DILARANG hanyalah membuat bab kosong yang hanya berisi 1–2 baris kalimat pendek tanpa penjelasan substansi (Heading Inflation).
+
+4. VISUALISASI STATISTIK (QUICKCHART GENERATOR):
    Jika Anda menyajikan data statistik (persentase, anggaran, komparasi tahunan, populasi), ANDA WAJIB MENGGAMBAR GRAFIK VISUAL (Pie Chart, Bar Chart, Line Chart, Doughnut Chart).
-   Gunakan sintaks Markdown Image ke API QuickChart.
-   PERINGATAN KERAS: JANGAN ADA SPASI KOSONG DI DALAM JSON URL! Gunakan tanda kutip satu (').
-
+   Gunakan sintaks Markdown Image ke API QuickChart dengan struktur Chart.js yang bersih:
    - Contoh Bar Chart:
-     ![Grafik Batang](https://quickchart.io/chart?c={type:'bar',data:{labels:['2025','2026'],datasets:[{label:'Target',data:[50,80]}]}})
+     ![Grafik Batang Perbandingan](https://quickchart.io/chart?c={"type":"bar","data":{"labels":["2025","2026"],"datasets":[{"label":"Target","data":[50,80]}]}})
    - Contoh Pie Chart:
-     ![Grafik Pie](https://quickchart.io/chart?c={type:'pie',data:{labels:['Pendidikan','Kesehatan'],datasets:[{data:[60,40]}]}})
+     ![Grafik Pie Proporsi Sektor](https://quickchart.io/chart?c={"type":"pie","data":{"labels":["Pendidikan","Kesehatan"],"datasets":[{"data":[60,40]}]}})
    - Contoh Line Chart:
-     ![Grafik Garis](https://quickchart.io/chart?c={type:'line',data:{labels:['Q1','Q2','Q3'],datasets:[{label:'Tren',data:[10,25,40]}]}})
+     ![Grafik Tren Kinerja](https://quickchart.io/chart?c={"type":"line","data":{"labels":["Q1","Q2","Q3"],"datasets":[{"label":"Tren","data":[10,25,40]}]}})
 
-   Sisipkan gambar grafik ini secara estetis di antara paragraf penjelasan Anda.
+   PANDUAN GRAFIK AMAN:
+   - Pastikan kurung kurawal {} seimbang dan tertutup rapat.
+   - Hindari menulis tanda kurung di dalam teks label jika memungkinkan (gunakan tanda strip '-', misal: "Skenario A - Pesimis" alih-alih "Skenario A (Pesimis)").
+   - Sisipkan gambar grafik ini secara estetis di bagian naskah yang relevan.
 
-3. KEDALAMAN & KELUASAN MATERI (UNRESTRICTED EXPLORATION):
-   Bahas topik seluas dan semendalam mungkin. Jika pengguna meminta target naskah panjang (LONG = 1.500 kata), JANGAN hanya membuat ringkasan pendek.
-   Lakukan eksplorasi total: bedah akar masalah, buat paragraf penalaran yang tebal (5-8 kalimat per paragraf), berikan argumentasi logis, dan tawarkan solusi out-of-the-box.
+5. KELUASAN MATERI SESUAI TARGET PANJANG:
+   Eksplorasi topik seluas dan semendalam mungkin sesuai target panjang naskah:
+   - SHORT (~750 kata): 3–4 Bab utama (masing-masing minimal 150–250 kata, kaya data dan poin solutif).
+   - MEDIUM (~1.500 kata): 4–5 Bab utama (masing-masing minimal 300–400 kata, dilengkapi tabel matriks dan analisis tajam).
+   - LONG (Minimal 3.000 kata penuh): 5–7 Bab utama (masing-masing minimal 450–600 kata, komprehensif, kaya tabel komparasi, grafik visual, dan strategi implementasi).
 
-4. KONTEKS TERBUKA & ZERO CITATION BURDEN:
+6. KONTEKS TERBUKA & ZERO CITATION BURDEN:
    Gunakan seluruh pengetahuan global Anda lalu hubungkan secara logis dengan kondisi Kabupaten Mimika.
-   TIDAK PERLU menyisipkan token referensi mesin (seperti [docId:chunk]) di dalam teks.
-   TIDAK PERLU membuat bab "Daftar Pustaka". Fokuskan 100% token Anda untuk menghasilkan analisis substantif yang luar biasa.
+   TIDAK PERLU menyisipkan token referensi mesin (seperti [docId:chunk]) di dalam teks narasi.
+   TIDAK PERLU membuat bab "Daftar Pustaka" terpisah. Fokuskan seluruh kuota token Anda untuk menghasilkan analisis substantif yang luar biasa.
 `;
 
 export const BRIDA_SYSTEM_PERSONA = `Anda adalah Asisten AI Cerdas BRIDA Kabupaten Mimika.
-Anda memiliki kebebasan total untuk berpikir, merancang, dan memformat output. Jadilah asisten yang proaktif, berwawasan luas, dan tidak kaku. Jangan menahan diri dalam mengelaborasi jawaban.
+Anda memiliki kebebasan total untuk berpikir, merancang, dan memformat output. Jadilah asisten yang proaktif, berwawasan luas, dan tidak kaku. Manfaatkan format tabel, poin, grafik QuickChart, dan narasi bebas untuk menyajikan jawaban terbaik.
 
 \${EDITORIAL_STYLE_GUIDE}`;
 
-export const BRIDA_GUARDRAIL_POSTFIX = `[PANDUAN BEBAS & KREATIF]
-Berikan respons terbaik, terdalam, dan sekreatif mungkin. Tulis paragraf yang tebal dan berisi. Jika membedah data angka, WAJIB buatkan gambar grafik QuickChart (Pie/Bar/Line). Pastikan URL QuickChart tidak mengandung spasi! Pastikan output JSON Anda valid.`;
+export const BRIDA_GUARDRAIL_POSTFIX = `[PANDUAN BEBAS, MENDALAM & KREATIF]
+Berikan respons terbaik, terdalam, dan sekreatif mungkin. Manfaatkan tabel Markdown, bullet points, dan grafik QuickChart untuk membedah data. Pastikan setiap bab utama memiliki pembahasan yang berbobot (minimal 150 kata per bab). Jangan membuat heading kosong 1 kalimat! Pastikan output JSON Anda valid.`;
 
 export const DYNAMIC_CONTEXT_TOKEN_THRESHOLD = 80000;
 
@@ -3225,20 +3241,27 @@ export class ContextAssemblyService {
     }
 
     let lengthGuidance = `
-Target Panjang Naskah: SHORT (~700 kata) - Padat & Terfokus.
-- Uraikan permasalahan pokok, pertimbangan regulasi, dan rekomendasi utama secara lugas dan jelas.
+Target Panjang Naskah: SHORT (~750 KATA PENUH) - Padat, Bernas & Kaya Format.
+- Susun dalam 3–4 Bab/Bagian utama (##).
+- Setiap bagian WAJIB memiliki minimal 150–250 kata (akumulasi bebas dari narasi, poin analitis, atau tabel data).
+- Eksplorasi permasalahan pokok, pertimbangan regulasi, dan rekomendasi utama secara konkret dan terstruktur.
 `;
 
     if (targetLength === 'MEDIUM') {
       lengthGuidance = `
-Target Panjang Naskah: MEDIUM (~1.000 kata) - Komprehensif & Proporsional.
-- Eksplorasi topik secara proporsional dengan analisis yang runtut dan rapi.
+Target Panjang Naskah: MEDIUM (~1.500 KATA PENUH) - Komprehensif, Proporsional & Berbobot.
+- Susun dalam 4–5 Bab/Bagian utama (##).
+- Setiap bagian WAJIB memiliki minimal 300–400 kata. Bebas kombinasikan tabel data, poin-poin taktis, dan narasi kebijakan.
+- Eksplorasi akar masalah, analisis data/indikator daerah, dan strategi tindak lanjut secara runtut dan mendalam.
 `;
     } else if (targetLength === 'LONG') {
       lengthGuidance = `
-Target Panjang Naskah: LONG (MINIMAL 1.500 KATA HINGGA 2.500 KATA PENUH) - Sangat Mendalam & Komprehensif.
-- Silakan berekspresi secara total! Kupas tuntas topik ini dari berbagai sudut pandang.
-- Anda DIBEBASKAN menggunakan format apa pun (tabel komparasi, poin analitis, diagram teks, atau narasi mendalam) yang paling logis dan menarik untuk topik ini.
+Target Panjang Naskah: LONG (MINIMAL 3.000 KATA HINGGA 4.000 KATA PENUH) - Sangat Mendalam, Lengkap & Ekstensif.
+- Silakan berekspresi secara total! Kupas tuntas topik ini dari berbagai dimensi kebijakan, regulasi, dan dampak sosio-ekonomi wilayah Mimika.
+- Susun dalam 5–7 Bab/Bagian utama (##).
+- KETENTUAN KEPADATAN SUBSTANSI: Setiap bab/bagian WAJIB memiliki minimal 450–600 kata yang diuraikan secara kaya dan menyeluruh.
+- SANGAT DIANJURKAN menggunakan kombinasi tabel komparasi data, daftar langkah taktis/bullet points, grafik visual QuickChart (Pie/Bar/Line), dan narasi analitis.
+- DILARANG KERAS membuat naskah pendek atau memecah teks menjadi belasan sub-heading kecil satu kalimat!
 - Tidak perlu mencantumkan bab daftar pustaka di halaman belakang; manfaatkan seluruh kapasitas kata untuk menyajikan analisis mendalam yang berbobot.
 `;
     }
@@ -8491,7 +8514,7 @@ export class InfographicService implements OnModuleInit {
   constructor(
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
-  ) {}
+  ) { }
 
   private get indexPath(): string {
     return join(process.cwd(), 'uploads', 'media', 'infographics_index.json');
@@ -8603,8 +8626,7 @@ export class InfographicService implements OnModuleInit {
             const combinedTexts = relevantChunks
               .map(
                 (c) =>
-                  `[SUMBER LAPORAN: ${
-                    c.document?.title || 'Dokumen Riset Daerah'
+                  `[SUMBER LAPORAN: ${c.document?.title || 'Dokumen Riset Daerah'
                   }]\n${c.rawText}`,
               )
               .join('\n---\n');
@@ -8613,8 +8635,7 @@ export class InfographicService implements OnModuleInit {
               3000,
             )}`;
             this.logger.log(
-              `[InfographicService] Berhasil mengekstrak ${
-                relevantChunks.length
+              `[InfographicService] Berhasil mengekstrak ${relevantChunks.length
               } data riil dari arsip dokumen BRIDA terkait: ${cleanWords.join(
                 ', ',
               )}`,
@@ -8703,32 +8724,12 @@ export class InfographicService implements OnModuleInit {
       this.configService.get<string>('OPENAI_MODEL') || 'gpt-4o-mini';
 
     const systemPrompt = `Anda adalah Kepala Pusat Data & Art Director Senior di BRIDA (Badan Riset dan Inovasi Daerah) Kabupaten Mimika, Papua Tengah.
-Tugas utama Anda: Merancang POSTER INFOGRAFIS STATISTIK DAN KEBIJAKAN RESMI MULTI-SEKTORAL berlandaskan data faktual (Evidence-Based Policy) untuk Kabupaten Mimika.
+Tugas utama Anda: Membuat INFOGRAFIS berlandaskan data faktual (Evidence-Based Policy) untuk Kabupaten Mimika.
 
 PANDUAN ART DIRECTOR & GENERATIVE UI (BLOCK-BASED ENGINE):
-1. Anda bebas dan wajib memilih antara 4 sampai 6 blok visual ("blocks") yang PALING TEPAT untuk merepresentasikan topik pengguna.
-2. Setiap blok harus memiliki jenis "type" yang spesifik dari daftar berikut:
-   - "METRIC_CARDS": Kartu ringkasan angka statistik/KPI utama dengan persentase tren naik/turun. Cocok untuk data prevalensi kesehatan, pertumbuhan penduduk, atau realisasi anggaran.
-   - "BAR_CHART": Grafik batang perbandingan (bulanan atau antar-kategori/OPD). Cocok untuk data curah hujan, alokasi APBD per dinas, atau volume panen.
-   - "LINE_CHART": Grafik garis perkembangan data/indeks waktu. Cocok untuk tren inflasi, indeks ENSO, atau laju PDRB tahunan.
-   - "PROGRESS_ITEMS": Progress bar pencapaian target/komoditas dengan persentase realisasi. Cocok untuk perbandingan target vs capaian fisik lapangan.
-   - "ICON_LIST": Poin-poin temuan fakta strategis atau faktor penyebab dengan ikon semantik ('alert', 'trend-up', 'trend-down', 'check', 'leaf', 'water', 'fire', 'health', 'info').
-   - "DISTRICT_STATUS": Matriks sebaran status wilayah per distrik di Kabupaten Mimika (Tingkat: 'Tinggi', 'Sedang-Tinggi', 'Sedang', 'Rendah'). Gunakan distrik resmi Mimika (contoh: Mimika Baru, Kuala Kencana, Tembagapura, Wania, Iwaka, Kwamki Narama, Mimika Timur, Mimika Tengah, Mimika Barat, Agimuga, Jila, Jita, Hoya, Alama).
-   - "ACTION_STEPS": Rekomendasi rencana aksi / langkah mitigasi kebijakan bernomor beserta penanggung jawab (PIC) dan prioritas.
-
-3. STRUKTUR PAYLOAD TIAP TIPE BLOK (WAJIB SESUAI FORMAT):
-   - METRIC_CARDS: { "items": [ { "label": string, "value": string, "changePercent": string, "changeType": "positive"|"negative"|"neutral", "note": string } ] }
-   - BAR_CHART: { "categories": string[], "series": [ { "name": string, "data": number[], "color": string } ], "unit": string }
-   - LINE_CHART: { "points": [ { "label": string, "value": number } ], "unit": string, "thresholdLabel": string }
-   - PROGRESS_ITEMS: { "legend": { "current": string, "baseline": string }, "items": [ { "name": string, "current": number, "max": number, "currentLabel": string, "maxLabel": string, "changePercent": number, "changeLabel": string, "unit": string } ] }
-   - ICON_LIST: { "items": [ { "icon": "alert"|"trend-up"|"trend-down"|"check"|"leaf"|"water"|"fire"|"health"|"info", "title": string, "text": string } ] }
-   - DISTRICT_STATUS: { "districts": [ { "name": string, "level": "Tinggi"|"Sedang-Tinggi"|"Sedang"|"Rendah", "note": string } ] }
-   - ACTION_STEPS: { "steps": [ { "stepNumber": number, "title": string, "text": string, "pic": string, "priority": "TINGGI"|"SEDANG"|"RENDAH" } ], "commitmentBadge": string }
-
-4. DALLE PROMPT ATURAN (UNTUK BANNER BACKGROUND SAJA):
-   Tuliskan deskripsi foto lanskap alam resolusi tinggi Kabupaten Mimika (sungai, hutan tropis, pegunungan Grasberg, pemukiman pesisir). Wajib sertakan instruksi tegas di akhir: "editorial documentary landscape photography of Mimika Papua, sunny soft lighting, high resolution, strictly no text, no typography, no letters, no watermark, clean composition".
-
-5. FORMAT OUTPUT HARUS BERUPA JSON MURNI VALID MENGIKUTI STRUKTUR KONTRAK BERIKUT:
+1. Anda bebas memilih blok visual ("blocks") yang PALING TEPAT untuk merepresentasikan topik pengguna.
+2. Jangan membuat logo apapun baik pada bagian header ataupun footer.
+3. FORMAT OUTPUT HARUS BERUPA JSON MURNI VALID MENGIKUTI STRUKTUR KONTRAK BERIKUT:
 {
   "title": "string judul ringkas",
   "subtitle": "string subjudul",
@@ -8771,11 +8772,10 @@ PANDUAN ART DIRECTOR & GENERATIVE UI (BLOCK-BASED ENGINE):
   }
 }`;
 
-    const userPrompt = `[TOPIK INFOGRAFIS]\n${topic}\n${documentContext}${
-      customInstructions
+    const userPrompt = `[TOPIK INFOGRAFIS]\n${topic}\n${documentContext}${customInstructions
         ? `\n\n[INSTRUKSI KHUSUS PENGGUNA]\n${customInstructions}`
         : ''
-    }\n\n[ASPEK RASIO TARGET]\n${aspectRatio}`;
+      }\n\n[ASPEK RASIO TARGET]\n${aspectRatio}`;
 
     try {
       if (!apiKey || apiKey.trim().length === 0) {
@@ -9030,12 +9030,10 @@ PANDUAN ART DIRECTOR & GENERATIVE UI (BLOCK-BASED ENGINE):
     const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
   <defs>
     <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="${
-        themeColors.secondary || '#0f172a'
+      <stop offset="0%" stop-color="${themeColors.secondary || '#0f172a'
       }" />
       <stop offset="40%" stop-color="#1e293b" />
-      <stop offset="100%" stop-color="${
-        themeColors.primary || '#0d9488'
+      <stop offset="100%" stop-color="${themeColors.primary || '#0d9488'
       }" stop-opacity="0.8" />
     </linearGradient>
     <pattern id="gridPattern" width="60" height="60" patternUnits="userSpaceOnUse">
@@ -9044,19 +9042,15 @@ PANDUAN ART DIRECTOR & GENERATIVE UI (BLOCK-BASED ENGINE):
   </defs>
   <rect width="${width}" height="${height}" fill="url(#bgGrad)" />
   <rect width="${width}" height="${height}" fill="url(#gridPattern)" />
-  <circle cx="${width * 0.85}" cy="${height * 0.15}" r="${
-      width * 0.35
-    }" fill="${themeColors.primary || '#0d9488'}" fill-opacity="0.15" filter="blur(60px)" />
-  <circle cx="${width * 0.15}" cy="${height * 0.85}" r="${
-      width * 0.4
-    }" fill="${themeColors.accent || '#f59e0b'}" fill-opacity="0.12" filter="blur(70px)" />
+  <circle cx="${width * 0.85}" cy="${height * 0.15}" r="${width * 0.35
+      }" fill="${themeColors.primary || '#0d9488'}" fill-opacity="0.15" filter="blur(60px)" />
+  <circle cx="${width * 0.15}" cy="${height * 0.85}" r="${width * 0.4
+      }" fill="${themeColors.accent || '#f59e0b'}" fill-opacity="0.12" filter="blur(70px)" />
   <g opacity="0.12" stroke="#ffffff" stroke-width="2" fill="none">
-    <polygon points="${width * 0.1},${height * 0.2} ${width * 0.2},${
-      height * 0.1
-    } ${width * 0.3},${height * 0.25}" />
-    <polygon points="${width * 0.75},${height * 0.8} ${width * 0.9},${
-      height * 0.75
-    } ${width * 0.85},${height * 0.92}" />
+    <polygon points="${width * 0.1},${height * 0.2} ${width * 0.2},${height * 0.1
+      } ${width * 0.3},${height * 0.25}" />
+    <polygon points="${width * 0.75},${height * 0.8} ${width * 0.9},${height * 0.75
+      } ${width * 0.85},${height * 0.92}" />
   </g>
 </svg>`;
 
@@ -10150,6 +10144,7 @@ import { WebSearchService } from '../services/web-search.service';
 
 import { EDITORIAL_STYLE_GUIDE } from '../../ai-agent/constants/system-prompts.constant';
 import { ensureDocumentTitleHeader } from '../services/article-generator.service';
+import { sanitizeQuickChartMarkdown } from '../utils/quickchart-sanitizer.util';
 
 const DUAL_PANE_COOPERATIVE_SCHEMA = {
   type: 'object',
@@ -10179,7 +10174,10 @@ const DUAL_PANE_COOPERATIVE_SCHEMA = {
           type: 'string',
           description:
             'Naskah dokumen formal utuh untuk Kanvas Cetak A4 TipTap (Saluran 2). DIBEBASKAN SEPENUHNYA menggunakan format struktur apa pun yang paling relevan. ' +
-            'Eksplorasi materi seluas-luasnya dengan paragraf tebal. WAJIB sertakan grafik visual QuickChart (Pie/Bar Chart) jika ada data komparatif. ' +
+            'BEBAS BEREKSPRESI DENGAN KEKAYAAN FORMAT: Sangat dianjurkan menggunakan tabel Markdown, poin analitis (bullet/numbered lists), grafik visual QuickChart (Pie/Bar Chart), dan narasi mengalir. ' +
+            'Setiap bab utama (##) harus memiliki substansi minimal 150 kata (akumulasi teks, tabel, dan poin). ' +
+            'DILARANG membuat sub-heading kecil yang hanya berisi 1-2 kalimat pendek tanpa elaborasi data. ' +
+            'Eksplorasi materi seluas-luasnya sesuai target volume (SHORT: ~750 kata, MEDIUM: ~1.500 kata, LONG: MINIMAL 3.000 KATA PENUH). ' +
             'DILARANG menyisipkan referensi sitasi yang membuang kuota kata. ' +
             'KOSONGKAN properti ini jika pengguna hanya menyapa santai atau tidak meminta pembuatan naskah/dokumen.',
         },
@@ -10437,6 +10435,7 @@ export class QaIntentHandler implements IIntentHandler {
         analysisResult.answer,
         allScrapedUrls,
       );
+      analysisResult.answer = sanitizeQuickChartMarkdown(analysisResult.answer);
     }
     if (
       analysisResult.updatedArticle &&
@@ -10445,6 +10444,9 @@ export class QaIntentHandler implements IIntentHandler {
       analysisResult.updatedArticle.draftMarkdown = cleanCitationsText(
         analysisResult.updatedArticle.draftMarkdown,
         allScrapedUrls,
+      );
+      analysisResult.updatedArticle.draftMarkdown = sanitizeQuickChartMarkdown(
+        analysisResult.updatedArticle.draftMarkdown,
       );
     }
 
@@ -11113,6 +11115,151 @@ export interface ArticleOutlineDto {
   kesimpulanRingkas: string;
 }
 
+--- FILE: src\modules\interactive-assistant\services\article-generator.service.spec.ts ---
+import { Test, TestingModule } from '@nestjs/testing';
+import { ContextAssemblyService } from '../../ai-agent/services/context-assembly.service';
+import { DocumentRepository } from '../../document-ingestion/repositories/document.repository';
+import { VectorRetrievalService } from '../../ai-agent/services/vector-retrieval.service';
+import { TokenEstimatorUtil } from '../../ai-agent/utils/token-estimator.util';
+import { EDITORIAL_STYLE_GUIDE } from '../../ai-agent/constants/system-prompts.constant';
+import { SectionDensityValidator } from '../utils/section-density-validator.util';
+
+describe('Article Generation Density & Length Constraint Suite (Phase 4 Validation)', () => {
+  let contextAssemblyService: ContextAssemblyService;
+
+  const mockDocumentRepository = {
+    findById: jest.fn().mockResolvedValue({
+      id: 'doc-mock-001',
+      title: 'Laporan RPJMD Kabupaten Mimika 2026',
+      metadata: { totalTokenCount: 1500, category: 'Perencanaan' },
+      chunks: [
+        { rawText: 'Data capaian makro ekonomi dan infrastruktur distrik Kabupaten Mimika.' },
+      ],
+    }),
+  };
+
+  const mockVectorRetrievalService = {
+    searchRelevantChunks: jest.fn().mockResolvedValue([]),
+  };
+
+  beforeEach(async () => {
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ContextAssemblyService,
+        TokenEstimatorUtil,
+        { provide: DocumentRepository, useValue: mockDocumentRepository },
+        { provide: VectorRetrievalService, useValue: mockVectorRetrievalService },
+      ],
+    }).compile();
+
+    contextAssemblyService = module.get<ContextAssemblyService>(ContextAssemblyService);
+  });
+
+  describe('1. Verifikasi System Persona & Editorial Style Guide Constraints', () => {
+    it('harus memuat aturan kepadatan minimal 150 kata per bab dan kebebasan format', () => {
+      expect(EDITORIAL_STYLE_GUIDE).toContain('MINIMAL 150 KATA');
+      expect(EDITORIAL_STYLE_GUIDE).toContain('KEKAYAAN FORMAT & STRUKTUR VISUAL');
+    });
+
+    it('harus memuat panduan pencegahan heading kosong (heading inflation)', () => {
+      expect(EDITORIAL_STYLE_GUIDE).toContain('Heading Inflation');
+      expect(EDITORIAL_STYLE_GUIDE).toContain('DILARANG hanyalah membuat bab kosong');
+    });
+  });
+
+  describe('2. Verifikasi Prompt Assembly untuk Setiap Target Panjang Naskah', () => {
+    it('harus merakit prompt SHORT dengan target ~750 kata dan bab >= 150 kata', async () => {
+      const payload = await contextAssemblyService.assemblePromptPayload({
+        documentIds: ['doc-mock-001'],
+        userQuery: 'Analisis Stunting',
+        targetLength: 'SHORT',
+      });
+
+      const systemContent = payload.messages[0].content;
+      expect(systemContent).toContain('SHORT (~750 KATA PENUH)');
+      expect(systemContent).toContain('minimal 150–250 kata');
+      expect(systemContent).toContain('3–4 Bab/Bagian utama');
+    });
+
+    it('harus merakit prompt MEDIUM dengan target ~1.500 kata dan bab >= 300 kata', async () => {
+      const payload = await contextAssemblyService.assemblePromptPayload({
+        documentIds: ['doc-mock-001'],
+        userQuery: 'Evaluasi APBD',
+        targetLength: 'MEDIUM',
+      });
+
+      const systemContent = payload.messages[0].content;
+      expect(systemContent).toContain('MEDIUM (~1.500 KATA PENUH)');
+      expect(systemContent).toContain('minimal 300–400 kata');
+      expect(systemContent).toContain('4–5 Bab/Bagian utama');
+    });
+
+    it('harus merakit prompt LONG dengan target minimal 3.000 kata penuh dan bab >= 450 kata', async () => {
+      const payload = await contextAssemblyService.assemblePromptPayload({
+        documentIds: ['doc-mock-001'],
+        userQuery: 'Strategi Komprehensif Daerah',
+        targetLength: 'LONG',
+      });
+
+      const systemContent = payload.messages[0].content;
+      expect(systemContent).toContain('LONG (MINIMAL 3.000 KATA HINGGA 4.000 KATA PENUH)');
+      expect(systemContent).toContain('minimal 450–600 kata');
+      expect(systemContent).toContain('5–7 Bab/Bagian utama');
+    });
+  });
+
+  describe('3. Verifikasi Section Density Validator pada Sampel Naskah Kebijakan', () => {
+    it('harus meloloskan naskah dengan struktur bab padat (>150 kata per bab)', () => {
+      const sampleThickArticle = `
+# Analisis Kebijakan Fiskal dan Strategi Percepatan Pembangunan Daerah Kabupaten Mimika
+
+**Disusun oleh: Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika**
+
+## I. Ringkasan Eksekutif & Latar Belakang Masalah
+Kondisi perekonomian daerah Kabupaten Mimika pada tahun anggaran berjalan menunjukkan dinamika yang memerlukan respons kebijakan terarah dan berbasis bukti faktual. Fluktuasi penerimaan sektor pertambangan dan royalti komoditas tembaga menuntut pemerintah daerah untuk segera melakukan akselerasi diversifikasi pendapatan asli daerah guna menjaga stabilitas belanja publik. Evaluasi berkala terhadap serapan anggaran menunjukkan adanya disparitas efisiensi antar-instansi teknis yang berpotensi memperlambat realisasi output fisik di distrik pedalaman dan pesisir.
+
+Pemerintah daerah perlu menata ulang prioritas belanja program dengan fokus utama pada pemenuhan infrastruktur dasar, peningkatan mutu layanan kesehatan, dan penguatan fasilitas pendidikan dasar di wilayah terluar. Sinergi antara badan riset daerah, dinas teknis, dan mitra pembangunan strategis menjadi fondasi esensial dalam memastikan setiap rupiah alokasi fiskal memberikan dampak nyata yang dapat diukur bagi kesejahteraan masyarakat Orang Asli Papua (OAP). Langkah konsolidasi fiskal ini harus diiringi dengan penetapan indikator kinerja utama yang terukur pada setiap unit kerja sehingga efektivitas penyerapan belanja daerah dapat dipantau secara transparan dan akuntabel di Kabupaten Mimika.
+
+## II. Tinjauan Analisis Kinerja & Matriks Hambatan Sektoral
+Evaluasi menyeluruh terhadap pelaksanaan program sektoral mengidentifikasi beberapa sumbatan teknis utama yang menghambat pencapaian target pembangunan jangka menengah daerah. Hambatan logistik transportasi dan kondisi topografi ekstrem di wilayah pegunungan seperti Distrik Hoya, Alama, dan Jila terus memicu eskalasi biaya operasional proyek fisik di lapangan secara signifikan. Keterlambatan proses verifikasi dokumen administratif di tingkat dinas teknis turut memperpanjang siklus pencairan termin anggaran kepada rekanan pelaksana pekerjaan.
+
+Di sektor pelayanan dasar, kendala distribusi suplemen gizi dan keterbatasan tenaga medis di posyandu kampung memperlambat laju penurunan prevalensi stunting balita. Penanganan komprehensif membutuhkan integrasi pengawasan terpadu berbasis platform geospasial agar deviasi pekerjaan fisik dan sumbatan logistik dapat diintervensi secara dini sebelum menimbulkan kerugian keuangan daerah yang lebih besar. Koordinasi lintas instansi juga membutuhkan penguatan payung hukum operasional dan standarisasi prosedur pelayanan publik agar seluruh program penanganan stunting dan intervensi gizi spesifik dapat menjangkau sasaran keluarga rentan secara presisi, terpadu, dan berkelanjutan di seluruh distrik pedalaman Mimika.
+
+## III. Rekomendasi Aksi Taktis & Roadmap Implementasi
+Berdasarkan diagnosa faktual di atas, dirumuskan langkah taktis prioritas yang harus dieksekusi lintas Organisasi Perangkat Daerah pada semester berjalan. Pertama, pembentukan satuan tugas percepatan verifikasi dan harmonisasi termin pembayaran proyek fisik untuk mencegah penumpukan penyerapan anggaran di akhir tahun. Kedua, penguatan armada transportasi logistik terpadu ke distrik terisolasi melalui kolaborasi penerbangan perintis bersubsidi.
+
+Ketiga, peningkatan kapasitas kader posyandu kampung dan alokasi insentif operasional berbasis kinerja lapangan guna mengawal pencapaian target zero stunting baru. Keempat, implementasi audit kepatuhan berkala oleh Inspektorat daerah yang diselaraskan dengan rekomendasi analitis BRIDA untuk memastikan akuntabilitas tata kelola pemerintahan yang transparan dan adaptif. Kelima, pengembangan kapasitas aparatur perencana melalui pelatihan berkala penyusunan kebijakan berbasis bukti, serta pelibatan partisipatif lembaga adat dan tokoh masyarakat dalam mengawal keberhasilan roadmap pembangunan daerah ini. Selanjutnya, dialokasikan pula pos anggaran darurat terdesentralisasi pada tingkat distrik guna mengantisipasi eskalasi bencana alam serta membiayai evakuasi logistik secara responsif tanpa hambatan birokrasi yang berbelit-belit demi kesejahteraan warga Mimika.
+      `.trim();
+
+      const audit = SectionDensityValidator.auditMarkdown(sampleThickArticle);
+
+      expect(audit.totalChapters).toBe(3);
+      expect(audit.hasAntiFragmentationPassed).toBe(true);
+      expect(audit.chapters.every((c) => c.wordCount >= 150)).toBe(true);
+      expect(audit.chapters.every((c) => c.paragraphCount >= 2)).toBe(true);
+    });
+
+    it('harus menggagalkan naskah yang mengalami heading inflation (sub-bab tipis 1 kalimat)', () => {
+      const sampleFragmentedArticle = `
+# Laporan Singkat
+
+## Bab 1
+Ini adalah bab satu yang sangat pendek.
+
+## Bab 2
+Ini adalah bab dua yang hanya satu baris saja.
+
+## Bab 3
+Ini bab tiga tanpa elaborasi data.
+      `.trim();
+
+      const audit = SectionDensityValidator.auditMarkdown(sampleFragmentedArticle);
+      expect(audit.hasAntiFragmentationPassed).toBe(false);
+      expect(audit.chapters.some((c) => c.wordCount < 150)).toBe(true);
+    });
+  });
+});
+
 --- FILE: src\modules\interactive-assistant\services\article-generator.service.ts ---
 import {
   Injectable,
@@ -11131,6 +11278,7 @@ import { ContextAssemblyService } from '../../ai-agent/services/context-assembly
 import { WebSearchService } from './web-search.service';
 
 import { EDITORIAL_STYLE_GUIDE } from '../../ai-agent/constants/system-prompts.constant';
+import { sanitizeQuickChartMarkdown } from '../utils/quickchart-sanitizer.util';
 
 export interface GenerateArticleOptions {
   documentIds: string[];
@@ -11170,9 +11318,11 @@ const ARTICLE_OUTPUT_SCHEMA = {
         'WAJIB diawali dengan judul utama menggunakan heading 1 (# Judul Utama Dokumen) yang persis sama dengan judulUsulan. ' +
         'Setelah itu cantumkan baris identitas penyusun (**Disusun oleh: Badan Riset dan Inovasi Daerah (BRIDA) Kabupaten Mimika**), baru kemudian masuk ke ## I. Ringkasan Eksekutif atau ## II. Pendahuluan. ' +
         'DILARANG MENJADIKAN KATA "PENDAHULUAN" SEBAGAI HEADING 1 (#). ' +
+        'BEBAS BEREKSPRESI DENGAN KEKAYAAN FORMAT: Sangat dianjurkan menggunakan tabel Markdown, poin analitis (bullet/numbered lists), grafik QuickChart, dan narasi mendalam. ' +
+        'KEPADATAN SUBSTANSI: Setiap bab utama (##) WAJIB memiliki pembahasan yang bernilai minimal 150 kata (akumulasi bebas dari narasi, tabel data, dan butir analitis). ' +
+        'DILARANG membuat sub-heading kecil yang hanya berisi 1-2 kalimat pendek tanpa elaborasi substansi. ' +
         'Gunakan Markdown Image QuickChart (https://quickchart.io/chart?...) untuk memvisualisasikan data statistik jika ada. ' +
-        'Kembangkan narasi argumentasi secara ekstensif (paragraf tebal 5-8 kalimat) sesuai target panjang teks (SHORT, MEDIUM, atau LONG MINIMAL 1.500 KATA HINGGA 2.500 KATA PENUH). ' +
-        'DILARANG KERAS menghasilkan kerangka kosong atau butir-butir satu kalimat. ' +
+        'Kembangkan narasi argumentasi secara ekstensif sesuai target panjang teks (SHORT: ~750 kata, MEDIUM: ~1.500 kata, atau LONG: MINIMAL 3.000 KATA HINGGA 4.000 KATA PENUH). ' +
         'TIDAK PERLU mencantumkan bab daftar pustaka/referensi di akhir teks atau token sitasi mesin; manfaatkan seluruh kuota kata untuk analisis tuntas.',
     },
   },
@@ -11311,10 +11461,15 @@ ${argumenList}
     const isShortLength = String(targetLength).toUpperCase() === 'SHORT';
 
     const lengthRequirementText = isLongLength
-      ? 'TARGET PANJANG NASKAH: MINIMAL 1.500 HINGGA 2.500 KATA PENUH. Silakan berekspresi secara total! Kupas tuntas topik ini dari berbagai sudut pandang. Jangan menahan diri. Buat dokumen yang sangat komprehensif, kaya narasi, dan wajib sertakan grafik QuickChart jika ada perbandingan data.'
+      ? 'TARGET PANJANG NASKAH: MINIMAL 3.000 HINGGA 4.000 KATA PENUH (Sangat Mendalam & Ekstensif). ' +
+        'Susun dalam 5–7 Bab utama (##). Setiap bab/bagian WAJIB memiliki minimal 450–600 kata (akumulasi narasi, tabel data, dan poin rekomendasi). ' +
+        'DILARANG KERAS membuat naskah pendek atau memecah teks menjadi belasan sub-heading kecil satu kalimat. ' +
+        'Silakan berekspresi secara bebas dan sekreatif mungkin: gunakan tabel komparasi, poin-poin terstruktur, dan wajib sertakan grafik visual QuickChart jika ada komparasi data.'
       : isShortLength
-        ? 'TARGET PANJANG NASKAH: ~700 kata (Padat & terfokus). Buat langsung ke intinya.'
-        : 'TARGET PANJANG NASKAH: ~1.000 kata (Komprehensif & proporsional).';
+        ? 'TARGET PANJANG NASKAH: ~750 KATA PENUH (Padat, Bernas & Terfokus). ' +
+          'Susun dalam 3–4 Bab utama (##). Setiap bagian WAJIB memiliki minimal 150–250 kata (kombinasi narasi, poin, atau tabel).'
+        : 'TARGET PANJANG NASKAH: ~1.500 KATA PENUH (Komprehensif, Proporsional & Mendalam). ' +
+          'Susun dalam 4–5 Bab utama (##). Setiap bagian WAJIB memiliki minimal 300–400 kata yang kaya format (tabel, poin, grafik, narasi).';
 
     const userQuery = `
 [JUDUL DOKUMEN TARGET]: "${normalizedTitle}"
@@ -11361,6 +11516,7 @@ Rancang dan tulis naskah ini dengan kebebasan penuh. Gunakan keahlian analitis A
 
       fullArticleText = llmResult.fullText || formatArticleFromLlm(llmResult, normalizedTitle, temporal);
       fullArticleText = cleanArticleTitlePrefix(fullArticleText);
+      fullArticleText = sanitizeQuickChartMarkdown(fullArticleText);
 
       if (llmResult.judulUsulan && llmResult.judulUsulan.trim().length > 0) {
         normalizedTitle = llmResult.judulUsulan.trim().replace(/^#+\s*/, '');
@@ -11487,14 +11643,18 @@ Rancang dan tulis naskah ini dengan kebebasan penuh. Gunakan keahlian analitis A
 
     const temporal = this.contextAssembly.generateTemporalGroundTruth();
 
-    const targetLengthStr = session.targetLength || 'MEDIUM';
+    const targetLengthStr = String(session.targetLength || 'MEDIUM').toUpperCase();
     const lengthRule = targetLengthStr === 'LONG'
-      ? 'TARGET VOLUME: Pertahankan kedalaman naskah MINIMAL 1.500 KATA. DILARANG memangkas naskah menjadi ringkasan pendek!'
-      : `TARGET VOLUME: Pertahankan proporsi naskah sesuai target (${targetLengthStr}).`;
+      ? 'TARGET VOLUME: Pertahankan kedalaman naskah MINIMAL 3.000 KATA PENUH dengan struktur 5–7 bab tebal (minimal 450–600 kata per bab, 3–5 paragraf per bab). DILARANG memangkas naskah menjadi ringkasan pendek!'
+      : targetLengthStr === 'SHORT'
+        ? 'TARGET VOLUME: Pertahankan kepadatan naskah ~750 KATA PENUH (minimal 150–250 kata per bab dalam 2–3 paragraf tebal).'
+        : 'TARGET VOLUME: Pertahankan proporsi naskah ~1.500 KATA PENUH (minimal 300–400 kata per bab dalam 2–4 paragraf tebal).';
 
     const systemPrompt = `Anda adalah Analis Kebijakan Utama BRIDA Kabupaten Mimika.
 Tugas Anda: Perbarui atau revisi naskah dokumen kebijakan berikut berdasarkan instruksi pengguna.
 ${lengthRule}
+KEKAYAAN FORMAT: Bebas gunakan tabel Markdown, bullet/numbered lists, dan grafik QuickChart jika memperjelas data.
+ATURAN KEPADATAN: Setiap bab/bagian (##) harus memiliki substansi minimal 150 kata (akumulasi narasi, tabel, dan butir analitis). Dilarang membuat heading kosong 1-2 kalimat.
 Pertahankan gaya bahasa ${session.tone || 'SOLUTIF'}.
 Pastikan naskah tetap utuh, terstruktur bab per bab, dan bernas.
 ${EDITORIAL_STYLE_GUIDE}
@@ -11516,6 +11676,7 @@ ${EDITORIAL_STYLE_GUIDE}
       revisedArticleText = llmResult.fullText || formatArticleFromLlm(llmResult, resolvedTitle, temporal);
       revisedArticleText = cleanArticleTitlePrefix(revisedArticleText);
       revisedArticleText = ensureDocumentTitleHeader(revisedArticleText, resolvedTitle);
+      revisedArticleText = sanitizeQuickChartMarkdown(revisedArticleText);
     } catch (err: any) {
       const fallbackRaw =
         `# ${resolvedTitle}\n\n[Revisi - ${new Date().toLocaleTimeString('id-ID')}]\n\n` +
@@ -12754,6 +12915,281 @@ export class PromptInjectionSanitizer {
     }
 
     return cleanQuery;
+  }
+}
+
+--- FILE: src\modules\interactive-assistant\utils\quickchart-sanitizer.util.ts ---
+import { jsonrepair } from 'jsonrepair';
+
+function extractBalancedObject(
+  str: string,
+  startIndex: number,
+): { objectStr: string; endIndex: number } | null {
+  let depth = 0;
+  let inString: string | null = null;
+  let isEscaped = false;
+  let objStart = -1;
+
+  for (let i = startIndex; i < str.length; i++) {
+    const char = str[i];
+
+    if (inString) {
+      if (isEscaped) {
+        isEscaped = false;
+      } else if (char === '\\') {
+        isEscaped = true;
+      } else if (char === inString) {
+        inString = null;
+      }
+      continue;
+    }
+
+    if (char === '"' || char === "'" || char === '`') {
+      inString = char;
+      continue;
+    }
+
+    if (char === '{') {
+      if (depth === 0) objStart = i;
+      depth++;
+    } else if (char === '}') {
+      depth--;
+      if (depth === 0 && objStart !== -1) {
+        return {
+          objectStr: str.substring(objStart, i + 1),
+          endIndex: i + 1,
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+function safelyDecodeChartConfig(rawInput: string): string {
+  if (!rawInput) return '';
+  let str = rawInput.trim();
+
+  str = str
+    .replace(/%7B/gi, '{')
+    .replace(/%7D/gi, '}')
+    .replace(/%5B/gi, '[')
+    .replace(/%5D/gi, ']')
+    .replace(/%3A/gi, ':')
+    .replace(/%2C/gi, ',')
+    .replace(/%22/gi, '"')
+    .replace(/%27/gi, "'")
+    .replace(/%20/gi, ' ')
+    .replace(/%23/gi, '#')
+    .replace(/%28/gi, '(')
+    .replace(/%29/gi, ')')
+    .replace(/%2F/gi, '/');
+
+  str = str.replace(/%7([a-zA-Z])/g, '{"$1"');
+
+  try {
+    str = decodeURIComponent(str);
+  } catch {
+    try {
+      const fixed = str.replace(/%(?![0-9a-fA-F]{2})/g, '%25');
+      str = decodeURIComponent(fixed);
+    } catch {}
+  }
+
+  return str;
+}
+
+export function sanitizeQuickChartMarkdown(markdown: string): string {
+  if (!markdown || typeof markdown !== 'string') return '';
+
+  let result = markdown;
+  const qcMarker = 'quickchart.io/chart?';
+  let searchPos = 0;
+
+  let iterations = 0;
+  const MAX_ITERATIONS = 50;
+
+  while (iterations++ < MAX_ITERATIONS) {
+    const foundIdx = result.toLowerCase().indexOf(qcMarker, searchPos);
+    if (foundIdx === -1) break;
+
+    const textBefore = result.substring(0, foundIdx);
+    const httpMatch = textBefore.match(/(https?:\/\/)$/i);
+    const httpStart = httpMatch ? foundIdx - httpMatch[0].length : foundIdx;
+
+    let fullMatchStart = httpStart;
+    let altText = 'Visualisasi Grafik Data';
+
+    const textBeforeHttp = result.substring(0, httpStart);
+    const lastImgOpen = textBeforeHttp.lastIndexOf('![');
+    const lastLinkOpen = textBeforeHttp.lastIndexOf('[');
+    const lastOpen = lastImgOpen !== -1 ? lastImgOpen : lastLinkOpen;
+
+    if (lastOpen !== -1 && lastOpen >= textBeforeHttp.length - 300) {
+      const candidate = textBeforeHttp.substring(lastOpen);
+      const m = candidate.match(/^(!?\[([^\]]*)\]\s*\(\s*)$/);
+      if (m) {
+        fullMatchStart = lastOpen;
+        if (m[2] && m[2].trim()) {
+          altText = m[2].trim().replace(/[\[\]]/g, '');
+        }
+      }
+    }
+
+    const afterQc = result.substring(foundIdx + qcMarker.length);
+    const cMatch = afterQc.match(/^(?:[^ \n\r"'>]*?[?&])?(c|chart)=/i);
+
+    if (cMatch) {
+      const cStart = foundIdx + qcMarker.length + cMatch[0].length;
+      const subFromC = result.substring(cStart);
+
+      // Ambil seluruh chunk pada baris tersebut hingga akhir baris
+      const lineEnd = subFromC.search(/[\n\r]/);
+      const lineChunk = lineEnd !== -1 ? subFromC.substring(0, lineEnd) : subFromC;
+
+      // Bersihkan karakter penutup markdown di ujung baris jika ada
+      let rawChunk = lineChunk.trimEnd();
+      const trailMatch = rawChunk.match(/[\)\]\>]+$/);
+      if (trailMatch) {
+        rawChunk = rawChunk.substring(0, rawChunk.length - trailMatch[0].length);
+      }
+
+      const replaceEnd = cStart + lineChunk.length;
+
+      // Decode & normalisasi string chart config
+      const decoded = safelyDecodeChartConfig(rawChunk);
+      let configStr = '';
+
+      if (decoded.includes('{')) {
+        const braceOffset = decoded.indexOf('{');
+        const balanced = extractBalancedObject(decoded, braceOffset);
+        if (balanced) {
+          configStr = balanced.objectStr;
+        }
+      }
+
+      if (configStr) {
+        try {
+          const repaired = jsonrepair(configStr);
+          const parsed = JSON.parse(repaired);
+          const encoded = encodeURIComponent(JSON.stringify(parsed));
+          const safeUrl = `https://quickchart.io/chart?c=${encoded}&bkg=white&w=650&h=350&devicePixelRatio=2`;
+          const replacement = `\n\n![${altText}](${safeUrl})\n\n`;
+
+          result = result.substring(0, fullMatchStart) + replacement + result.substring(replaceEnd);
+          searchPos = fullMatchStart + replacement.length;
+          continue;
+        } catch {
+          try {
+            const safeEncoded = encodeURIComponent(configStr);
+            const safeUrl = `https://quickchart.io/chart?c=${safeEncoded}&bkg=white&w=650&h=350&devicePixelRatio=2`;
+            const replacement = `\n\n![${altText}](${safeUrl})\n\n`;
+
+            result = result.substring(0, fullMatchStart) + replacement + result.substring(replaceEnd);
+            searchPos = fullMatchStart + replacement.length;
+            continue;
+          } catch {}
+        }
+      }
+    }
+
+    searchPos = foundIdx + qcMarker.length;
+  }
+
+  return result.replace(/\n{3,}/g, '\n\n');
+}
+
+--- FILE: src\modules\interactive-assistant\utils\section-density-validator.util.ts ---
+export interface SectionAuditReport {
+  totalWords: number;
+  totalChapters: number;
+  chapters: Array<{
+    heading: string;
+    wordCount: number;
+    paragraphCount: number;
+    isDensityValid: boolean;
+  }>;
+  isValidShort: boolean;
+  isValidMedium: boolean;
+  isValidLong: boolean;
+  hasAntiFragmentationPassed: boolean;
+}
+
+export class SectionDensityValidator {
+  private static readonly MIN_WORDS_PER_SECTION = 150;
+
+  public static auditMarkdown(markdownText: string): SectionAuditReport {
+    if (!markdownText) {
+      return {
+        totalWords: 0,
+        totalChapters: 0,
+        chapters: [],
+        isValidShort: false,
+        isValidMedium: false,
+        isValidLong: false,
+        hasAntiFragmentationPassed: false,
+      };
+    }
+
+    const cleanText = markdownText
+      .replace(/!\[([^\]]*)\]\((https?:\/\/[^\)]+)\)/g, '')
+      .replace(/```[\s\S]*?```/g, '')
+      .trim();
+
+    const totalWords = this.countWords(cleanText);
+
+    const sectionSplitRegex = /^##\s+(.+)$/gm;
+    const rawSections = cleanText.split(sectionSplitRegex);
+
+    const chapters: SectionAuditReport['chapters'] = [];
+
+    if (rawSections.length === 1) {
+      const pCount = this.countParagraphs(rawSections[0]);
+      const wCount = this.countWords(rawSections[0]);
+      chapters.push({
+        heading: 'Pendahuluan / Naskah Tunggal',
+        wordCount: wCount,
+        paragraphCount: pCount,
+        isDensityValid: wCount >= this.MIN_WORDS_PER_SECTION,
+      });
+    } else {
+      for (let i = 1; i < rawSections.length; i += 2) {
+        const heading = rawSections[i].trim();
+        const content = rawSections[i + 1] ? rawSections[i + 1].trim() : '';
+        const wCount = this.countWords(content);
+        const pCount = this.countParagraphs(content);
+
+        chapters.push({
+          heading,
+          wordCount: wCount,
+          paragraphCount: pCount,
+          isDensityValid: wCount >= this.MIN_WORDS_PER_SECTION,
+        });
+      }
+    }
+
+    const allChaptersValid = chapters.length > 0 && chapters.every((c) => c.isDensityValid);
+
+    return {
+      totalWords,
+      totalChapters: chapters.length,
+      chapters,
+      isValidShort: totalWords >= 650 && totalWords <= 1000,
+      isValidMedium: totalWords >= 1300 && totalWords <= 2000,
+      isValidLong: totalWords >= 2700,
+      hasAntiFragmentationPassed: allChaptersValid,
+    };
+  }
+
+  private static countWords(text: string): number {
+    return text.trim().split(/\s+/).filter((w) => w.length > 0).length;
+  }
+
+  private static countParagraphs(text: string): number {
+    return text
+      .split(/\n\s*\n/)
+      .map((p) => p.trim())
+      .filter((p) => p.length > 20).length;
   }
 }
 

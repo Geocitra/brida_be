@@ -26,7 +26,7 @@ export class InfographicService implements OnModuleInit {
   constructor(
     private readonly configService: ConfigService,
     private readonly prisma: PrismaService,
-  ) {}
+  ) { }
 
   private get indexPath(): string {
     return join(process.cwd(), 'uploads', 'media', 'infographics_index.json');
@@ -138,8 +138,7 @@ export class InfographicService implements OnModuleInit {
             const combinedTexts = relevantChunks
               .map(
                 (c) =>
-                  `[SUMBER LAPORAN: ${
-                    c.document?.title || 'Dokumen Riset Daerah'
+                  `[SUMBER LAPORAN: ${c.document?.title || 'Dokumen Riset Daerah'
                   }]\n${c.rawText}`,
               )
               .join('\n---\n');
@@ -148,8 +147,7 @@ export class InfographicService implements OnModuleInit {
               3000,
             )}`;
             this.logger.log(
-              `[InfographicService] Berhasil mengekstrak ${
-                relevantChunks.length
+              `[InfographicService] Berhasil mengekstrak ${relevantChunks.length
               } data riil dari arsip dokumen BRIDA terkait: ${cleanWords.join(
                 ', ',
               )}`,
@@ -238,32 +236,12 @@ export class InfographicService implements OnModuleInit {
       this.configService.get<string>('OPENAI_MODEL') || 'gpt-4o-mini';
 
     const systemPrompt = `Anda adalah Kepala Pusat Data & Art Director Senior di BRIDA (Badan Riset dan Inovasi Daerah) Kabupaten Mimika, Papua Tengah.
-Tugas utama Anda: Merancang POSTER INFOGRAFIS STATISTIK DAN KEBIJAKAN RESMI MULTI-SEKTORAL berlandaskan data faktual (Evidence-Based Policy) untuk Kabupaten Mimika.
+Tugas utama Anda: Membuat INFOGRAFIS berlandaskan data faktual (Evidence-Based Policy) untuk Kabupaten Mimika.
 
 PANDUAN ART DIRECTOR & GENERATIVE UI (BLOCK-BASED ENGINE):
-1. Anda bebas dan wajib memilih antara 4 sampai 6 blok visual ("blocks") yang PALING TEPAT untuk merepresentasikan topik pengguna.
-2. Setiap blok harus memiliki jenis "type" yang spesifik dari daftar berikut:
-   - "METRIC_CARDS": Kartu ringkasan angka statistik/KPI utama dengan persentase tren naik/turun. Cocok untuk data prevalensi kesehatan, pertumbuhan penduduk, atau realisasi anggaran.
-   - "BAR_CHART": Grafik batang perbandingan (bulanan atau antar-kategori/OPD). Cocok untuk data curah hujan, alokasi APBD per dinas, atau volume panen.
-   - "LINE_CHART": Grafik garis perkembangan data/indeks waktu. Cocok untuk tren inflasi, indeks ENSO, atau laju PDRB tahunan.
-   - "PROGRESS_ITEMS": Progress bar pencapaian target/komoditas dengan persentase realisasi. Cocok untuk perbandingan target vs capaian fisik lapangan.
-   - "ICON_LIST": Poin-poin temuan fakta strategis atau faktor penyebab dengan ikon semantik ('alert', 'trend-up', 'trend-down', 'check', 'leaf', 'water', 'fire', 'health', 'info').
-   - "DISTRICT_STATUS": Matriks sebaran status wilayah per distrik di Kabupaten Mimika (Tingkat: 'Tinggi', 'Sedang-Tinggi', 'Sedang', 'Rendah'). Gunakan distrik resmi Mimika (contoh: Mimika Baru, Kuala Kencana, Tembagapura, Wania, Iwaka, Kwamki Narama, Mimika Timur, Mimika Tengah, Mimika Barat, Agimuga, Jila, Jita, Hoya, Alama).
-   - "ACTION_STEPS": Rekomendasi rencana aksi / langkah mitigasi kebijakan bernomor beserta penanggung jawab (PIC) dan prioritas.
-
-3. STRUKTUR PAYLOAD TIAP TIPE BLOK (WAJIB SESUAI FORMAT):
-   - METRIC_CARDS: { "items": [ { "label": string, "value": string, "changePercent": string, "changeType": "positive"|"negative"|"neutral", "note": string } ] }
-   - BAR_CHART: { "categories": string[], "series": [ { "name": string, "data": number[], "color": string } ], "unit": string }
-   - LINE_CHART: { "points": [ { "label": string, "value": number } ], "unit": string, "thresholdLabel": string }
-   - PROGRESS_ITEMS: { "legend": { "current": string, "baseline": string }, "items": [ { "name": string, "current": number, "max": number, "currentLabel": string, "maxLabel": string, "changePercent": number, "changeLabel": string, "unit": string } ] }
-   - ICON_LIST: { "items": [ { "icon": "alert"|"trend-up"|"trend-down"|"check"|"leaf"|"water"|"fire"|"health"|"info", "title": string, "text": string } ] }
-   - DISTRICT_STATUS: { "districts": [ { "name": string, "level": "Tinggi"|"Sedang-Tinggi"|"Sedang"|"Rendah", "note": string } ] }
-   - ACTION_STEPS: { "steps": [ { "stepNumber": number, "title": string, "text": string, "pic": string, "priority": "TINGGI"|"SEDANG"|"RENDAH" } ], "commitmentBadge": string }
-
-4. DALLE PROMPT ATURAN (UNTUK BANNER BACKGROUND SAJA):
-   Tuliskan deskripsi foto lanskap alam resolusi tinggi Kabupaten Mimika (sungai, hutan tropis, pegunungan Grasberg, pemukiman pesisir). Wajib sertakan instruksi tegas di akhir: "editorial documentary landscape photography of Mimika Papua, sunny soft lighting, high resolution, strictly no text, no typography, no letters, no watermark, clean composition".
-
-5. FORMAT OUTPUT HARUS BERUPA JSON MURNI VALID MENGIKUTI STRUKTUR KONTRAK BERIKUT:
+1. Anda bebas memilih blok visual ("blocks") yang PALING TEPAT untuk merepresentasikan topik pengguna.
+2. Jangan membuat logo apapun baik pada bagian header ataupun footer.
+3. FORMAT OUTPUT HARUS BERUPA JSON MURNI VALID MENGIKUTI STRUKTUR KONTRAK BERIKUT:
 {
   "title": "string judul ringkas",
   "subtitle": "string subjudul",
@@ -306,11 +284,10 @@ PANDUAN ART DIRECTOR & GENERATIVE UI (BLOCK-BASED ENGINE):
   }
 }`;
 
-    const userPrompt = `[TOPIK INFOGRAFIS]\n${topic}\n${documentContext}${
-      customInstructions
+    const userPrompt = `[TOPIK INFOGRAFIS]\n${topic}\n${documentContext}${customInstructions
         ? `\n\n[INSTRUKSI KHUSUS PENGGUNA]\n${customInstructions}`
         : ''
-    }\n\n[ASPEK RASIO TARGET]\n${aspectRatio}`;
+      }\n\n[ASPEK RASIO TARGET]\n${aspectRatio}`;
 
     try {
       if (!apiKey || apiKey.trim().length === 0) {
@@ -565,12 +542,10 @@ PANDUAN ART DIRECTOR & GENERATIVE UI (BLOCK-BASED ENGINE):
     const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
   <defs>
     <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="${
-        themeColors.secondary || '#0f172a'
+      <stop offset="0%" stop-color="${themeColors.secondary || '#0f172a'
       }" />
       <stop offset="40%" stop-color="#1e293b" />
-      <stop offset="100%" stop-color="${
-        themeColors.primary || '#0d9488'
+      <stop offset="100%" stop-color="${themeColors.primary || '#0d9488'
       }" stop-opacity="0.8" />
     </linearGradient>
     <pattern id="gridPattern" width="60" height="60" patternUnits="userSpaceOnUse">
@@ -579,19 +554,15 @@ PANDUAN ART DIRECTOR & GENERATIVE UI (BLOCK-BASED ENGINE):
   </defs>
   <rect width="${width}" height="${height}" fill="url(#bgGrad)" />
   <rect width="${width}" height="${height}" fill="url(#gridPattern)" />
-  <circle cx="${width * 0.85}" cy="${height * 0.15}" r="${
-      width * 0.35
-    }" fill="${themeColors.primary || '#0d9488'}" fill-opacity="0.15" filter="blur(60px)" />
-  <circle cx="${width * 0.15}" cy="${height * 0.85}" r="${
-      width * 0.4
-    }" fill="${themeColors.accent || '#f59e0b'}" fill-opacity="0.12" filter="blur(70px)" />
+  <circle cx="${width * 0.85}" cy="${height * 0.15}" r="${width * 0.35
+      }" fill="${themeColors.primary || '#0d9488'}" fill-opacity="0.15" filter="blur(60px)" />
+  <circle cx="${width * 0.15}" cy="${height * 0.85}" r="${width * 0.4
+      }" fill="${themeColors.accent || '#f59e0b'}" fill-opacity="0.12" filter="blur(70px)" />
   <g opacity="0.12" stroke="#ffffff" stroke-width="2" fill="none">
-    <polygon points="${width * 0.1},${height * 0.2} ${width * 0.2},${
-      height * 0.1
-    } ${width * 0.3},${height * 0.25}" />
-    <polygon points="${width * 0.75},${height * 0.8} ${width * 0.9},${
-      height * 0.75
-    } ${width * 0.85},${height * 0.92}" />
+    <polygon points="${width * 0.1},${height * 0.2} ${width * 0.2},${height * 0.1
+      } ${width * 0.3},${height * 0.25}" />
+    <polygon points="${width * 0.75},${height * 0.8} ${width * 0.9},${height * 0.75
+      } ${width * 0.85},${height * 0.92}" />
   </g>
 </svg>`;
 
