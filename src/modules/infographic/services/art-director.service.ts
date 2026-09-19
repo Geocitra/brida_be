@@ -13,6 +13,9 @@ import {
   resolveTopicInformationArchitecture,
   resolveCanvasComposition,
   ArchetypeDefinition,
+  SAFE_AREA,
+  CONTENT_START,
+  CONTENT_END,
 } from '../constants/infographic-design-system.constant';
 
 export interface InitialPromptCraftOptions {
@@ -243,7 +246,7 @@ ATURAN UTAMA EKSEKUSI LANGSUNG (ZERO-CLARIFICATION DIRECTIVE):
 1. DILARANG mengajukan pertanyaan balik atau meminta klarifikasi pada pengguna! Langsung tentukan konsep terbaik dan eksekusi.
 2. Langsung berikan penjelasan singkat (maksimal 2-3 kalimat pada 'aiCommentary') mengenai arsitektur informasi, zone composition, dan angka penting yang disintesis.
 3. Seluruh judul, label diagram, dan teks pada visual WAJIB 100% DALAM BAHASA INDONESIA RESMI.
-4. DILARANG membuat atau mencantumkan logo/lambang/watermark apapun.
+4. DILARANG membuat logo, lambang, watermark, ATAU BARIS FOOTER/ATRIBUSI SUMBER dalam bentuk apa pun. Area header (0-${SAFE_AREA.headerPercent}%) dan footer (${CONTENT_END}-100%) wajib dikosongkan total sebagai pita solid — akan diisi manual oleh pengguna setelah gambar selesai dibuat.
 
 SUMBER DATA ACUAN GANDA (DUAL-SOURCE GROUNDING):
 Anda dibekali data riil dari 2 sumber:
@@ -259,14 +262,14 @@ DATA PROVENANCE ENFORCEMENT:
 
 ATURAN STRUKTURAL REKAYASA PROMPT VISUAL ("imagePrompt"):
 1. Susun instruksi visual bahasa Inggris yang sangat presisi untuk model generasi gambar.
-2. Terapkan secara eksplisit 7 VISUAL ZONES sesuai arsitektur di atas, lengkap dengan alokasi persentase tinggi kanvas.
-3. ZONE HERO (0-20%) harus berupa foto/visual FULL-WIDTH edge-to-edge yang langsung memenuhi area atas. DILARANG menyisakan area putih kosong di atas hero. Overlay judul dan subjudul di atas hero menggunakan kontras kuat.
+2. Terapkan secara eksplisit 6 VISUAL ZONES (bukan 7) sesuai arsitektur di atas dalam rentang ${CONTENT_START}%-${CONTENT_END}% tinggi kanvas.
+3. ZONE HERO (${CONTENT_START}-26%) dimulai TEPAT di ${CONTENT_START}%, bukan di 0%. Harus berupa foto/visual FULL-WIDTH edge-to-edge. DILARANG menggambar elemen di atas ${CONTENT_START}%. Overlay judul dan subjudul di atas hero menggunakan kontras kuat.
 4. PETA/MAP harus berukuran besar dan dominan (~18% kanvas), BUKAN peta kecil di dalam kartu. Sertakan label distrik, legenda, dan 2-4 callout anotasi data.
 5. Tetapkan palet warna tegas: Dominan ${archetype.primaryColor}, Sekunder ${archetype.secondaryColor}, Aksen ${archetype.accentColor} di atas latar belakang putih bersih (#FFFFFF).
 6. SELURUH TEKS, JUDUL, DAN LABEL PADA GAMBAR WAJIB 100% DALAM BAHASA INDONESIA RESMI.
-7. DILARANG memunculkan logo, lambang, cap, atau watermark apapun.
+7. DILARANG memunculkan logo, lambang, cap, watermark, nama instansi, baris sumber data, tagline penutup, atau tanggal di mana pun.
 8. VARIASI VISUAL: Jangan render setiap zone sebagai rectangular card. Campurkan full-width photography, metric strips, charts, maps, timelines, diagrams, icons, callout numbers, dan photographic panels.
-9. Tutup prompt DALL-E dengan: "Ultra-sharp 8k resolution, dense editorial grid layout filling 95% of vertical canvas, professional vector typography strictly in Indonesian language, no logos, no watermarks, high information density, official government report style, controlled whitespace, full-canvas composition, balanced visual rhythm, no large unused areas."`;
+9. Tutup prompt DALL-E dengan: "Ultra-sharp 8k resolution, dense editorial grid layout, professional vector typography strictly in Indonesian language, no logos, no watermarks, no footer bar, no source attribution line, no institution name, top ${SAFE_AREA.headerPercent}% and bottom ${SAFE_AREA.footerPercent}% of the canvas left completely blank as solid color bands, high information density, official government report style, balanced visual rhythm."`;
 
     const userMessage = `[TOPIK INFOGRAFIS]: ${options.topic}
 
@@ -323,9 +326,10 @@ Tugas Anda:
 3. Pertahankan CANVAS OCCUPANCY 92-97%. Jangan membuat poster menjadi lebih kosong.
 4. Pertahankan palet warna tematik (Dominan: ${archetype.primaryColor}, Sekunder: ${archetype.secondaryColor}, Aksen: ${archetype.accentColor}) di atas latar belakang bersih (#FFFFFF).
 5. Seluruh teks pada gambar WAJIB 100% BAHASA INDONESIA RESMI.
-6. DILARANG memunculkan logo, lambang, atau watermark apapun.
-7. Setiap angka baru yang ditambahkan WAJIB terdaftar di extractedKeyFacts beserta sumber dan confidence.
-8. Berikan komentar dialog ("aiCommentary") yang menjelaskan revisi apa yang diterapkan. DILARANG bertanya balik.`;
+6. DILARANG memunculkan logo, lambang, cap, watermark, baris sumber, atau footer apapun.
+7. Safe area atas (${SAFE_AREA.headerPercent}%) dan bawah (${SAFE_AREA.footerPercent}%) WAJIB tetap kosong pada setiap revisi. Jika pengguna meminta "tambahkan footer" atau "tambahkan logo instansi", JANGAN menggambarnya di kanvas — jelaskan pada 'aiCommentary' bahwa header dan footer ditambahkan secara resmi melalui panel Branding setelah gambar selesai dibuat.
+8. Setiap angka baru yang ditambahkan WAJIB terdaftar di extractedKeyFacts beserta sumber dan confidence.
+9. Berikan komentar dialog ("aiCommentary") yang menjelaskan revisi apa yang diterapkan. DILARANG bertanya balik.`;
 
     const userMessage = `[PROMPT DALL-E SEBELUMNYA]:
 ${options.previousPrompt}

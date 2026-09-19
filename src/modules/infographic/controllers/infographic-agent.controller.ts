@@ -12,12 +12,15 @@ import {
   HttpStatus,
   ParseUUIDPipe,
   NotFoundException,
+  BadRequestException,
+  Query,
 } from '@nestjs/common';
 import { Response } from 'express';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { existsSync } from 'fs';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { InfographicAgentService } from '../services/infographic-agent.service';
+import { PosterCompositionService } from '../services/poster-composition.service';
 import {
   CreateInfographicSessionDto,
   ChatInfographicAgentDto,
@@ -25,7 +28,10 @@ import {
 
 @Controller('infographic/agent')
 export class InfographicAgentController {
-  constructor(private readonly agentService: InfographicAgentService) {}
+  constructor(
+    private readonly agentService: InfographicAgentService,
+    private readonly compositionService: PosterCompositionService,
+  ) {}
 
   /**
    * POST /infographic/agent/session
@@ -97,8 +103,10 @@ export class InfographicAgentController {
    * Mengunduh berkas fisik poster PNG dengan header Content-Disposition: attachment
    */
   @Get('posters/:id/download')
+  @UseGuards(JwtAuthGuard)
   async downloadPoster(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Query('branded') branded: string,
     @Res() res: Response,
   ) {
     const poster = await this.agentService.getPosterById(id);
@@ -106,17 +114,32 @@ export class InfographicAgentController {
       throw new NotFoundException('Poster dengan ID tersebut tidak ditemukan.');
     }
 
+    let targetImageUrl = poster.imageUrl;
+    let isBranded = false;
+
+    if (branded === 'true') {
+      targetImageUrl = await this.compositionService.composePoster(id);
+      isBranded = targetImageUrl !== poster.imageUrl;
+    }
+
     const cleanTitle = (poster.session?.title || 'Poster')
       .replace(/[^a-zA-Z0-9\s]/g, '')
       .trim()
       .replace(/\s+/g, '_')
       .substring(0, 50);
-    const filename = `Infografis_BRIDA_${cleanTitle}_v${poster.versionNumber}.png`;
+    const suffix = isBranded ? '_Resmi' : '';
+    const filename = `Infografis_BRIDA_${cleanTitle}_v${poster.versionNumber}${suffix}.png`;
 
-    const relativePath = poster.imageUrl.startsWith('/')
-      ? poster.imageUrl.substring(1)
-      : poster.imageUrl;
-    const fullPath = join(process.cwd(), relativePath);
+    const postersRoot = resolve(process.cwd(), 'uploads', 'media', 'posters');
+    const relativePath = targetImageUrl.startsWith('/')
+      ? targetImageUrl.substring(1)
+      : targetImageUrl;
+    const fullPath = resolve(process.cwd(), relativePath);
+
+    // Containment check: cegah path traversal
+    if (!fullPath.startsWith(postersRoot)) {
+      throw new BadRequestException('Lokasi berkas poster tidak sah.');
+    }
 
     if (!existsSync(fullPath)) {
       throw new NotFoundException('Berkas fisik poster tidak ditemukan pada disk server.');

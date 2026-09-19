@@ -85,6 +85,7 @@ export class InfographicAgentService {
         aiCommentary: artConcept.aiCommentary,
         imageUrl: localImageUrl,
         aspectRatio,
+        generationProfile: 'V2_CLEAN_CANVAS',
       },
     });
 
@@ -156,6 +157,7 @@ export class InfographicAgentService {
         aiCommentary: evolvedConcept.aiCommentary,
         imageUrl: localImageUrl,
         aspectRatio,
+        generationProfile: 'V2_CLEAN_CANVAS',
       },
     });
 
@@ -234,6 +236,9 @@ export class InfographicAgentService {
         },
         posters: {
           orderBy: { versionNumber: 'asc' },
+          include: {
+            branding: true,
+          },
         },
       },
     });
@@ -264,6 +269,7 @@ export class InfographicAgentService {
         session: {
           select: { title: true },
         },
+        branding: true,
       },
     });
   }

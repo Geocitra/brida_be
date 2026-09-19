@@ -10,9 +10,15 @@ import { IMAGE_GENERATOR_TOKEN } from './interfaces/image-generator.interface';
 
 import { InfographicAgentService } from './services/infographic-agent.service';
 import { InfographicAgentController } from './controllers/infographic-agent.controller';
+import { InfographicBrandingService } from './services/infographic-branding.service';
+import { InfographicBrandingController } from './controllers/infographic-branding.controller';
 
 import { InfographicController } from './controllers/infographic.controller';
 import { InfographicService } from './services/infographic.service';
+
+import { POSTER_RENDERER_TOKEN } from './interfaces/poster-renderer.interface';
+import { HtmlPosterRenderer } from './renderers/html-poster.renderer';
+import { PosterCompositionService } from './services/poster-composition.service';
 
 @Module({
   imports: [
@@ -22,6 +28,7 @@ import { InfographicService } from './services/infographic.service';
   ],
   controllers: [
     InfographicAgentController,
+    InfographicBrandingController,
     InfographicController,
   ],
   providers: [
@@ -29,6 +36,13 @@ import { InfographicService } from './services/infographic.service';
     PosterStorageService,
     ArtDirectorPromptArchitect,
     InfographicAgentService,
+    InfographicBrandingService,
+    PosterCompositionService,
+    {
+      provide: POSTER_RENDERER_TOKEN,
+      useClass: HtmlPosterRenderer,
+    },
+    HtmlPosterRenderer,
     {
       provide: IMAGE_GENERATOR_TOKEN,
       useClass: OpenAiImageAdapter,
@@ -40,6 +54,9 @@ import { InfographicService } from './services/infographic.service';
     PosterStorageService,
     ArtDirectorPromptArchitect,
     InfographicAgentService,
+    InfographicBrandingService,
+    PosterCompositionService,
+    POSTER_RENDERER_TOKEN,
     IMAGE_GENERATOR_TOKEN,
     OpenAiImageAdapter,
   ],
