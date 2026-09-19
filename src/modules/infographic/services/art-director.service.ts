@@ -261,15 +261,16 @@ DATA PROVENANCE ENFORCEMENT:
 - DILARANG mengubah persentase-persentase yang tidak saling berhubungan menjadi satu pie chart.
 
 ATURAN STRUKTURAL REKAYASA PROMPT VISUAL ("imagePrompt"):
-1. Susun instruksi visual bahasa Inggris yang sangat presisi untuk model generasi gambar.
-2. Terapkan secara eksplisit 6 VISUAL ZONES (bukan 7) sesuai arsitektur di atas dalam rentang ${CONTENT_START}%-${CONTENT_END}% tinggi kanvas.
-3. ZONE HERO (${CONTENT_START}-26%) dimulai TEPAT di ${CONTENT_START}%, bukan di 0%. Harus berupa foto/visual FULL-WIDTH edge-to-edge. DILARANG menggambar elemen di atas ${CONTENT_START}%. Overlay judul dan subjudul di atas hero menggunakan kontras kuat.
-4. PETA/MAP harus berukuran besar dan dominan (~18% kanvas), BUKAN peta kecil di dalam kartu. Sertakan label distrik, legenda, dan 2-4 callout anotasi data.
-5. Tetapkan palet warna tegas: Dominan ${archetype.primaryColor}, Sekunder ${archetype.secondaryColor}, Aksen ${archetype.accentColor} di atas latar belakang putih bersih (#FFFFFF).
-6. SELURUH TEKS, JUDUL, DAN LABEL PADA GAMBAR WAJIB 100% DALAM BAHASA INDONESIA RESMI.
-7. DILARANG memunculkan logo, lambang, cap, watermark, nama instansi, baris sumber data, tagline penutup, atau tanggal di mana pun.
-8. VARIASI VISUAL: Jangan render setiap zone sebagai rectangular card. Campurkan full-width photography, metric strips, charts, maps, timelines, diagrams, icons, callout numbers, dan photographic panels.
-9. Tutup prompt DALL-E dengan: "Ultra-sharp 8k resolution, dense editorial grid layout, professional vector typography strictly in Indonesian language, no logos, no watermarks, no footer bar, no source attribution line, no institution name, top ${SAFE_AREA.headerPercent}% and bottom ${SAFE_AREA.footerPercent}% of the canvas left completely blank as solid color bands, high information density, official government report style, balanced visual rhythm."`;
+1. Susun instruksi visual bahasa Inggris yang sangat presisi untuk model generasi gambar DALL-E 3.
+2. WAJIB instruksikan aturan HEADROOM ATAS di awal prompt: Pucuk atas kanvas (0-15%) adalah LANGIT BERSIH KOSONG (clear sky / empty negative space) TANPA TEKS, TANPA JUDUL, dan TANPA ELEMEN GRAFIS APAPUN untuk alokasi kop instansi resmi.
+3. POSISI JUDUL UTAMA: Judul utama dan subjudul DILARANG KERAS diletakkan di pucuk atas kanvas! Judul WAJIB diletakkan di bagian bawah zona hero (dekat cakrawala/pegunungan), menyisakan ruang bernapas kosong di atasnya.
+4. Terapkan secara eksplisit 6 VISUAL ZONES sesuai arsitektur di atas dalam rentang kanvas.
+5. PETA/MAP harus berukuran besar dan dominan (~18% kanvas), BUKAN peta kecil di dalam kartu. Sertakan label distrik, legenda, dan 2-4 callout anotasi data.
+6. Tetapkan palet warna tegas: Dominan ${archetype.primaryColor}, Sekunder ${archetype.secondaryColor}, Aksen ${archetype.accentColor} di atas latar belakang putih bersih (#FFFFFF).
+7. SELURUH TEKS, JUDUL, DAN LABEL PADA GAMBAR WAJIB 100% DALAM BAHASA INDONESIA RESMI.
+8. DILARANG memunculkan logo, lambang, cap, watermark, nama instansi, baris sumber data, tagline penutup, atau tanggal di mana pun.
+9. MARGIN BAWAH: Zona terbawah (cards/impact) harus selesai di atas margin 8-10%, jangan biarkan kartu menyentuh tepi bawah kanvas.
+10. Tutup prompt DALL-E dengan: "Ultra-sharp 8k resolution, dense editorial grid layout, professional vector typography strictly in Indonesian language, generous clear top headroom for masthead, generous bottom footer margin, no logos, no watermarks, no footer bar, official government report style."`;
 
     const userMessage = `[TOPIK INFOGRAFIS]: ${options.topic}
 

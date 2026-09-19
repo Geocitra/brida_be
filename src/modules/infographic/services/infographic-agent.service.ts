@@ -47,9 +47,14 @@ export class InfographicAgentService {
       customInstructions: dto.customInstructions,
     });
 
-    // 2. Eksekusi DALL-E 3 menghasilkan biner gambar poster
+    // 2. Eksekusi DALL-E 3 dengan penegakan Headroom dan Margin deterministik
+    const enforcedPrompt = this.enforceHeadroomAndMargins(
+      artConcept.imagePrompt,
+      artConcept.posterTitle,
+    );
+
     const imageResult = await this.imageGenerator.generateImage({
-      prompt: artConcept.imagePrompt,
+      prompt: enforcedPrompt,
       aspectRatio,
       quality: 'hd',
     });
@@ -81,7 +86,7 @@ export class InfographicAgentService {
         sessionId: session.id,
         versionNumber: 1,
         userPrompt: dto.topic,
-        revisedPrompt: artConcept.imagePrompt,
+        revisedPrompt: enforcedPrompt,
         aiCommentary: artConcept.aiCommentary,
         imageUrl: localImageUrl,
         aspectRatio,
@@ -133,9 +138,14 @@ export class InfographicAgentService {
       aspectRatio,
     });
 
-    // 2. Render gambar poster baru versi revisi
+    // 2. Render gambar poster baru versi revisi dengan penegakan Headroom dan Margin deterministik
+    const enforcedPrompt = this.enforceHeadroomAndMargins(
+      evolvedConcept.imagePrompt,
+      evolvedConcept.posterTitle,
+    );
+
     const imageResult = await this.imageGenerator.generateImage({
-      prompt: evolvedConcept.imagePrompt,
+      prompt: enforcedPrompt,
       aspectRatio,
       quality: 'hd',
     });
@@ -153,7 +163,7 @@ export class InfographicAgentService {
         sessionId: session.id,
         versionNumber: nextVersionNumber,
         userPrompt: dto.message,
-        revisedPrompt: evolvedConcept.imagePrompt,
+        revisedPrompt: enforcedPrompt,
         aiCommentary: evolvedConcept.aiCommentary,
         imageUrl: localImageUrl,
         aspectRatio,
@@ -310,5 +320,25 @@ export class InfographicAgentService {
       success: true,
       message: `Sesi poster dan ${session.posters.length} berkas gambar berhasil dihapus.`,
     };
+  }
+
+  /**
+   * Menyuntikkan aturan Headroom dan Margin secara deterministik sebelum dikirim ke DALL-E / Image Engine.
+   * Model AI tidak mengerti sintaks persentase seperti (10-26%), sehingga wajib diinstruksikan
+   * secara fisik: langit/pucuk kosong, judul ditarik ke bawah, dan kartu bawah tidak menyentuh tepi.
+   */
+  private enforceHeadroomAndMargins(rawPrompt: string, title?: string): string {
+    const titleInstruction = title
+      ? `The main headline title "${title}" MUST be positioned in the lower-middle portion of the hero scene, leaving generous clear open sky above it for the official government header.`
+      : `All main headline titles MUST be placed in the lower-middle portion of the hero scene, leaving generous clear sky above it.`;
+
+    const headroomDirectives = [
+      'CRITICAL CANVAS COMPOSITION & HEADROOM RULES (MANDATORY):',
+      '1. TOP HEADROOM MARGIN: The topmost 15% of the canvas MUST be a completely clean, uncluttered open sky or empty solid margin with ZERO text, ZERO titles, ZERO icons, and NO graphic borders.',
+      `2. TITLE PLACEMENT: ${titleInstruction} Never place any title or headline at the topmost edge of the poster.`,
+      '3. BOTTOM MARGIN: The bottom 8-10% of the canvas MUST be clean empty margin space. All cards, charts, icons, and bullet text must terminate strictly above this bottom margin and never touch the bottom edge of the poster.',
+    ].join('\n');
+
+    return `${headroomDirectives}\n\n${rawPrompt}`;
   }
 }

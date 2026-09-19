@@ -1,6 +1,52 @@
 import { RenderPosterOptions } from '../interfaces/poster-renderer.interface';
 
 /**
+ * Menghitung metrik branding proporsional adaptif berbasis aspek rasio kanvas
+ * Menjamin header dan footer tidak memenggal konten AI dan tidak terlalu tebal di landscape.
+ */
+export function getPosterBrandingMetrics(width: number, height: number) {
+  const ratio = width / height;
+  let headerPercent: number;
+  let footerPercent: number;
+
+  if (ratio > 1.5) {
+    // Landscape 16:9
+    headerPercent = 0.06;
+    footerPercent = 0.035;
+  } else if (ratio > 1.1) {
+    // Landscape 4:3
+    headerPercent = 0.065;
+    footerPercent = 0.04;
+  } else if (ratio > 0.85) {
+    // Square 1:1
+    headerPercent = 0.07;
+    footerPercent = 0.04;
+  } else if (ratio > 0.65) {
+    // Portrait 3:4
+    headerPercent = 0.07;
+    footerPercent = 0.04;
+  } else {
+    // Tall Portrait 9:16
+    headerPercent = 0.075;
+    footerPercent = 0.04;
+  }
+
+  const headerHeightPx = Math.round(height * headerPercent);
+  const footerHeightPx = Math.round(height * footerPercent);
+
+  return {
+    headerPercent,
+    footerPercent,
+    headerHeightPx,
+    footerHeightPx,
+    titleFontSizePx: Math.max(13, Math.round(headerHeightPx * 0.28)),
+    subTitleFontSizePx: Math.max(10, Math.round(headerHeightPx * 0.20)),
+    footerFontSizePx: Math.max(10, Math.round(footerHeightPx * 0.36)),
+    logoHeightPx: Math.round(headerHeightPx * 0.74),
+  };
+}
+
+/**
  * Membentuk markup HTML presisi untuk dikonversi menjadi PNG beresolusi tinggi oleh Puppeteer
  */
 export function generatePosterBrandingHtml(options: RenderPosterOptions): string {
@@ -25,14 +71,16 @@ export function generatePosterBrandingHtml(options: RenderPosterOptions): string
   const footerTextColor = layoutConfig.footerTextColor || (isDarkColor(footerBgColor) ? '#F8FAFC' : '#0F1E36');
   const footerAlignment = layoutConfig.footerAlignment || 'center';
 
-  // Perhitungan skala proporsional dinamis berbasis tinggi kanvas
-  const headerHeightPx = Math.round(height * 0.08);
-  const footerHeightPx = Math.round(height * 0.06);
-
-  const titleFontSizePx = Math.max(14, Math.round(headerHeightPx * 0.28));
-  const subTitleFontSizePx = Math.max(11, Math.round(headerHeightPx * 0.20));
-  const footerFontSizePx = Math.max(11, Math.round(footerHeightPx * 0.32));
-  const logoHeightPx = Math.round(headerHeightPx * 0.72);
+  // Perhitungan skala proporsional dinamis berbasis tinggi kanvas dan aspek rasio
+  const metrics = getPosterBrandingMetrics(width, height);
+  const {
+    headerHeightPx,
+    footerHeightPx,
+    titleFontSizePx,
+    subTitleFontSizePx,
+    footerFontSizePx,
+    logoHeightPx,
+  } = metrics;
 
   return `<!DOCTYPE html>
 <html lang="id">
@@ -108,6 +156,9 @@ export function generatePosterBrandingHtml(options: RenderPosterOptions): string
       flex-direction: column;
       justify-content: center;
       line-height: 1.15;
+      min-width: 0;
+      flex: 1;
+      overflow: hidden;
     }
 
     .header-institution {
@@ -115,6 +166,9 @@ export function generatePosterBrandingHtml(options: RenderPosterOptions): string
       font-weight: 900;
       letter-spacing: 0.06em;
       text-transform: uppercase;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     .header-sub-institution {
@@ -123,6 +177,9 @@ export function generatePosterBrandingHtml(options: RenderPosterOptions): string
       opacity: 0.92;
       margin-top: ${Math.round(headerHeightPx * 0.04)}px;
       letter-spacing: 0.02em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
 
     /* ── FOOTER RESMI (SAFE AREA: 94% - 100%) ── */
