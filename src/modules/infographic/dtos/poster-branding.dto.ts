@@ -43,6 +43,11 @@ export class PosterLayoutConfigDto {
 
   @IsOptional()
   @IsString()
+  @IsIn(['compact', 'normal', 'spacious'])
+  headerHeight?: 'compact' | 'normal' | 'spacious';
+
+  @IsOptional()
+  @IsString()
   @IsIn(['compact', 'normal', 'large'])
   footerFontSize?: 'compact' | 'normal' | 'large';
 

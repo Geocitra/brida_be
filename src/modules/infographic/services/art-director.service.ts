@@ -13,7 +13,18 @@ import {
   resolveTopicInformationArchitecture,
   resolveCanvasComposition,
   ArchetypeDefinition,
+  SAFE_AREA_CONFIG,
 } from '../constants/infographic-design-system.constant';
+
+/**
+ * Mengambil konfigurasi safe area per aspek rasio dari SAFE_AREA_CONFIG.
+ * Sumber kebenaran tunggal — nilai ini juga dipakai oleh getPosterBrandingMetrics
+ * sehingga blank space AI === tinggi bar header/footer yang dirender.
+ */
+function getSafeAreaForAspectRatio(aspectRatio: string) {
+  const key = aspectRatio as keyof typeof SAFE_AREA_CONFIG;
+  return SAFE_AREA_CONFIG[key] ?? SAFE_AREA_CONFIG['9:16'];
+}
 
 export interface InitialPromptCraftOptions {
   topic: string;
@@ -222,6 +233,13 @@ export class ArtDirectorPromptArchitect {
     const { archetype, formattedZones, visualGrammarPrompt } = this.resolveTopicArchetype(options.topic);
     const canvasComposition = resolveCanvasComposition(options.aspectRatio);
 
+    // Ambil safe area yang SAMA dengan yang digunakan oleh renderer header/footer
+    const safeArea = getSafeAreaForAspectRatio(options.aspectRatio);
+    const headerPct = safeArea.headerBarPercent;        // e.g. 7.5
+    const footerPct = safeArea.footerBarPercent;        // e.g. 4.0
+    const topReserved = safeArea.topReservedPercent;    // headerBar + tolerance buffer
+    const bottomReserved = safeArea.bottomReservedPercent; // footerBar + tolerance buffer
+
     const systemPrompt = `Anda adalah Art Director & Information Designer Senior BRIDA Kabupaten Mimika.
 Tugas Anda: Merancang konsep INFOGRAFIS PEMERINTAH BERMUTU TINGGI yang PADAT INFORMASI (Data-Dense Government Policy Infographic) menggunakan Master Design System Kabupaten Mimika, lalu merangkai prompt visual dalam bahasa Inggris untuk DALL-E 3 / Modern Image AI.
 
@@ -260,15 +278,16 @@ DATA PROVENANCE ENFORCEMENT:
 ATURAN STRUKTURAL REKAYASA PROMPT VISUAL ("imagePrompt"):
 1. Susun instruksi visual bahasa Inggris yang sangat presisi untuk model generasi gambar.
 2. Terapkan secara eksplisit 7 VISUAL ZONES sesuai arsitektur di atas, lengkap dengan alokasi persentase tinggi kanvas.
-3. ZONE HERO (0-20%) harus berupa foto/visual FULL-WIDTH edge-to-edge yang langsung memenuhi area atas. DILARANG menyisakan area putih kosong di atas hero. Overlay judul dan subjudul di atas hero menggunakan kontras kuat.
+3. ZONE HERO (${topReserved}%-${topReserved + 20}%) harus berupa foto/visual FULL-WIDTH edge-to-edge. DILARANG menyisakan area putih kosong di bawah area header. Overlay judul dan subjudul di atas hero menggunakan kontras kuat.
 4. PETA/MAP harus berukuran besar dan dominan (~18% kanvas), BUKAN peta kecil di dalam kartu. Sertakan label distrik, legenda, dan 2-4 callout anotasi data.
 5. Tetapkan palet warna tegas: Dominan ${archetype.primaryColor}, Sekunder ${archetype.secondaryColor}, Aksen ${archetype.accentColor} di atas latar belakang putih bersih (#FFFFFF).
 6. SELURUH TEKS, JUDUL, DAN LABEL PADA GAMBAR WAJIB 100% DALAM BAHASA INDONESIA RESMI.
 7. DILARANG memunculkan logo, lambang, cap, atau watermark apapun.
 8. VARIASI VISUAL: Jangan render setiap zone sebagai rectangular card. Campurkan full-width photography, metric strips, charts, maps, timelines, diagrams, icons, callout numbers, dan photographic panels.
-9. WAJIB: Sisakan area KOSONG PUTIH BERSIH selebar 8% di bagian PALING ATAS kanvas (top margin) tanpa gambar, grafik, teks, maupun dekorasi apapun — area ini diperuntukkan bagi logo dan nama instansi resmi yang akan ditambahkan secara terpisah.
-10. WAJIB: Sisakan area KOSONG PUTIH BERSIH selebar 5% di bagian PALING BAWAH kanvas (bottom margin) tanpa gambar, grafik, teks, maupun dekorasi apapun — area ini diperuntukkan bagi informasi alamat dan keterangan resmi yang akan ditambahkan secara terpisah.
-11. Tutup prompt DALL-E dengan: "Ultra-sharp 8k resolution, dense editorial grid layout, professional vector typography strictly in Indonesian language, no logos, no watermarks, high information density, official government report style, STRICT 8% blank white top margin reserved for official letterhead, STRICT 5% blank white bottom margin reserved for official address, full-canvas composition between margins, balanced visual rhythm."`;
+9. WAJIB: Sisakan area KOSONG PUTIH BERSIH selebar ${headerPct}% di bagian PALING ATAS kanvas (0% hingga ${headerPct}% dari atas) — TANPA gambar, grafik, teks, maupun dekorasi apapun. Area ini adalah tempat bar header resmi instansi (tinggi persis ${headerPct}% dari kanvas).
+10. WAJIB: Sisakan area KOSONG PUTIH BERSIH selebar ${footerPct}% di bagian PALING BAWAH kanvas (${100 - footerPct}% hingga 100% dari atas) — TANPA gambar, grafik, teks, maupun dekorasi apapun. Area ini adalah tempat bar footer resmi instansi (tinggi persis ${footerPct}% dari kanvas).
+11. Semua konten infografis (foto, chart, peta, teks) HANYA boleh menempati zona tengah: dari ${topReserved}% hingga ${100 - bottomReserved}% tinggi kanvas.
+12. Tutup prompt DALL-E dengan: "Ultra-sharp 8k resolution, dense editorial grid layout, professional vector typography strictly in Indonesian language, no logos, no watermarks, high information density, official government report style, STRICT ${headerPct}% blank white top margin (0-${headerPct}% of canvas height) reserved for official letterhead overlay, STRICT ${footerPct}% blank white bottom margin (${100 - footerPct}-100% of canvas height) reserved for official footer overlay, all infographic content strictly between ${topReserved}% and ${100 - bottomReserved}% of canvas height, balanced visual rhythm."`;
 
     const userMessage = `[TOPIK INFOGRAFIS]: ${options.topic}
 
@@ -311,6 +330,12 @@ Rancang konsep infografis pemerintah PADAT INFORMASI yang memenuhi seluruh kanva
     const { archetype, visualGrammarPrompt } = this.resolveTopicArchetype(`${options.topic} ${options.userRevisionQuery}`);
     const canvasComposition = resolveCanvasComposition(options.aspectRatio);
 
+    const safeArea = (options.aspectRatio && options.aspectRatio in SAFE_AREA_CONFIG)
+      ? SAFE_AREA_CONFIG[options.aspectRatio as keyof typeof SAFE_AREA_CONFIG]
+      : SAFE_AREA_CONFIG['9:16'];
+    const headerPct = safeArea.headerBarPercent;
+    const footerPct = safeArea.footerBarPercent;
+
     const systemPrompt = `Anda adalah Art Director AI BRIDA Kabupaten Mimika yang sedang berdialog dengan pengguna untuk merevisi infografis.
 
 ${MASTER_DESIGN_SYSTEM}
@@ -327,8 +352,8 @@ Tugas Anda:
 5. Seluruh teks pada gambar WAJIB 100% BAHASA INDONESIA RESMI.
 6. DILARANG memunculkan logo, lambang, atau watermark apapun.
 7. Setiap angka baru yang ditambahkan WAJIB terdaftar di extractedKeyFacts beserta sumber dan confidence.
-8. WAJIB PERTAHANKAN: Area KOSONG PUTIH BERSIH 8% di bagian PALING ATAS kanvas (tanpa gambar/teks/dekorasi apapun) untuk logo dan nama instansi resmi.
-9. WAJIB PERTAHANKAN: Area KOSONG PUTIH BERSIH 5% di bagian PALING BAWAH kanvas (tanpa gambar/teks/dekorasi apapun) untuk informasi alamat resmi.
+8. WAJIB PERTAHANKAN: Area KOSONG PUTIH BERSIH selebar ${headerPct}% di bagian PALING ATAS kanvas (0%-${headerPct}%) tanpa gambar/teks/dekorasi apapun untuk logo dan nama instansi resmi.
+9. WAJIB PERTAHANKAN: Area KOSONG PUTIH BERSIH selebar ${footerPct}% di bagian PALING BAWAH kanvas (${100 - footerPct}%-100%) tanpa gambar/teks/dekorasi apapun untuk informasi alamat resmi.
 10. Berikan komentar dialog ("aiCommentary") yang menjelaskan revisi apa yang diterapkan. DILARANG bertanya balik.`;
 
     const userMessage = `[PROMPT DALL-E SEBELUMNYA]:

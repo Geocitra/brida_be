@@ -1,45 +1,54 @@
 import { RenderPosterOptions } from '../interfaces/poster-renderer.interface';
+import { SAFE_AREA_CONFIG } from '../constants/infographic-design-system.constant';
 
 export interface PosterBrandingMetricsOptions {
   headerFontSize?: 'compact' | 'normal' | 'large';
   footerFontSize?: 'compact' | 'normal' | 'large';
   logoSize?: 'compact' | 'normal' | 'large';
+  headerHeight?: 'compact' | 'normal' | 'spacious';
+  /** Aspek rasio kanvas, contoh: '9:16', '3:4', '1:1', '4:3', '16:9' */
+  aspectRatio?: string;
 }
 
 /**
- * Menghitung metrik branding proporsional adaptif berbasis aspek rasio kanvas
- * Menjamin header dan footer tidak memenggal konten AI dan tidak terlalu tebal di landscape.
+ * Menentukan konfigurasi Safe Area berdasarkan aspek rasio.
+ * Sumber kebenaran tunggal — sinkron dengan SAFE_AREA_CONFIG dan prompt AI.
+ */
+function resolveSafeArea(width: number, height: number, aspectRatio?: string) {
+  // Gunakan aspect ratio string jika disediakan
+  if (aspectRatio && aspectRatio in SAFE_AREA_CONFIG) {
+    return SAFE_AREA_CONFIG[aspectRatio as keyof typeof SAFE_AREA_CONFIG];
+  }
+
+  // Fallback: deteksi dari rasio dimensi
+  const ratio = width / height;
+  if (ratio > 1.5) return SAFE_AREA_CONFIG['16:9'];
+  if (ratio > 1.1) return SAFE_AREA_CONFIG['4:3'];
+  if (ratio > 0.85) return SAFE_AREA_CONFIG['1:1'];
+  if (ratio > 0.65) return SAFE_AREA_CONFIG['3:4'];
+  return SAFE_AREA_CONFIG['9:16'];
+}
+
+/**
+ * Menghitung metrik branding proporsional adaptif berbasis SAFE_AREA_CONFIG.
+ * Nilai header/footer % identik dengan yang diinstruksikan ke AI dalam prompt,
+ * sehingga overlay tepat menutupi blank space yang disisakan AI — tidak lebih, tidak kurang.
  */
 export function getPosterBrandingMetrics(
   width: number,
   height: number,
   options?: PosterBrandingMetricsOptions,
 ) {
-  const ratio = width / height;
-  let headerPercent: number;
-  let footerPercent: number;
+  const safeArea = resolveSafeArea(width, height, options?.aspectRatio);
 
-  if (ratio > 1.5) {
-    // Landscape 16:9
-    headerPercent = 0.06;
-    footerPercent = 0.035;
-  } else if (ratio > 1.1) {
-    // Landscape 4:3
-    headerPercent = 0.065;
-    footerPercent = 0.04;
-  } else if (ratio > 0.85) {
-    // Square 1:1
-    headerPercent = 0.07;
-    footerPercent = 0.04;
-  } else if (ratio > 0.65) {
-    // Portrait 3:4
-    headerPercent = 0.07;
-    footerPercent = 0.04;
-  } else {
-    // Tall Portrait 9:16
-    headerPercent = 0.075;
-    footerPercent = 0.04;
-  }
+  // headerBarPercent adalah tinggi fisik bar yang dirender (dalam persen)
+  // Ini SINKRON dengan nilai yang AI di-prompt untuk disisakan di bagian atas
+  const headerPercent = safeArea.headerBarPercent / 100;
+  const footerPercent = safeArea.footerBarPercent / 100;
+
+  const headerHeightMultiplier =
+    options?.headerHeight === 'compact' ? 0.85 : options?.headerHeight === 'spacious' ? 1.2 : 1.0;
+  const effectiveHeaderPercent = headerPercent * headerHeightMultiplier;
 
   const headerFontMultiplier =
     options?.headerFontSize === 'compact' ? 0.85 : options?.headerFontSize === 'large' ? 1.18 : 1.0;
@@ -48,20 +57,22 @@ export function getPosterBrandingMetrics(
   const logoSizeMultiplier =
     options?.logoSize === 'compact' ? 0.58 : options?.logoSize === 'large' ? 0.88 : 0.74;
 
-  const headerHeightPx = Math.round(height * headerPercent);
+  const headerHeightPx = Math.round(height * effectiveHeaderPercent);
   const footerHeightPx = Math.round(height * footerPercent);
 
   return {
-    headerPercent,
+    headerPercent: effectiveHeaderPercent,
     footerPercent,
     headerHeightPx,
     footerHeightPx,
+    safeArea,
     titleFontSizePx: Math.max(12, Math.round(headerHeightPx * 0.28 * headerFontMultiplier)),
     subTitleFontSizePx: Math.max(9, Math.round(headerHeightPx * 0.20 * headerFontMultiplier)),
     footerFontSizePx: Math.max(9, Math.round(footerHeightPx * 0.36 * footerFontMultiplier)),
     logoHeightPx: Math.round(headerHeightPx * logoSizeMultiplier),
   };
 }
+
 
 /**
  * Membentuk markup HTML presisi untuk dikonversi menjadi PNG beresolusi tinggi oleh Puppeteer
@@ -86,6 +97,7 @@ export function generatePosterBrandingHtml(options: RenderPosterOptions): string
   const headerFontSize = layoutConfig.headerFontSize || 'normal';
   const footerFontSize = layoutConfig.footerFontSize || 'normal';
   const logoSize = layoutConfig.logoSize || 'normal';
+  const headerHeight = (layoutConfig as any).headerHeight || 'normal';
 
   const footerBgColor = layoutConfig.footerBgColor || '#0F1E36';
   const footerTextColor = layoutConfig.footerTextColor || (isDarkColor(footerBgColor) ? '#F8FAFC' : '#0F1E36');
@@ -96,6 +108,8 @@ export function generatePosterBrandingHtml(options: RenderPosterOptions): string
     headerFontSize,
     footerFontSize,
     logoSize,
+    headerHeight,
+    aspectRatio: (options as any).aspectRatio,
   });
   const {
     headerHeightPx,
@@ -155,16 +169,14 @@ export function generatePosterBrandingHtml(options: RenderPosterOptions): string
       overflow: hidden;
     }
 
-    /* ── BASE AI IMAGE: Menempati ZONA KONTEN saja (antara header dan footer) ── */
-    /* PENTING: Gambar TIDAK mengisi 100% kanvas — header/footer mendapat ruang BERSIH sendiri */
+    /* ── BASE AI IMAGE: Mengisi seluruh kanvas (header/footer menempati blank space AI) ── */
     .base-canvas-image {
       position: absolute;
-      top: ${headerEnabled ? headerHeightPx : 0}px;
+      top: 0;
       left: 0;
       width: 100%;
-      height: calc(100% - ${headerEnabled ? headerHeightPx : 0}px - ${footerEnabled ? footerHeightPx : 0}px);
-      object-fit: cover;
-      object-position: center top;
+      height: 100%;
+      object-fit: fill;
       z-index: 1;
     }
 
