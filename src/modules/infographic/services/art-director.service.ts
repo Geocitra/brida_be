@@ -284,10 +284,10 @@ ATURAN STRUKTURAL REKAYASA PROMPT VISUAL ("imagePrompt"):
 6. SELURUH TEKS, JUDUL, DAN LABEL PADA GAMBAR WAJIB 100% DALAM BAHASA INDONESIA RESMI.
 7. DILARANG memunculkan logo, lambang, cap, atau watermark apapun.
 8. VARIASI VISUAL: Jangan render setiap zone sebagai rectangular card. Campurkan full-width photography, metric strips, charts, maps, timelines, diagrams, icons, callout numbers, dan photographic panels.
-9. WAJIB: Sisakan area KOSONG PUTIH BERSIH selebar ${topReserved}% di bagian PALING ATAS kanvas (0% hingga ${topReserved}% dari atas) — TANPA gambar, grafik, teks, maupun dekorasi apapun. Area ini adalah tempat bar header resmi instansi ditambah ruang napas kosong (buffer toleransi) agar kop instansi tidak menabrak teks visual.
+9. WAJIB: Sisakan area KOSONG PUTIH BERSIH selebar ${headerPct}% di bagian PALING ATAS kanvas (0% hingga ${headerPct}% dari atas) — TANPA gambar, grafik, teks, maupun dekorasi apapun. Area ini adalah tempat bar header resmi instansi (tinggi persis ${headerPct}% dari kanvas).
 10. WAJIB: Sisakan area KOSONG PUTIH BERSIH selebar ${footerPct}% di bagian PALING BAWAH kanvas (${100 - footerPct}% hingga 100% dari atas) — TANPA gambar, grafik, teks, maupun dekorasi apapun. Area ini adalah tempat bar footer resmi instansi (tinggi persis ${footerPct}% dari kanvas).
 11. Semua konten infografis (foto, chart, peta, teks) HANYA boleh menempati zona tengah: dari ${topReserved}% hingga ${100 - bottomReserved}% tinggi kanvas.
-12. Tutup prompt DALL-E dengan: "Ultra-sharp 8k resolution, dense editorial grid layout, professional vector typography strictly in Indonesian language, no logos, no watermarks, high information density, official government report style, STRICT ${topReserved}% blank white top margin (0-${topReserved}% of canvas height) reserved for official letterhead overlay, STRICT ${footerPct}% blank white bottom margin (${100 - footerPct}-100% of canvas height) reserved for official footer overlay, all infographic content strictly between ${topReserved}% and ${100 - bottomReserved}% of canvas height, balanced visual rhythm."`;
+12. Tutup prompt DALL-E dengan: "Ultra-sharp 8k resolution, dense editorial grid layout, professional vector typography strictly in Indonesian language, no logos, no watermarks, high information density, official government report style, STRICT ${headerPct}% blank white top margin (0-${headerPct}% of canvas height) reserved for official letterhead overlay, STRICT ${footerPct}% blank white bottom margin (${100 - footerPct}-100% of canvas height) reserved for official footer overlay, all infographic content strictly between ${topReserved}% and ${100 - bottomReserved}% of canvas height, balanced visual rhythm."`;
 
     const userMessage = `[TOPIK INFOGRAFIS]: ${options.topic}
 
@@ -335,8 +335,6 @@ Rancang konsep infografis pemerintah PADAT INFORMASI yang memenuhi seluruh kanva
       : SAFE_AREA_CONFIG['9:16'];
     const headerPct = safeArea.headerBarPercent;
     const footerPct = safeArea.footerBarPercent;
-    const topReserved = safeArea.topReservedPercent;
-    const bottomReserved = safeArea.bottomReservedPercent;
 
     const systemPrompt = `Anda adalah Art Director AI BRIDA Kabupaten Mimika yang sedang berdialog dengan pengguna untuk merevisi infografis.
 
@@ -354,7 +352,7 @@ Tugas Anda:
 5. Seluruh teks pada gambar WAJIB 100% BAHASA INDONESIA RESMI.
 6. DILARANG memunculkan logo, lambang, atau watermark apapun.
 7. Setiap angka baru yang ditambahkan WAJIB terdaftar di extractedKeyFacts beserta sumber dan confidence.
-8. WAJIB PERTAHANKAN: Area KOSONG PUTIH BERSIH selebar ${topReserved}% di bagian PALING ATAS kanvas (0%-${topReserved}%) tanpa gambar/teks/dekorasi apapun untuk logo dan nama instansi resmi.
+8. WAJIB PERTAHANKAN: Area KOSONG PUTIH BERSIH selebar ${headerPct}% di bagian PALING ATAS kanvas (0%-${headerPct}%) tanpa gambar/teks/dekorasi apapun untuk logo dan nama instansi resmi.
 9. WAJIB PERTAHANKAN: Area KOSONG PUTIH BERSIH selebar ${footerPct}% di bagian PALING BAWAH kanvas (${100 - footerPct}%-100%) tanpa gambar/teks/dekorasi apapun untuk informasi alamat resmi.
 10. Berikan komentar dialog ("aiCommentary") yang menjelaskan revisi apa yang diterapkan. DILARANG bertanya balik.`;
 
