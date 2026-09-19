@@ -112,67 +112,67 @@ DATA INTEGRITY & PROVENANCE:
  */
 export const SAFE_AREA_CONFIG = {
   '9:16': {
-    headerBarPercent: 10.5,
+    headerBarPercent: 9.5,
     headerTolerancePercent: 2.5,
-    topReservedPercent: 13.0,
+    topReservedPercent: 12.0,
     footerBarPercent: 4.0,
     footerTolerancePercent: 2.0,
     bottomReservedPercent: 6.0,
-    contentStart: 13.0,
+    contentStart: 12.0,
     contentEnd: 94.0,
   },
   '3:4': {
-    headerBarPercent: 10.0,
+    headerBarPercent: 9.0,
     headerTolerancePercent: 2.5,
-    topReservedPercent: 12.5,
+    topReservedPercent: 11.5,
     footerBarPercent: 4.0,
     footerTolerancePercent: 2.0,
     bottomReservedPercent: 6.0,
-    contentStart: 12.5,
+    contentStart: 11.5,
     contentEnd: 94.0,
   },
   '1:1': {
-    headerBarPercent: 10.0,
+    headerBarPercent: 9.0,
     headerTolerancePercent: 2.5,
-    topReservedPercent: 12.5,
+    topReservedPercent: 11.5,
     footerBarPercent: 4.0,
     footerTolerancePercent: 2.0,
     bottomReservedPercent: 6.0,
-    contentStart: 12.5,
+    contentStart: 11.5,
     contentEnd: 94.0,
   },
   '16:9': {
-    headerBarPercent: 9.0,
+    headerBarPercent: 8.0,
     headerTolerancePercent: 2.0,
-    topReservedPercent: 11.0,
+    topReservedPercent: 10.0,
     footerBarPercent: 3.5,
     footerTolerancePercent: 1.5,
     bottomReservedPercent: 5.0,
-    contentStart: 11.0,
+    contentStart: 10.0,
     contentEnd: 95.0,
   },
   '4:3': {
-    headerBarPercent: 9.5,
+    headerBarPercent: 8.5,
     headerTolerancePercent: 2.0,
-    topReservedPercent: 11.5,
+    topReservedPercent: 10.5,
     footerBarPercent: 4.0,
     footerTolerancePercent: 1.5,
     bottomReservedPercent: 5.5,
-    contentStart: 11.5,
+    contentStart: 10.5,
     contentEnd: 94.5,
   },
 } as const;
 
 export const SAFE_AREA = {
-  headerPercent: 10.5,
+  headerPercent: 9.5,
   headerTolerancePercent: 2.5,
-  topReservedPercent: 13.0,
+  topReservedPercent: 12.0,
   footerPercent: 4.0,
   footerTolerancePercent: 2.0,
   bottomReservedPercent: 6.0,
 } as const;
 
-export const CONTENT_START = SAFE_AREA.topReservedPercent; // 13%
+export const CONTENT_START = SAFE_AREA.topReservedPercent; // 12%
 export const CONTENT_END = 100 - SAFE_AREA.bottomReservedPercent; // 94%
 
 export const SAFE_AREA_DIRECTIVE = `
