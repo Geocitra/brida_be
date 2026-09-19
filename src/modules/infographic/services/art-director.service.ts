@@ -266,7 +266,9 @@ ATURAN STRUKTURAL REKAYASA PROMPT VISUAL ("imagePrompt"):
 6. SELURUH TEKS, JUDUL, DAN LABEL PADA GAMBAR WAJIB 100% DALAM BAHASA INDONESIA RESMI.
 7. DILARANG memunculkan logo, lambang, cap, atau watermark apapun.
 8. VARIASI VISUAL: Jangan render setiap zone sebagai rectangular card. Campurkan full-width photography, metric strips, charts, maps, timelines, diagrams, icons, callout numbers, dan photographic panels.
-9. Tutup prompt DALL-E dengan: "Ultra-sharp 8k resolution, dense editorial grid layout filling 95% of vertical canvas, professional vector typography strictly in Indonesian language, no logos, no watermarks, high information density, official government report style, controlled whitespace, full-canvas composition, balanced visual rhythm, no large unused areas."`;
+9. WAJIB: Sisakan area KOSONG PUTIH BERSIH selebar 8% di bagian PALING ATAS kanvas (top margin) tanpa gambar, grafik, teks, maupun dekorasi apapun — area ini diperuntukkan bagi logo dan nama instansi resmi yang akan ditambahkan secara terpisah.
+10. WAJIB: Sisakan area KOSONG PUTIH BERSIH selebar 5% di bagian PALING BAWAH kanvas (bottom margin) tanpa gambar, grafik, teks, maupun dekorasi apapun — area ini diperuntukkan bagi informasi alamat dan keterangan resmi yang akan ditambahkan secara terpisah.
+11. Tutup prompt DALL-E dengan: "Ultra-sharp 8k resolution, dense editorial grid layout, professional vector typography strictly in Indonesian language, no logos, no watermarks, high information density, official government report style, STRICT 8% blank white top margin reserved for official letterhead, STRICT 5% blank white bottom margin reserved for official address, full-canvas composition between margins, balanced visual rhythm."`;
 
     const userMessage = `[TOPIK INFOGRAFIS]: ${options.topic}
 
@@ -320,12 +322,14 @@ ${visualGrammarPrompt}
 Tugas Anda:
 1. Pahami instruksi revisi pengguna (menambah chart, mengganti warna, mengubah angka, menambah data sektoral, memperbesar peta, dsb).
 2. Perbarui prompt visual DALL-E 3 ("imagePrompt") sebelumnya dengan menerapkan perubahan yang diminta secara konsisten tanpa merusak Canvas Composition dan Visual Grammar induk.
-3. Pertahankan CANVAS OCCUPANCY 92-97%. Jangan membuat poster menjadi lebih kosong.
+3. Pertahankan CANVAS OCCUPANCY 85-92% (antara margin atas dan bawah). Jangan membuat poster menjadi lebih kosong di area tengah.
 4. Pertahankan palet warna tematik (Dominan: ${archetype.primaryColor}, Sekunder: ${archetype.secondaryColor}, Aksen: ${archetype.accentColor}) di atas latar belakang bersih (#FFFFFF).
 5. Seluruh teks pada gambar WAJIB 100% BAHASA INDONESIA RESMI.
 6. DILARANG memunculkan logo, lambang, atau watermark apapun.
 7. Setiap angka baru yang ditambahkan WAJIB terdaftar di extractedKeyFacts beserta sumber dan confidence.
-8. Berikan komentar dialog ("aiCommentary") yang menjelaskan revisi apa yang diterapkan. DILARANG bertanya balik.`;
+8. WAJIB PERTAHANKAN: Area KOSONG PUTIH BERSIH 8% di bagian PALING ATAS kanvas (tanpa gambar/teks/dekorasi apapun) untuk logo dan nama instansi resmi.
+9. WAJIB PERTAHANKAN: Area KOSONG PUTIH BERSIH 5% di bagian PALING BAWAH kanvas (tanpa gambar/teks/dekorasi apapun) untuk informasi alamat resmi.
+10. Berikan komentar dialog ("aiCommentary") yang menjelaskan revisi apa yang diterapkan. DILARANG bertanya balik.`;
 
     const userMessage = `[PROMPT DALL-E SEBELUMNYA]:
 ${options.previousPrompt}

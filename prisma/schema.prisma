@@ -424,20 +424,48 @@ model InfographicSession {
   @@map("infographic_sessions")
 }
 
+enum PosterGenerationProfile {
+  V1_BAKED_FOOTER
+  V2_CLEAN_CANVAS
+}
+
 // ── MODEL BARU: Riwayat Versi Gambar Poster (v1, v2, revisi) ──
 model InfographicPoster {
-  id            String             @id @default(uuid()) @db.Uuid
-  sessionId     String             @db.Uuid
-  versionNumber Int                @default(1)
-  userPrompt    String             @db.Text
-  revisedPrompt String?            @db.Text
-  aiCommentary  String?            @db.Text
-  imageUrl      String             @db.VarChar(1024)
-  aspectRatio   String             @default("9:16")
-  createdAt     DateTime           @default(now())
+  id                String                    @id @default(uuid()) @db.Uuid
+  sessionId         String                    @db.Uuid
+  versionNumber     Int                       @default(1)
+  userPrompt        String                    @db.Text
+  revisedPrompt     String?                   @db.Text
+  aiCommentary      String?                   @db.Text
+  imageUrl          String                    @db.VarChar(1024)
+  aspectRatio       String                    @default("9:16")
+  generationProfile PosterGenerationProfile   @default(V1_BAKED_FOOTER)
+  createdAt         DateTime                  @default(now())
 
-  session       InfographicSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session           InfographicSession        @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  branding          InfographicPosterBranding?
 
   @@index([sessionId, versionNumber])
   @@map("infographic_posters")
+}
+
+// ── MODEL BARU: Metadata Branding (Header, Logo, Footer) per Poster ──
+model InfographicPosterBranding {
+  id             String            @id @default(uuid()) @db.Uuid
+  posterId       String            @unique @db.Uuid
+  headerEnabled  Boolean           @default(false)
+  logoUrl        String?           @db.VarChar(1024)
+  institution    String?           @db.VarChar(160)
+  subInstitution String?           @db.VarChar(160)
+  footerEnabled  Boolean           @default(false)
+  footerText     String?           @db.VarChar(500)
+  layoutConfig   Json              @default("{}")
+  composedUrl    String?           @db.VarChar(1024)
+  brandingHash   String?           @db.VarChar(64)
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  poster         InfographicPoster @relation(fields: [posterId], references: [id], onDelete: Cascade)
+
+  @@map("infographic_poster_branding")
 }

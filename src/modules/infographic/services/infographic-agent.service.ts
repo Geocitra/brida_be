@@ -234,6 +234,9 @@ export class InfographicAgentService {
         },
         posters: {
           orderBy: { versionNumber: 'asc' },
+          include: {
+            branding: true,
+          },
         },
       },
     });
@@ -264,6 +267,7 @@ export class InfographicAgentService {
         session: {
           select: { title: true },
         },
+        branding: true,
       },
     });
   }

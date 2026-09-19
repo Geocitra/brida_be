@@ -87,135 +87,240 @@ DATA INTEGRITY & PROVENANCE:
 `;
 
 // ============================================================================
-// CANVAS COMPOSITION ENGINE — Vertical Zone Allocation per Aspek Rasio
+// CANVAS SAFE AREA & COMPOSITION ENGINE — Vertical Zone Allocation
 // ============================================================================
+
+/**
+ * Alokasi kanvas yang DIKOSONGKAN oleh AI agar dapat diisi
+ * secara deterministik oleh PosterCompositionService (Fase 4).
+ *
+ * PENTING: Angka ini adalah kontrak antara prompt generatif dan
+ * renderer. Mengubahnya WAJIB diikuti perubahan pada
+ * poster-branding.template.ts, atau header/footer akan
+ * menimpa konten infografis.
+ */
+// ============================================================================
+// CANVAS SAFE AREA & COMPOSITION ENGINE — Vertical Zone Allocation
+// ============================================================================
+
+/**
+ * Konfigurasi Safe Area & Alokasi Kanvas Adaptif per Aspek Rasio.
+ * Menerapkan prinsip 3-Tier Sizing:
+ * 1. Bar Overlay: tinggi fisik bar header/footer resmi yang ditempel.
+ * 2. Tolerance Buffer: ruang napas kosong ekstra antara bar dan konten agar AI tidak ter-clip.
+ * 3. Reserved Area: total area kosong yang wajib dipatuhi oleh model AI dalam prompt.
+ */
+export const SAFE_AREA_CONFIG = {
+  '9:16': {
+    headerBarPercent: 7.5,
+    headerTolerancePercent: 2.5,
+    topReservedPercent: 10.0,
+    footerBarPercent: 4.0,
+    footerTolerancePercent: 2.0,
+    bottomReservedPercent: 6.0,
+    contentStart: 10.0,
+    contentEnd: 94.0,
+  },
+  '3:4': {
+    headerBarPercent: 7.0,
+    headerTolerancePercent: 2.5,
+    topReservedPercent: 9.5,
+    footerBarPercent: 4.0,
+    footerTolerancePercent: 2.0,
+    bottomReservedPercent: 6.0,
+    contentStart: 9.5,
+    contentEnd: 94.0,
+  },
+  '1:1': {
+    headerBarPercent: 7.0,
+    headerTolerancePercent: 2.5,
+    topReservedPercent: 9.5,
+    footerBarPercent: 4.0,
+    footerTolerancePercent: 2.0,
+    bottomReservedPercent: 6.0,
+    contentStart: 9.5,
+    contentEnd: 94.0,
+  },
+  '16:9': {
+    headerBarPercent: 6.0,
+    headerTolerancePercent: 2.0,
+    topReservedPercent: 8.0,
+    footerBarPercent: 3.5,
+    footerTolerancePercent: 1.5,
+    bottomReservedPercent: 5.0,
+    contentStart: 8.0,
+    contentEnd: 95.0,
+  },
+  '4:3': {
+    headerBarPercent: 6.5,
+    headerTolerancePercent: 2.0,
+    topReservedPercent: 8.5,
+    footerBarPercent: 4.0,
+    footerTolerancePercent: 1.5,
+    bottomReservedPercent: 5.5,
+    contentStart: 8.5,
+    contentEnd: 94.5,
+  },
+} as const;
+
+export const SAFE_AREA = {
+  headerPercent: 7.5,
+  headerTolerancePercent: 2.5,
+  topReservedPercent: 10.0,
+  footerPercent: 4.0,
+  footerTolerancePercent: 2.0,
+  bottomReservedPercent: 6.0,
+} as const;
+
+export const CONTENT_START = SAFE_AREA.topReservedPercent; // 10%
+export const CONTENT_END = 100 - SAFE_AREA.bottomReservedPercent; // 94%
+
+export const SAFE_AREA_DIRECTIVE = `
+RESERVED SAFE AREAS — MANDATORY:
+- Top 10% of the canvas MUST be a clean solid color band (pure white #FFFFFF or theme solid color). Absolutely NO text, NO headlines, NO imagery, NO icons, NO graphic elements inside this band. Leave it completely empty as a buffer for the official institutional header.
+- Bottom 6% of the canvas (94% to 100%) MUST likewise be a clean solid color band, completely empty without any text, cards, borders, or chart legends.
+- These reserved bands are intentional. They are NOT a violation of the canvas occupancy requirement. The 92-97% occupancy target applies ONLY to the content area between 10% and 94%.
+- NEVER render any title bar, institution name, organization label, source attribution, tagline, date stamp, page number, or footer line anywhere on the canvas. That information is applied afterwards by a separate system.
+`;
 
 export const CANVAS_COMPOSITION_9x16 = `
 === FULL CANVAS COMPOSITION (9:16 PORTRAIT) ===
 
-Use the entire 9:16 canvas from top to bottom. Target visual occupancy: 92-97%.
+${SAFE_AREA_DIRECTIVE}
 
-VERTICAL VISUAL RHYTHM — approximate allocation:
+CONTENT AREA: 10% to 94% of canvas height.
+Target visual occupancy WITHIN the content area: 92-97%.
 
-0-20%:   ZONE 1 — FULL-WIDTH HERO VISUAL
-         Large documentary/environmental photograph or detailed topic-specific visual
-         extending edge-to-edge horizontally. Overlay the title and subtitle over the hero
-         area using strong contrast. Do NOT leave blank white space above the hero.
+VERTICAL VISUAL RHYTHM — absolute canvas positions:
 
-20-32%:  ZONE 2 — KEY STATISTICS STRIP
-         4-6 verified statistics displayed as a strong horizontal visual strip or modular
-         statistic blocks. Each statistic must include: large number, unit, short label,
-         and optional directional indicator.
+0-10%:   RESERVED SAFE AREA — leave completely empty (solid color band).
+         (Header bar occupies 0-7.5%; 7.5-10% is tolerance cushion to prevent clipping).
 
-32-48%:  ZONE 3 — PRIMARY DATA STORY
-         Large chart, comparison visualization, trend line, or diagram. Not just a card.
-         Add one concise insight statement below the chart.
+10-26%:  ZONE 1 — FULL-WIDTH HERO VISUAL
+         Large documentary/environmental photograph or detailed topic-specific visual extending edge-to-edge horizontally, starting safely at 10%. Overlay the title and subtitle over the hero area using strong contrast. Do NOT extend any text or elements above 10%.
 
-48-67%:  ZONE 4 — GEOGRAPHIC / SPATIAL STORY
-         Large map occupying substantial visual area (not a tiny map inside a card).
-         The map itself is a major visual element. Include district labels, legend, and
-         2-4 callout annotations with key geographic insight.
+26-38%:  ZONE 2 — KEY STATISTICS STRIP
+         4-6 verified statistics displayed as a strong horizontal visual strip or modular statistic blocks. Each statistic must include: large number, unit, short label, and optional directional indicator.
 
-67-81%:  ZONE 5 — PROGRAM / RESPONSE / FIELD EVIDENCE
-         Use a combination of timeline, feature cards, photographic documentation, or
-         process visualization. Mix visual types.
+38-54%:  ZONE 3 — PRIMARY DATA STORY
+         Large chart, comparison visualization, trend line, or diagram. Not just a card. Add one concise insight statement below the chart.
 
-81-94%:  ZONE 6 — IMPACT / COMMUNITY OUTCOMES
-         4-6 icons, metrics, or visual impact indicators. Use varied visual elements,
-         not uniform cards.
+54-72%:  ZONE 4 — GEOGRAPHIC / SPATIAL STORY
+         Large map occupying substantial visual area (not a tiny map inside a card). The map itself is a major visual element. Include district labels, legend, and 2-4 callout annotations with key geographic insight.
 
-94-100%: ZONE 7 — COMPACT OFFICIAL FOOTER
-         One-line data source attribution and closing tagline. Compact and minimal.
+72-84%:  ZONE 5 — PROGRAM / RESPONSE / FIELD EVIDENCE
+         Use a combination of timeline, feature cards, photographic documentation, or process visualization. Mix visual types.
 
-VISUAL DENSITY TARGET: HIGH.
-The final infographic should feel substantial, information-rich, editorial, visually
-balanced, publication-ready, and data-driven. Do NOT optimize for minimalism.
-Optimize for information clarity and visual storytelling.
+84-94%:  ZONE 6 — IMPACT / COMMUNITY OUTCOMES
+         4-6 icons, metrics, or visual impact indicators. All cards and graphics must conclude cleanly at or before 94%.
+
+94-100%: RESERVED SAFE AREA — leave completely empty (solid color band).
+         (Footer bar occupies 96-100%; 94-96% is tolerance cushion).
+
+There is no ZONE 7. Do not render a footer.
+VISUAL DENSITY TARGET: HIGH within the 10-94% content area.
 `;
 
 export const CANVAS_COMPOSITION_1x1 = `
 === FULL CANVAS COMPOSITION (1:1 SQUARE) ===
 
-Use the entire 1:1 canvas. Target visual occupancy: 90-95%.
-Compress the 7 zones into a tighter grid layout.
+${SAFE_AREA_DIRECTIVE}
 
-LAYOUT — approximate allocation:
+CONTENT AREA: 9.5% to 94% of canvas height.
+Target visual occupancy WITHIN the content area: 90-95%.
 
-Top 25%:     ZONE 1 — HERO (compact title + subtitle + background visual)
-25-40%:      ZONE 2 — KEY STATISTICS (3-4 metric blocks in a row)
-40-60%:      ZONE 3+4 — DATA STORY + GEOGRAPHIC (side-by-side chart and map)
-60-80%:      ZONE 5+6 — PROGRAM + IMPACT (compact grid)
-80-100%:     ZONE 7 — FOOTER
+LAYOUT — absolute vertical allocation:
 
+0-9.5%:  RESERVED SAFE AREA — leave completely empty (solid color band). Header occupies 0-7.0%; 7.0-9.5% is tolerance buffer.
+9.5-28%: ZONE 1 — HERO (compact title + subtitle + background visual starting safely at 9.5%)
+28-44%:  ZONE 2 — KEY STATISTICS (3-4 metric blocks in a row)
+44-68%:  ZONE 3+4 — DATA STORY + GEOGRAPHIC (side-by-side chart and map)
+68-94%:  ZONE 5+6 — PROGRAM + IMPACT (compact grid concluding cleanly at 94%)
+94-100%: RESERVED SAFE AREA — leave completely empty (solid color band). Footer occupies 96-100%; 94-96% is tolerance buffer.
+
+There is no ZONE 7. Do not render a footer.
 Prioritize data density. Fewer decorative elements, more numbers and charts.
 `;
 
 export const CANVAS_COMPOSITION_16x9 = `
 === FULL CANVAS COMPOSITION (16:9 LANDSCAPE) ===
 
-Use the entire 16:9 canvas. Target visual occupancy: 90-95%.
+RESERVED SAFE AREAS — MANDATORY (16:9 LANDSCAPE):
+- Top 8.0% of the canvas MUST be completely empty (Header bar occupies 0-6.0%; 6.0-8.0% is tolerance buffer).
+- Bottom 5.0% of the canvas MUST be completely empty (Footer bar occupies 96.5-100%; 95.0-96.5% is tolerance buffer).
+- NEVER render any government header, logo, or footer text on the canvas.
+
+CONTENT AREA: 8.0% to 95.0% of canvas height.
+Target visual occupancy WITHIN the content area: 90-95%.
 Use a multi-column layout to maximize horizontal space.
 
-LAYOUT — approximate allocation:
+All three columns must begin safely at 8.0% and conclude at 95.0% of canvas height.
+0-8.0%:     RESERVED SAFE AREA — leave completely empty (solid color band across full width).
 
 Left 35%:   ZONE 1+2 — HERO COLUMN (hero visual + key statistics stacked vertically)
 Center 35%: ZONE 3+4 — DATA COLUMN (chart on top, map below)
-Right 30%:  ZONE 5+6+7 — INSIGHT COLUMN (program cards, impact icons, footer)
+Right 30%:  ZONE 5+6 — INSIGHT COLUMN (program cards, impact icons)
 
-Prioritize horizontal data flow. Use the full width.
+95.0-100%:  RESERVED SAFE AREA — leave completely empty (solid color band across full width).
+Do not render a footer.
 `;
 
 export const CANVAS_COMPOSITION_3x4 = `
 === FULL CANVAS COMPOSITION (3:4 PORTRAIT / EDITORIAL POSTER) ===
 
-Use the entire 3:4 canvas from top to bottom. Target visual occupancy: 92-96%.
+${SAFE_AREA_DIRECTIVE}
+
+CONTENT AREA: 9.5% to 94% of canvas height.
+Target visual occupancy WITHIN the content area: 92-96%.
 Slightly wider than 9:16, allowing richer multi-column blocks, prominent maps, and balanced editorial spacing.
 
-VERTICAL VISUAL RHYTHM — approximate allocation:
+VERTICAL VISUAL RHYTHM — absolute canvas positions:
 
-0-22%:   ZONE 1 — FULL-WIDTH HERO VISUAL
-         Large documentary/environmental photograph or topic-specific visual extending edge-to-edge horizontally.
-         Overlay the title and subtitle over the hero area using strong contrast. Do NOT leave blank white space above.
+0-9.5%:  RESERVED SAFE AREA — leave completely empty (solid color band). Header occupies 0-7.0%; 7.0-9.5% is tolerance buffer.
 
-22-34%:  ZONE 2 — KEY STATISTICS STRIP
-         4-6 verified statistics displayed in a clean 2x2 or 3-column modular statistic block.
-         Each statistic must include: large bold number, unit, and short Indonesian label.
+9.5-26%: ZONE 1 — FULL-WIDTH HERO VISUAL
+         Large documentary/environmental photograph or topic-specific visual extending edge-to-edge horizontally, starting safely at 9.5%. Overlay the title and subtitle over the hero area using strong contrast.
 
-34-52%:  ZONE 3 — PRIMARY DATA STORY
+26-38%:  ZONE 2 — KEY STATISTICS STRIP
+         4-6 verified statistics displayed in a clean 2x2 or 3-column modular statistic block. Each statistic must include: large bold number, unit, and short Indonesian label.
+
+38-56%:  ZONE 3 — PRIMARY DATA STORY
          Substantial chart, multi-metric comparison, or trend visualization with an insight statement below.
 
-52-72%:  ZONE 4 — GEOGRAPHIC / SPATIAL STORY
+56-74%:  ZONE 4 — GEOGRAPHIC / SPATIAL STORY
          Large thematic map occupying substantial visual area with district callouts, legend, and regional annotations.
 
-72-86%:  ZONE 5 & 6 — STRATEGIC PROGRAM & IMPACT
-         Balanced combination of initiative cards, field evidence photos, and measurable socio-economic impact metrics.
+74-94%:  ZONE 5 & 6 — STRATEGIC PROGRAM & IMPACT
+         Balanced combination of initiative cards, field evidence photos, and measurable socio-economic impact metrics concluding cleanly at 94%.
 
-86-100%: ZONE 7 — OFFICIAL GOVERNMENT FOOTER
-         One-line data source attribution and closing tagline. Compact and formal.
+94-100%: RESERVED SAFE AREA — leave completely empty (solid color band). Footer occupies 96-100%; 94-96% is tolerance buffer.
 
-VISUAL DENSITY TARGET: HIGH.
-Publication-ready government infographic poster. Composed and framed cleanly for a 3:4 aspect ratio.
+There is no ZONE 7. Do not render a footer.
+VISUAL DENSITY TARGET: HIGH within the 9.5-94% content area.
 `;
 
 export const CANVAS_COMPOSITION_4x3 = `
 === FULL CANVAS COMPOSITION (4:3 LANDSCAPE / PRESENTATION & TABLET) ===
 
-Use the entire 4:3 canvas. Target visual occupancy: 90-95%.
+RESERVED SAFE AREAS — MANDATORY (4:3 LANDSCAPE):
+- Top 8.5% of the canvas MUST be completely empty (Header bar occupies 0-6.5%; 6.5-8.5% is tolerance buffer).
+- Bottom 5.5% of the canvas MUST be completely empty (Footer bar occupies 96.0-100%; 94.5-96.0% is tolerance buffer).
+- NEVER render any government header, logo, or footer text on the canvas.
+
+CONTENT AREA: 8.5% to 94.5% of canvas height.
+Target visual occupancy WITHIN the content area: 90-95%.
 Use a balanced 2-column or 3-column editorial grid to optimize horizontal and vertical real estate.
 
-LAYOUT — approximate allocation:
+All columns must begin safely at 8.5% and end at 94.5% of canvas height.
+0-8.5%:     RESERVED SAFE AREA — leave completely empty (solid color band across full width).
 
-Left 40%:   ZONE 1+2 — HERO & STATS
-            Dominant hero visual with overlaid Indonesian title, accompanied by 3-4 key indicator cards.
+Left 40%:   ZONE 1+2 — HERO & STATS (Dominant hero visual with overlaid Indonesian title, accompanied by 3-4 key indicator cards)
+Center 35%: ZONE 3+4 — DATA & SPATIAL STORY (Prominent comparison chart on top, thematic district map or spatial distribution below)
+Right 25%:  ZONE 5+6 — INTERVENTIONS & IMPACT (Compact program cards and measurable community outcome icons)
 
-Center 35%: ZONE 3+4 — DATA & SPATIAL STORY
-            Prominent comparison chart on top, thematic district map or spatial distribution below.
-
-Right 25%:  ZONE 5+6+7 — INTERVENTIONS, IMPACT & FOOTER
-            Compact program cards, measurable community outcome icons, and one-line official footer at bottom.
-
-VISUAL DENSITY TARGET: HIGH.
-Balanced horizontal-editorial data flow. Composed and framed cleanly for a 4:3 aspect ratio.
+94.5-100%:  RESERVED SAFE AREA — leave completely empty (solid color band across full width).
+Do not render a footer.
+VISUAL DENSITY TARGET: HIGH within the 8.5-94.5% content area.
 `;
 
 // ============================================================================
@@ -245,7 +350,6 @@ export const ARCHETYPE_REGISTRY: Record<InfographicArchetype, ArchetypeDefinitio
       { zoneId: 'geography', title: 'Koridor Logistik & Sebaran Proyek', heightPercent: 18, purpose: 'Peta rute koridor pesisir (Pomako) dan pegunungan (Agimuga, Tembagapura)', visualType: 'large_route_map', compositionNote: 'Large stylized map with route lines, district labels, and project callouts' },
       { zoneId: 'program', title: 'Daftar Proyek Strategis', heightPercent: 14, purpose: 'Status pekerjaan paket jalan dan jembatan dengan foto dokumentasi', visualType: 'photo_feature_cards', compositionNote: 'Mix of small field photographs with project status cards' },
       { zoneId: 'impact', title: 'Dampak Sosio-Ekonomi', heightPercent: 12, purpose: 'Waktu tempuh, penurunan biaya logistik, konektivitas warga terhubung', visualType: 'icon_metrics', compositionNote: '4-6 impact indicators with flat icons and verified numbers' },
-      { zoneId: 'footer', title: 'Footer Resmi', heightPercent: 5, purpose: 'BRIDA & Dinas PUPR Kabupaten Mimika', visualType: 'compact_footer', compositionNote: 'Single-line data source attribution' },
     ],
   },
 
@@ -271,7 +375,6 @@ export const ARCHETYPE_REGISTRY: Record<InfographicArchetype, ArchetypeDefinitio
       { zoneId: 'geography', title: 'Sebaran Wilayah Rawan', heightPercent: 18, purpose: 'Komparasi distrik pesisir vs pegunungan', visualType: 'district_bar_chart_or_map', compositionNote: 'Horizontal bar chart comparing districts OR thematic map with risk zones' },
       { zoneId: 'program', title: 'Faktor & Intervensi', heightPercent: 14, purpose: 'Akar masalah dan paket intervensi bansos/PKH/pemberdayaan OAP', visualType: 'split_panel', compositionNote: 'Left: factor breakdown diagram. Right: program intervention cards with icons' },
       { zoneId: 'impact', title: 'Target & Dampak Terukur', heightPercent: 12, purpose: 'Target zero poverty, keluarga terangkat, realisasi anggaran sosial', visualType: 'impact_callouts', compositionNote: 'Bold callout numbers with source labels' },
-      { zoneId: 'footer', title: 'Footer Resmi', heightPercent: 5, purpose: 'Dinas Sosial & BRIDA Kabupaten Mimika', visualType: 'compact_footer', compositionNote: 'Single-line data attribution' },
     ],
   },
 
@@ -297,7 +400,6 @@ export const ARCHETYPE_REGISTRY: Record<InfographicArchetype, ArchetypeDefinitio
       { zoneId: 'geography', title: 'Peta Kerentanan Distrik', heightPercent: 18, purpose: 'Zona prioritas stunting di distrik pedalaman dan pesisir', visualType: 'risk_zone_map', compositionNote: 'Large thematic map with red/orange/green district zones and callout labels' },
       { zoneId: 'program', title: 'Intervensi Spesifik & Sensitif', heightPercent: 14, purpose: 'PMT, tablet tambah darah, sanitasi air, dan program konvergensi', visualType: 'intervention_cards', compositionNote: 'Checklist-style cards with icons and field photos' },
       { zoneId: 'impact', title: 'Roadmap Pencapaian', heightPercent: 12, purpose: 'Target nasional (<14%), timeline intervensi, dan dampak terukur', visualType: 'timeline_roadmap', compositionNote: 'Horizontal timeline with milestone markers' },
-      { zoneId: 'footer', title: 'Footer Kolaborasi', heightPercent: 5, purpose: 'Dinas Kesehatan & BRIDA Kabupaten Mimika', visualType: 'compact_footer', compositionNote: 'Single-line attribution' },
     ],
   },
 
@@ -323,7 +425,6 @@ export const ARCHETYPE_REGISTRY: Record<InfographicArchetype, ArchetypeDefinitio
       { zoneId: 'geography', title: 'Sebaran Fasilitas Belajar', heightPercent: 18, purpose: 'Ketersediaan sarana di 18 distrik Mimika', visualType: 'facility_map', compositionNote: 'District map with school density indicators and teacher distribution' },
       { zoneId: 'program', title: 'Program Afirmasi Daerah', heightPercent: 14, purpose: 'Beasiswa OAP dan distribusi guru ke wilayah perintis', visualType: 'program_feature_cards', compositionNote: 'Feature cards with beneficiary numbers and photos' },
       { zoneId: 'impact', title: 'Dampak Peningkatan IPM', heightPercent: 12, purpose: 'Kontribusi terhadap Indeks Pembangunan Manusia Mimika', visualType: 'progress_indicators', compositionNote: 'Circular or bar progress indicators with year-over-year comparison' },
-      { zoneId: 'footer', title: 'Footer Pendidikan', heightPercent: 5, purpose: 'Dinas Pendidikan & BRIDA Mimika', visualType: 'compact_footer', compositionNote: 'Single-line attribution' },
     ],
   },
 
@@ -349,7 +450,6 @@ export const ARCHETYPE_REGISTRY: Record<InfographicArchetype, ArchetypeDefinitio
       { zoneId: 'geography', title: 'Dekomposisi Sektoral', heightPercent: 16, purpose: 'Kontribusi pertambangan, pertanian, perdagangan, dan jasa', visualType: 'horizontal_stacked_bar', compositionNote: 'Horizontal stacked bar chart showing sector contributions' },
       { zoneId: 'program', title: 'Realisasi Investasi & UMKM', heightPercent: 14, purpose: 'Serapan modal dan penciptaan lapangan kerja lokal', visualType: 'data_table_with_callouts', compositionNote: 'Compact data table with highlighted key investments' },
       { zoneId: 'impact', title: 'Rekomendasi Kebijakan', heightPercent: 14, purpose: 'Diversifikasi pendapatan daerah masa depan', visualType: 'numbered_action_steps', compositionNote: 'Numbered strategic recommendations with priority labels' },
-      { zoneId: 'footer', title: 'Footer Keuangan', heightPercent: 5, purpose: 'Bapenda, Bappeda, & BRIDA Mimika', visualType: 'compact_footer', compositionNote: 'Single-line attribution' },
     ],
   },
 
@@ -375,7 +475,6 @@ export const ARCHETYPE_REGISTRY: Record<InfographicArchetype, ArchetypeDefinitio
       { zoneId: 'geography', title: 'Peta Wilayah Kerentanan', heightPercent: 18, purpose: 'Distrik pesisir dan dataran tinggi rawan pangan/air', visualType: 'vulnerability_zone_map', compositionNote: 'Large thematic map with red/orange/yellow vulnerability zones, district labels, and affected-area callouts' },
       { zoneId: 'program', title: 'Dampak Riil Lapangan', heightPercent: 14, purpose: 'Ketahanan pangan lokal (sagu/umbi), pasokan air bersih, dan distribusi logistik', visualType: 'impact_grid_with_photos', compositionNote: 'Grid of impact categories with small field photos and verified statistics' },
       { zoneId: 'impact', title: 'Protokol Respons & Mitigasi', heightPercent: 12, purpose: 'Langkah tanggap darurat Pemda dan penyaluran logistik', visualType: 'response_timeline', compositionNote: 'Horizontal timeline: MONITORING → MITIGASI → INTERVENSI → PEMULIHAN' },
-      { zoneId: 'footer', title: 'Footer Kebencanaan', heightPercent: 5, purpose: 'BPBD, BMKG & BRIDA Kabupaten Mimika', visualType: 'compact_footer', compositionNote: 'Single-line attribution' },
     ],
   },
 
@@ -401,7 +500,6 @@ export const ARCHETYPE_REGISTRY: Record<InfographicArchetype, ArchetypeDefinitio
       { zoneId: 'geography', title: 'Konteks Wilayah Implementasi', heightPercent: 18, purpose: 'Sebaran cakupan kebijakan di tingkat distrik/kampung', visualType: 'coverage_map', compositionNote: 'District map showing policy implementation coverage' },
       { zoneId: 'program', title: 'Inisiatif Pembaruan', heightPercent: 14, purpose: 'Penyederhanaan birokrasi dan transformasi digital', visualType: 'initiative_feature_cards', compositionNote: 'Feature cards with initiative descriptions and progress indicators' },
       { zoneId: 'impact', title: 'Arah Kebijakan Strategis', heightPercent: 12, purpose: 'Rencana aksi akselerasi pembangunan Mimika', visualType: 'strategic_roadmap', compositionNote: 'Numbered strategic steps with priority labels and PIC assignments' },
-      { zoneId: 'footer', title: 'Footer Resmi', heightPercent: 5, purpose: 'Pemerintah Kabupaten Mimika & BRIDA', visualType: 'compact_footer', compositionNote: 'Single-line attribution' },
     ],
   },
 };

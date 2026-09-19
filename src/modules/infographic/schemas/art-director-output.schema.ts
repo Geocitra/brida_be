@@ -73,7 +73,7 @@ export const ART_DIRECTOR_OUTPUT_SCHEMA = {
     imagePrompt: {
       type: 'string',
       description:
-        'Prompt visual detail dalam Bahasa Inggris untuk DALL-E 3 / Image AI yang memuat: (1) komposisi 7 visual zones beserta alokasi tinggi kanvas, (2) palet warna tematik, (3) instruksi teks 100% Bahasa Indonesia pada gambar, (4) instruksi tanpa logo/watermark, dan (5) instruksi penutup resolusi 8k. Prompt harus menghasilkan komposisi dense yang memenuhi 92-97% kanvas.',
+        'Prompt visual detail dalam Bahasa Inggris untuk DALL-E 3 / Image AI yang memuat: (1) aturan WAJIB 8% area kosong putih bersih di paling atas kanvas untuk kop instansi, (2) aturan WAJIB 5% area kosong putih bersih di paling bawah kanvas untuk alamat resmi, (3) komposisi 7 visual zones di area tengah (8%-95%), (4) palet warna tematik, (5) teks 100% Bahasa Indonesia, (6) tanpa logo/watermark, dan (7) instruksi penutup resolusi 8k. Prompt harus menghasilkan komposisi dense di area tengah kanvas dengan margin atas dan bawah yang benar-benar bersih.',
     },
   },
 };
