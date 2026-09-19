@@ -165,6 +165,59 @@ Right 30%:  ZONE 5+6+7 — INSIGHT COLUMN (program cards, impact icons, footer)
 Prioritize horizontal data flow. Use the full width.
 `;
 
+export const CANVAS_COMPOSITION_3x4 = `
+=== FULL CANVAS COMPOSITION (3:4 PORTRAIT / EDITORIAL POSTER) ===
+
+Use the entire 3:4 canvas from top to bottom. Target visual occupancy: 92-96%.
+Slightly wider than 9:16, allowing richer multi-column blocks, prominent maps, and balanced editorial spacing.
+
+VERTICAL VISUAL RHYTHM — approximate allocation:
+
+0-22%:   ZONE 1 — FULL-WIDTH HERO VISUAL
+         Large documentary/environmental photograph or topic-specific visual extending edge-to-edge horizontally.
+         Overlay the title and subtitle over the hero area using strong contrast. Do NOT leave blank white space above.
+
+22-34%:  ZONE 2 — KEY STATISTICS STRIP
+         4-6 verified statistics displayed in a clean 2x2 or 3-column modular statistic block.
+         Each statistic must include: large bold number, unit, and short Indonesian label.
+
+34-52%:  ZONE 3 — PRIMARY DATA STORY
+         Substantial chart, multi-metric comparison, or trend visualization with an insight statement below.
+
+52-72%:  ZONE 4 — GEOGRAPHIC / SPATIAL STORY
+         Large thematic map occupying substantial visual area with district callouts, legend, and regional annotations.
+
+72-86%:  ZONE 5 & 6 — STRATEGIC PROGRAM & IMPACT
+         Balanced combination of initiative cards, field evidence photos, and measurable socio-economic impact metrics.
+
+86-100%: ZONE 7 — OFFICIAL GOVERNMENT FOOTER
+         One-line data source attribution and closing tagline. Compact and formal.
+
+VISUAL DENSITY TARGET: HIGH.
+Publication-ready government infographic poster. Composed and framed cleanly for a 3:4 aspect ratio.
+`;
+
+export const CANVAS_COMPOSITION_4x3 = `
+=== FULL CANVAS COMPOSITION (4:3 LANDSCAPE / PRESENTATION & TABLET) ===
+
+Use the entire 4:3 canvas. Target visual occupancy: 90-95%.
+Use a balanced 2-column or 3-column editorial grid to optimize horizontal and vertical real estate.
+
+LAYOUT — approximate allocation:
+
+Left 40%:   ZONE 1+2 — HERO & STATS
+            Dominant hero visual with overlaid Indonesian title, accompanied by 3-4 key indicator cards.
+
+Center 35%: ZONE 3+4 — DATA & SPATIAL STORY
+            Prominent comparison chart on top, thematic district map or spatial distribution below.
+
+Right 25%:  ZONE 5+6+7 — INTERVENTIONS, IMPACT & FOOTER
+            Compact program cards, measurable community outcome icons, and one-line official footer at bottom.
+
+VISUAL DENSITY TARGET: HIGH.
+Balanced horizontal-editorial data flow. Composed and framed cleanly for a 4:3 aspect ratio.
+`;
+
 // ============================================================================
 // ARCHETYPE REGISTRY — Visual Grammar Engine per Domain Sektoral
 // ============================================================================
@@ -363,6 +416,10 @@ export function resolveCanvasComposition(aspectRatio: string): string {
       return CANVAS_COMPOSITION_1x1;
     case '16:9':
       return CANVAS_COMPOSITION_16x9;
+    case '3:4':
+      return CANVAS_COMPOSITION_3x4;
+    case '4:3':
+      return CANVAS_COMPOSITION_4x3;
     case '9:16':
     default:
       return CANVAS_COMPOSITION_9x16;

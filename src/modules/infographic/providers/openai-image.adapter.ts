@@ -76,9 +76,11 @@ export class OpenAiImageAdapter implements IImageGeneratorAdapter {
           resolution = '1024x1024';
           break;
         case '16:9':
+        case '4:3':
           resolution = '1536x1024';
           break;
         case '9:16':
+        case '3:4':
         default:
           resolution = '1024x1536';
           break;
@@ -92,9 +94,11 @@ export class OpenAiImageAdapter implements IImageGeneratorAdapter {
           resolution = '1024x1024';
           break;
         case '16:9':
+        case '4:3':
           resolution = '1792x1024';
           break;
         case '9:16':
+        case '3:4':
         default:
           resolution = '1024x1792';
           break;
@@ -205,6 +209,10 @@ export class OpenAiImageAdapter implements IImageGeneratorAdapter {
         return { width: 1080, height: 1080 };
       case '16:9':
         return { width: 1920, height: 1080 };
+      case '4:3':
+        return { width: 1440, height: 1080 };
+      case '3:4':
+        return { width: 1080, height: 1440 };
       case '9:16':
       default:
         return { width: 1080, height: 1920 };

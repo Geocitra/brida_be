@@ -16,8 +16,8 @@ export class CreateInfographicSessionDto {
 
   @IsString()
   @IsOptional()
-  @IsIn(['1:1', '9:16', '16:9'], {
-    message: 'Aspek rasio harus bernilai 1:1, 9:16, atau 16:9.',
+  @IsIn(['1:1', '9:16', '16:9', '3:4', '4:3'], {
+    message: 'Aspek rasio harus bernilai 1:1, 9:16, 16:9, 3:4, atau 4:3.',
   })
   aspectRatio?: PosterAspectRatio = '9:16';
 
@@ -37,8 +37,8 @@ export class ChatInfographicAgentDto {
 
   @IsString()
   @IsOptional()
-  @IsIn(['1:1', '9:16', '16:9'], {
-    message: 'Aspek rasio harus bernilai 1:1, 9:16, atau 16:9.',
+  @IsIn(['1:1', '9:16', '16:9', '3:4', '4:3'], {
+    message: 'Aspek rasio harus bernilai 1:1, 9:16, 16:9, 3:4, atau 4:3.',
   })
   aspectRatio?: PosterAspectRatio;
 }

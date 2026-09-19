@@ -1,6 +1,6 @@
 import { IsString, IsNotEmpty, IsOptional, IsIn } from 'class-validator';
 
-export type InfographicAspectRatio = '1:1' | '9:16' | '16:9';
+export type InfographicAspectRatio = '1:1' | '9:16' | '16:9' | '3:4' | '4:3';
 export type InfographicVisualStyle =
   | 'modern-vector'
   | 'corporate-clean'
@@ -18,8 +18,8 @@ export class GenerateInfographicDto {
 
   @IsString()
   @IsOptional()
-  @IsIn(['1:1', '9:16', '16:9'], {
-    message: 'Rasio aspek harus 1:1, 9:16, atau 16:9.',
+  @IsIn(['1:1', '9:16', '16:9', '3:4', '4:3'], {
+    message: 'Rasio aspek harus 1:1, 9:16, 16:9, 3:4, atau 4:3.',
   })
   aspectRatio?: InfographicAspectRatio = '9:16';
 

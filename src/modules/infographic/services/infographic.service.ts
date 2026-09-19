@@ -397,9 +397,9 @@ PANDUAN ART DIRECTOR & GENERATIVE UI (BLOCK-BASED ENGINE):
       'chatgpt-image-latest';
 
     let imageSize = '1024x1024';
-    if (aspectRatio === '9:16') {
+    if (aspectRatio === '9:16' || aspectRatio === '3:4') {
       imageSize = '1024x1536';
-    } else if (aspectRatio === '16:9') {
+    } else if (aspectRatio === '16:9' || aspectRatio === '4:3') {
       imageSize = '1536x1024';
     }
 
@@ -486,10 +486,21 @@ PANDUAN ART DIRECTOR & GENERATIVE UI (BLOCK-BASED ENGINE):
       mkdirSync(mediaDir, { recursive: true });
     }
 
-    const width =
-      aspectRatio === '16:9' ? 1024 : aspectRatio === '9:16' ? 576 : 1024;
-    const height =
-      aspectRatio === '9:16' ? 1024 : aspectRatio === '16:9' ? 576 : 1024;
+    let width = 1024;
+    let height = 1024;
+    if (aspectRatio === '9:16') {
+      width = 576;
+      height = 1024;
+    } else if (aspectRatio === '16:9') {
+      width = 1024;
+      height = 576;
+    } else if (aspectRatio === '3:4') {
+      width = 768;
+      height = 1024;
+    } else if (aspectRatio === '4:3') {
+      width = 1024;
+      height = 768;
+    }
 
     try {
       this.logger.log(
@@ -536,8 +547,21 @@ PANDUAN ART DIRECTOR & GENERATIVE UI (BLOCK-BASED ENGINE):
       mkdirSync(mediaDir, { recursive: true });
     }
 
-    const width = aspectRatio === '16:9' ? 1792 : 1024;
-    const height = aspectRatio === '9:16' ? 1792 : 1024;
+    let width = 1024;
+    let height = 1024;
+    if (aspectRatio === '16:9') {
+      width = 1792;
+      height = 1024;
+    } else if (aspectRatio === '9:16') {
+      width = 1024;
+      height = 1792;
+    } else if (aspectRatio === '4:3') {
+      width = 1440;
+      height = 1080;
+    } else if (aspectRatio === '3:4') {
+      width = 1080;
+      height = 1440;
+    }
 
     const svgContent = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}">
   <defs>
