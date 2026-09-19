@@ -113,73 +113,73 @@ DATA INTEGRITY & PROVENANCE:
 export const SAFE_AREA_CONFIG = {
   '9:16': {
     headerBarPercent: 7.5,
-    headerTolerancePercent: 2.5,
-    topReservedPercent: 10.0,
+    headerTolerancePercent: 4.5,
+    topReservedPercent: 12.0,
     footerBarPercent: 4.0,
     footerTolerancePercent: 2.0,
     bottomReservedPercent: 6.0,
-    contentStart: 10.0,
+    contentStart: 12.0,
     contentEnd: 94.0,
   },
   '3:4': {
     headerBarPercent: 7.0,
-    headerTolerancePercent: 2.5,
-    topReservedPercent: 9.5,
+    headerTolerancePercent: 4.5,
+    topReservedPercent: 11.5,
     footerBarPercent: 4.0,
     footerTolerancePercent: 2.0,
     bottomReservedPercent: 6.0,
-    contentStart: 9.5,
+    contentStart: 11.5,
     contentEnd: 94.0,
   },
   '1:1': {
     headerBarPercent: 7.0,
-    headerTolerancePercent: 2.5,
-    topReservedPercent: 9.5,
+    headerTolerancePercent: 4.5,
+    topReservedPercent: 11.5,
     footerBarPercent: 4.0,
     footerTolerancePercent: 2.0,
     bottomReservedPercent: 6.0,
-    contentStart: 9.5,
+    contentStart: 11.5,
     contentEnd: 94.0,
   },
   '16:9': {
     headerBarPercent: 6.0,
-    headerTolerancePercent: 2.0,
-    topReservedPercent: 8.0,
+    headerTolerancePercent: 4.0,
+    topReservedPercent: 10.0,
     footerBarPercent: 3.5,
     footerTolerancePercent: 1.5,
     bottomReservedPercent: 5.0,
-    contentStart: 8.0,
+    contentStart: 10.0,
     contentEnd: 95.0,
   },
   '4:3': {
     headerBarPercent: 6.5,
-    headerTolerancePercent: 2.0,
-    topReservedPercent: 8.5,
+    headerTolerancePercent: 4.0,
+    topReservedPercent: 10.5,
     footerBarPercent: 4.0,
     footerTolerancePercent: 1.5,
     bottomReservedPercent: 5.5,
-    contentStart: 8.5,
+    contentStart: 10.5,
     contentEnd: 94.5,
   },
 } as const;
 
 export const SAFE_AREA = {
   headerPercent: 7.5,
-  headerTolerancePercent: 2.5,
-  topReservedPercent: 10.0,
+  headerTolerancePercent: 4.5,
+  topReservedPercent: 12.0,
   footerPercent: 4.0,
   footerTolerancePercent: 2.0,
   bottomReservedPercent: 6.0,
 } as const;
 
-export const CONTENT_START = SAFE_AREA.topReservedPercent; // 10%
+export const CONTENT_START = SAFE_AREA.topReservedPercent; // 12%
 export const CONTENT_END = 100 - SAFE_AREA.bottomReservedPercent; // 94%
 
 export const SAFE_AREA_DIRECTIVE = `
 RESERVED SAFE AREAS — MANDATORY:
-- Top 10% of the canvas MUST be a clean solid color band (pure white #FFFFFF or theme solid color). Absolutely NO text, NO headlines, NO imagery, NO icons, NO graphic elements inside this band. Leave it completely empty as a buffer for the official institutional header.
+- Top 12% of the canvas MUST be a clean solid color band (pure white #FFFFFF or theme solid color). Absolutely NO text, NO headlines, NO imagery, NO icons, NO graphic elements inside this band. Leave it completely empty as a buffer for the official institutional header.
 - Bottom 6% of the canvas (94% to 100%) MUST likewise be a clean solid color band, completely empty without any text, cards, borders, or chart legends.
-- These reserved bands are intentional. They are NOT a violation of the canvas occupancy requirement. The 92-97% occupancy target applies ONLY to the content area between 10% and 94%.
+- These reserved bands are intentional. They are NOT a violation of the canvas occupancy requirement. The 92-97% occupancy target applies ONLY to the content area between 12% and 94%.
 - NEVER render any title bar, institution name, organization label, source attribution, tagline, date stamp, page number, or footer line anywhere on the canvas. That information is applied afterwards by a separate system.
 `;
 
@@ -188,16 +188,16 @@ export const CANVAS_COMPOSITION_9x16 = `
 
 ${SAFE_AREA_DIRECTIVE}
 
-CONTENT AREA: 10% to 94% of canvas height.
+CONTENT AREA: 12% to 94% of canvas height.
 Target visual occupancy WITHIN the content area: 92-97%.
 
 VERTICAL VISUAL RHYTHM — absolute canvas positions:
 
-0-10%:   RESERVED SAFE AREA — leave completely empty (solid color band).
-         (Header bar occupies 0-7.5%; 7.5-10% is tolerance cushion to prevent clipping).
+0-12%:   RESERVED SAFE AREA — leave completely empty (solid color band).
+         (Header bar occupies 0-7.5%; 7.5-12% is generous tolerance cushion to prevent clipping).
 
-10-26%:  ZONE 1 — FULL-WIDTH HERO VISUAL
-         Large documentary/environmental photograph or detailed topic-specific visual extending edge-to-edge horizontally, starting safely at 10%. Overlay the title and subtitle over the hero area using strong contrast. Do NOT extend any text or elements above 10%.
+12-28%:  ZONE 1 — FULL-WIDTH HERO VISUAL
+         Large documentary/environmental photograph or detailed topic-specific visual extending edge-to-edge horizontally, starting safely at 12%. Overlay the title and subtitle over the hero area using strong contrast. Do NOT extend any text or elements above 12%.
 
 26-38%:  ZONE 2 — KEY STATISTICS STRIP
          4-6 verified statistics displayed as a strong horizontal visual strip or modular statistic blocks. Each statistic must include: large number, unit, short label, and optional directional indicator.
@@ -226,13 +226,13 @@ export const CANVAS_COMPOSITION_1x1 = `
 
 ${SAFE_AREA_DIRECTIVE}
 
-CONTENT AREA: 9.5% to 94% of canvas height.
+CONTENT AREA: 11.5% to 94% of canvas height.
 Target visual occupancy WITHIN the content area: 90-95%.
 
 LAYOUT — absolute vertical allocation:
 
-0-9.5%:  RESERVED SAFE AREA — leave completely empty (solid color band). Header occupies 0-7.0%; 7.0-9.5% is tolerance buffer.
-9.5-28%: ZONE 1 — HERO (compact title + subtitle + background visual starting safely at 9.5%)
+0-11.5%: RESERVED SAFE AREA — leave completely empty (solid color band). Header occupies 0-7.0%; 7.0-11.5% is generous tolerance buffer.
+11.5-28%: ZONE 1 — HERO (compact title + subtitle + background visual starting safely at 11.5%)
 28-44%:  ZONE 2 — KEY STATISTICS (3-4 metric blocks in a row)
 44-68%:  ZONE 3+4 — DATA STORY + GEOGRAPHIC (side-by-side chart and map)
 68-94%:  ZONE 5+6 — PROGRAM + IMPACT (compact grid concluding cleanly at 94%)
@@ -246,16 +246,16 @@ export const CANVAS_COMPOSITION_16x9 = `
 === FULL CANVAS COMPOSITION (16:9 LANDSCAPE) ===
 
 RESERVED SAFE AREAS — MANDATORY (16:9 LANDSCAPE):
-- Top 8.0% of the canvas MUST be completely empty (Header bar occupies 0-6.0%; 6.0-8.0% is tolerance buffer).
+- Top 10.0% of the canvas MUST be completely empty (Header bar occupies 0-6.0%; 6.0-10.0% is generous tolerance buffer).
 - Bottom 5.0% of the canvas MUST be completely empty (Footer bar occupies 96.5-100%; 95.0-96.5% is tolerance buffer).
 - NEVER render any government header, logo, or footer text on the canvas.
 
-CONTENT AREA: 8.0% to 95.0% of canvas height.
+CONTENT AREA: 10.0% to 95.0% of canvas height.
 Target visual occupancy WITHIN the content area: 90-95%.
 Use a multi-column layout to maximize horizontal space.
 
-All three columns must begin safely at 8.0% and conclude at 95.0% of canvas height.
-0-8.0%:     RESERVED SAFE AREA — leave completely empty (solid color band across full width).
+All three columns must begin safely at 10.0% and conclude at 95.0% of canvas height.
+0-10.0%:     RESERVED SAFE AREA — leave completely empty (solid color band across full width).
 
 Left 35%:   ZONE 1+2 — HERO COLUMN (hero visual + key statistics stacked vertically)
 Center 35%: ZONE 3+4 — DATA COLUMN (chart on top, map below)
@@ -270,44 +270,44 @@ export const CANVAS_COMPOSITION_3x4 = `
 
 ${SAFE_AREA_DIRECTIVE}
 
-CONTENT AREA: 9.5% to 94% of canvas height.
+CONTENT AREA: 11.5% to 94% of canvas height.
 Target visual occupancy WITHIN the content area: 92-96%.
 Slightly wider than 9:16, allowing richer multi-column blocks, prominent maps, and balanced editorial spacing.
 
 VERTICAL VISUAL RHYTHM — absolute canvas positions:
 
-0-9.5%:  RESERVED SAFE AREA — leave completely empty (solid color band). Header occupies 0-7.0%; 7.0-9.5% is tolerance buffer.
+0-11.5%: RESERVED SAFE AREA — leave completely empty (solid color band). Header occupies 0-7.0%; 7.0-11.5% is generous tolerance buffer.
 
-9.5-26%: ZONE 1 — FULL-WIDTH HERO VISUAL
-         Large documentary/environmental photograph or topic-specific visual extending edge-to-edge horizontally, starting safely at 9.5%. Overlay the title and subtitle over the hero area using strong contrast.
+11.5-28%: ZONE 1 — FULL-WIDTH HERO VISUAL
+         Large documentary/environmental photograph or topic-specific visual extending edge-to-edge horizontally, starting safely at 11.5%. Overlay the title and subtitle over the hero area using strong contrast.
 
-26-38%:  ZONE 2 — KEY STATISTICS STRIP
+28-40%:  ZONE 2 — KEY STATISTICS STRIP
          4-6 verified statistics displayed in a clean 2x2 or 3-column modular statistic block. Each statistic must include: large bold number, unit, and short Indonesian label.
 
-38-56%:  ZONE 3 — PRIMARY DATA STORY
+40-58%:  ZONE 3 — PRIMARY DATA STORY
          Substantial chart, multi-metric comparison, or trend visualization with an insight statement below.
 
-56-74%:  ZONE 4 — GEOGRAPHIC / SPATIAL STORY
+58-76%:  ZONE 4 — GEOGRAPHIC / SPATIAL STORY
          Large thematic map occupying substantial visual area with district callouts, legend, and regional annotations.
 
-74-94%:  ZONE 5 & 6 — STRATEGIC PROGRAM & IMPACT
+76-94%:  ZONE 5 & 6 — STRATEGIC PROGRAM & IMPACT
          Balanced combination of initiative cards, field evidence photos, and measurable socio-economic impact metrics concluding cleanly at 94%.
 
 94-100%: RESERVED SAFE AREA — leave completely empty (solid color band). Footer occupies 96-100%; 94-96% is tolerance buffer.
 
 There is no ZONE 7. Do not render a footer.
-VISUAL DENSITY TARGET: HIGH within the 9.5-94% content area.
+VISUAL DENSITY TARGET: HIGH within the 11.5-94% content area.
 `;
 
 export const CANVAS_COMPOSITION_4x3 = `
 === FULL CANVAS COMPOSITION (4:3 LANDSCAPE / PRESENTATION & TABLET) ===
 
 RESERVED SAFE AREAS — MANDATORY (4:3 LANDSCAPE):
-- Top 8.5% of the canvas MUST be completely empty (Header bar occupies 0-6.5%; 6.5-8.5% is tolerance buffer).
+- Top 10.5% of the canvas MUST be completely empty (Header bar occupies 0-6.5%; 6.5-10.5% is generous tolerance buffer).
 - Bottom 5.5% of the canvas MUST be completely empty (Footer bar occupies 96.0-100%; 94.5-96.0% is tolerance buffer).
 - NEVER render any government header, logo, or footer text on the canvas.
 
-CONTENT AREA: 8.5% to 94.5% of canvas height.
+CONTENT AREA: 10.5% to 94.5% of canvas height.
 Target visual occupancy WITHIN the content area: 90-95%.
 Use a balanced 2-column or 3-column editorial grid to optimize horizontal and vertical real estate.
 
