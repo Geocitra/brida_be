@@ -6,6 +6,8 @@ export interface PosterBrandingMetricsOptions {
   footerFontSize?: 'compact' | 'normal' | 'large';
   logoSize?: 'compact' | 'normal' | 'large';
   headerHeight?: 'compact' | 'normal' | 'spacious';
+  headerHeightPercent?: number;
+  footerHeightPercent?: number;
   /** Aspek rasio kanvas, contoh: '9:16', '3:4', '1:1', '4:3', '16:9' */
   aspectRatio?: string;
 }
@@ -46,9 +48,21 @@ export function getPosterBrandingMetrics(
   const headerPercent = safeArea.headerBarPercent / 100;
   const footerPercent = safeArea.footerBarPercent / 100;
 
-  const headerHeightMultiplier =
-    options?.headerHeight === 'compact' ? 0.85 : options?.headerHeight === 'spacious' ? 1.2 : 1.0;
-  const effectiveHeaderPercent = headerPercent * headerHeightMultiplier;
+  let effectiveHeaderPercent: number;
+  if (typeof options?.headerHeightPercent === 'number' && options.headerHeightPercent > 0) {
+    effectiveHeaderPercent = options.headerHeightPercent / 100;
+  } else {
+    const headerHeightMultiplier =
+      options?.headerHeight === 'compact' ? 0.85 : options?.headerHeight === 'spacious' ? 1.2 : 1.0;
+    effectiveHeaderPercent = headerPercent * headerHeightMultiplier;
+  }
+
+  let effectiveFooterPercent: number;
+  if (typeof options?.footerHeightPercent === 'number' && options.footerHeightPercent > 0) {
+    effectiveFooterPercent = options.footerHeightPercent / 100;
+  } else {
+    effectiveFooterPercent = footerPercent;
+  }
 
   const headerFontMultiplier =
     options?.headerFontSize === 'compact' ? 0.85 : options?.headerFontSize === 'large' ? 1.18 : 1.0;
@@ -58,11 +72,11 @@ export function getPosterBrandingMetrics(
     options?.logoSize === 'compact' ? 0.58 : options?.logoSize === 'large' ? 0.88 : 0.74;
 
   const headerHeightPx = Math.round(height * effectiveHeaderPercent);
-  const footerHeightPx = Math.round(height * footerPercent);
+  const footerHeightPx = Math.round(height * effectiveFooterPercent);
 
   return {
     headerPercent: effectiveHeaderPercent,
-    footerPercent,
+    footerPercent: effectiveFooterPercent,
     headerHeightPx,
     footerHeightPx,
     safeArea,
@@ -98,6 +112,8 @@ export function generatePosterBrandingHtml(options: RenderPosterOptions): string
   const footerFontSize = layoutConfig.footerFontSize || 'normal';
   const logoSize = layoutConfig.logoSize || 'normal';
   const headerHeight = (layoutConfig as any).headerHeight || 'normal';
+  const headerHeightPercent = (layoutConfig as any).headerHeightPercent;
+  const footerHeightPercent = (layoutConfig as any).footerHeightPercent;
 
   const footerBgColor = layoutConfig.footerBgColor || '#0F1E36';
   const footerTextColor = layoutConfig.footerTextColor || (isDarkColor(footerBgColor) ? '#F8FAFC' : '#0F1E36');
@@ -109,6 +125,8 @@ export function generatePosterBrandingHtml(options: RenderPosterOptions): string
     footerFontSize,
     logoSize,
     headerHeight,
+    headerHeightPercent,
+    footerHeightPercent,
     aspectRatio: (options as any).aspectRatio,
   });
   const {

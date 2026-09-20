@@ -6,10 +6,19 @@ import {
   ValidateNested,
   IsObject,
   IsIn,
+  IsNumber,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class PosterLayoutConfigDto {
+  @IsOptional()
+  @IsNumber()
+  headerHeightPercent?: number;
+
+  @IsOptional()
+  @IsNumber()
+  footerHeightPercent?: number;
+
   @IsOptional()
   @IsString()
   headerBgColor?: string;
