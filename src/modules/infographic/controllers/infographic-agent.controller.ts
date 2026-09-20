@@ -144,8 +144,14 @@ export class InfographicAgentController {
       throw new NotFoundException('Berkas fisik poster tidak ditemukan pada disk server.');
     }
 
+    const safeAsciiFilename = filename.replace(/[^\x20-\x7E]/g, '_');
     res.setHeader('Content-Type', 'image/png');
-    return res.download(fullPath, filename);
+    res.setHeader('Access-Control-Expose-Headers', 'Content-Disposition, Content-Type');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${safeAsciiFilename}"; filename*=UTF-8''${encodeURIComponent(filename)}`,
+    );
+    return res.download(fullPath, safeAsciiFilename);
   }
 
   /**

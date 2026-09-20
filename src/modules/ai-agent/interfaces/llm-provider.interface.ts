@@ -12,5 +12,7 @@ export interface ILlmProvider {
   generateStructuredAnalysis<T>(
     messages: LlmChatMessage[],
     jsonSchema: any,
+    temperature?: number,
+    maxOutputTokens?: number,
   ): Promise<T>;
 }

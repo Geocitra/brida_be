@@ -59,11 +59,12 @@ export class VendorLlmAdapter implements ILlmProvider {
     messages: MultimodalChatMessage[],
     jsonSchema: any,
     temperature: number = 0.0,
+    maxOutputTokens?: number,
   ): Promise<T> {
     const provider = this.getActiveProvider();
 
     this.logger.log(
-      `[VendorLlmAdapter] Provider aktif: ${provider.toUpperCase()} | Mengirim ${messages.length} pesan (temperature=${temperature})...`,
+      `[VendorLlmAdapter] Provider aktif: ${provider.toUpperCase()} | Mengirim ${messages.length} pesan (temperature=${temperature}, maxTokens=${maxOutputTokens ?? 'default'})...`,
     );
 
     // Mengeksekusi dengan Exponential Backoff Resilience (Maksimal 3 Kali Percobaan)
@@ -77,7 +78,7 @@ export class VendorLlmAdapter implements ILlmProvider {
           this.logger.warn('[OPENAI_API_KEY Kosong] Jatuh ke mock response. Set OPENAI_API_KEY pada .env.');
           rawResponse = await this.mockVendorApiCall();
         } else {
-          rawResponse = await this.callRealOpenAiApi(apiKey, messages, jsonSchema, temperature);
+          rawResponse = await this.callRealOpenAiApi(apiKey, messages, jsonSchema, temperature, maxOutputTokens);
         }
       } else {
         // ── PENDEKATAN 1: Google Gemini (Default) ────────────────────────
@@ -86,7 +87,7 @@ export class VendorLlmAdapter implements ILlmProvider {
           this.logger.warn('[GEMINI_API_KEY Kosong] Jatuh ke mock response. Set GEMINI_API_KEY pada .env.');
           rawResponse = await this.mockVendorApiCall();
         } else {
-          rawResponse = await this.callRealGeminiApi(apiKey, messages, jsonSchema, temperature);
+          rawResponse = await this.callRealGeminiApi(apiKey, messages, jsonSchema, temperature, maxOutputTokens);
         }
       }
 
@@ -108,6 +109,7 @@ export class VendorLlmAdapter implements ILlmProvider {
     messages: MultimodalChatMessage[],
     jsonSchema?: any,
     temperature: number = 0.0,
+    maxOutputTokens?: number,
   ): Promise<string> {
     const modelName = this.configService.get<string>('GEMINI_MODEL') || 'gemini-1.5-flash';
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
@@ -153,11 +155,14 @@ export class VendorLlmAdapter implements ILlmProvider {
       }
     }
 
+    // Token limit: gunakan yang diberikan caller, atau default 32768 untuk long-form content
+    const effectiveMaxTokens = maxOutputTokens ?? 32768;
+
     const requestBody: any = {
       contents,
       generationConfig: {
         temperature,
-        maxOutputTokens: 8192,
+        maxOutputTokens: effectiveMaxTokens,
         responseMimeType: 'application/json',
         responseSchema: cleanedSchema,
       },
@@ -167,7 +172,7 @@ export class VendorLlmAdapter implements ILlmProvider {
       requestBody.systemInstruction = systemInstruction;
     }
 
-    this.logger.log(`[Gemini] Mengirim request ke model: ${modelName}`);
+    this.logger.log(`[Gemini] Mengirim request ke model: ${modelName} | maxOutputTokens: ${effectiveMaxTokens}`);
 
     const response = await fetch(url, {
       method: 'POST',
@@ -208,6 +213,7 @@ export class VendorLlmAdapter implements ILlmProvider {
     messages: MultimodalChatMessage[],
     jsonSchema?: any,
     temperature: number = 0.0,
+    maxOutputTokens?: number,
   ): Promise<string> {
     const modelName = this.configService.get<string>('OPENAI_MODEL') || 'gpt-4o-mini';
     const url = 'https://api.openai.com/v1/chat/completions';
@@ -270,11 +276,14 @@ export class VendorLlmAdapter implements ILlmProvider {
       }
     }
 
+    // Token limit: gunakan yang diberikan caller, atau default 16384 untuk long-form content
+    const effectiveMaxTokens = maxOutputTokens ?? 16384;
+
     const requestBody: any = {
       model: modelName,
       messages: openAiMessages,
       temperature,
-      max_completion_tokens: 8192,
+      max_completion_tokens: effectiveMaxTokens,
     };
 
     // Aktifkan JSON Mode / Structured Outputs jika ada jsonSchema
@@ -320,7 +329,7 @@ export class VendorLlmAdapter implements ILlmProvider {
       }
     }
 
-    this.logger.log(`[OpenAI] Mengirim request ke model: ${modelName} | JSON Mode: ${jsonSchema ? 'ON' : 'OFF'}`);
+    this.logger.log(`[OpenAI] Mengirim request ke model: ${modelName} | maxTokens: ${effectiveMaxTokens} | JSON Mode: ${jsonSchema ? 'ON' : 'OFF'}`);
 
     const response = await fetch(url, {
       method: 'POST',

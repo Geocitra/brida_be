@@ -8,6 +8,8 @@ import {
   Param,
   UseGuards,
   UseInterceptors,
+  UsePipes,
+  ValidationPipe,
   UploadedFile,
   ParseUUIDPipe,
   HttpCode,
@@ -45,6 +47,7 @@ export class InfographicBrandingController {
    */
   @Put()
   @HttpCode(HttpStatus.OK)
+  @UsePipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: false, transform: true }))
   async updateBranding(
     @Param('id', new ParseUUIDPipe({ version: '4' })) posterId: string,
     @Body() dto: UpsertPosterBrandingDto,

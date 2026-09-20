@@ -61,7 +61,8 @@ export function getPosterBrandingMetrics(
   if (typeof options?.footerHeightPercent === 'number' && options.footerHeightPercent > 0) {
     effectiveFooterPercent = options.footerHeightPercent / 100;
   } else {
-    effectiveFooterPercent = footerPercent;
+    // Default footer minimal 5.2% dari tinggi kanvas agar proporsional, nyaman dibaca, dan tidak claustrophobic
+    effectiveFooterPercent = Math.max(footerPercent, 0.052);
   }
 
   const headerFontMultiplier =
@@ -80,10 +81,24 @@ export function getPosterBrandingMetrics(
     headerHeightPx,
     footerHeightPx,
     safeArea,
-    titleFontSizePx: Math.max(12, Math.round(headerHeightPx * 0.28 * headerFontMultiplier)),
-    subTitleFontSizePx: Math.max(9, Math.round(headerHeightPx * 0.20 * headerFontMultiplier)),
-    footerFontSizePx: Math.max(9, Math.round(footerHeightPx * 0.36 * footerFontMultiplier)),
-    logoHeightPx: Math.round(headerHeightPx * logoSizeMultiplier),
+    // Font judul dan subjudul dihitung proporsional terhadap LEBAR kanvas (seperti frontend cqw)
+    // dan dibatasi oleh tinggi header agar tidak meluap keluar dan tidak pernah terpotong elipsis
+    titleFontSizePx: Math.min(
+      Math.round(headerHeightPx * 0.35),
+      Math.max(14, Math.round(width * 0.024 * headerFontMultiplier)),
+    ),
+    subTitleFontSizePx: Math.min(
+      Math.round(headerHeightPx * 0.24),
+      Math.max(10, Math.round(width * 0.016 * headerFontMultiplier)),
+    ),
+    footerFontSizePx: Math.min(
+      Math.round(footerHeightPx * 0.42),
+      Math.max(11, Math.round(width * 0.014 * footerFontMultiplier)),
+    ),
+    logoHeightPx: Math.min(
+      Math.round(headerHeightPx * logoSizeMultiplier),
+      Math.round(width * 0.16),
+    ),
   };
 }
 
@@ -241,11 +256,12 @@ export function generatePosterBrandingHtml(options: RenderPosterOptions): string
     .header-institution {
       font-size: ${titleFontSizePx}px;
       font-weight: 900;
-      letter-spacing: 0.06em;
+      letter-spacing: 0.03em;
       text-transform: uppercase;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      max-width: 100%;
     }
 
     .header-sub-institution {
@@ -253,10 +269,11 @@ export function generatePosterBrandingHtml(options: RenderPosterOptions): string
       font-weight: 500;
       opacity: 0.92;
       margin-top: ${Math.round(headerHeightPx * 0.04)}px;
-      letter-spacing: 0.02em;
+      letter-spacing: 0.01em;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
+      max-width: 100%;
     }
 
     /* ── FOOTER RESMI (SAFE AREA: 94% - 100%) ── */
@@ -272,14 +289,15 @@ export function generatePosterBrandingHtml(options: RenderPosterOptions): string
       display: flex;
       align-items: center;
       padding: 0 ${Math.round(width * 0.04)}px;
-      border-top: 1px solid ${isDarkColor(footerBgColor) ? 'rgba(255,255,255,0.12)' : 'rgba(0,0,0,0.12)'};
+      border-top: 3px solid ${isDarkColor(footerBgColor) ? '#14B8A6' : '#0D9488'};
+      box-shadow: 0 -4px 15px rgba(0,0,0,0.25);
       ${footerAlignment === 'center' ? 'justify-content: center; text-align: center;' : footerAlignment === 'right' ? 'justify-content: flex-end; text-align: right;' : 'justify-content: flex-start; text-align: left;'}
     }
 
     .footer-text {
       font-size: ${footerFontSizePx}px;
-      font-weight: 500;
-      letter-spacing: 0.03em;
+      font-weight: 600;
+      letter-spacing: 0.02em;
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;

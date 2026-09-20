@@ -317,13 +317,21 @@ export class ChatRepository {
   /**
    * Memperbarui draf teks Markdown naskah artikel aktif (Pane Kanan)
    */
-  async updateActiveDraft(sessionId: string, currentDraft: string): Promise<ChatSession> {
+  async updateActiveDraft(
+    sessionId: string,
+    currentDraft: string,
+    resetEditorState: boolean = false,
+  ): Promise<ChatSession> {
+    const dataToUpdate: any = {
+      currentDraft,
+      updatedAt: new Date(),
+    };
+    if (resetEditorState) {
+      dataToUpdate.editorDocumentState = null;
+    }
     return this.prisma.chatSession.update({
       where: { id: sessionId },
-      data: {
-        currentDraft,
-        updatedAt: new Date(),
-      },
+      data: dataToUpdate,
     });
   }
 

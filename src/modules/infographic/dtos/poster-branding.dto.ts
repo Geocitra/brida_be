@@ -69,12 +69,29 @@ export class PosterLayoutConfigDto {
   @IsString()
   @IsIn(['compact', 'normal', 'large'])
   logoSize?: 'compact' | 'normal' | 'large';
+
+  @IsOptional()
+  @IsNumber()
+  watermarkOpacity?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  showDate?: boolean;
 }
 
 export class UpsertPosterBrandingDto {
   @IsOptional()
+  id?: string;
+
+  @IsOptional()
+  posterId?: string;
+
+  @IsOptional()
   @IsBoolean()
   headerEnabled?: boolean;
+
+  @IsOptional()
+  logoUrl?: string | null;
 
   @IsOptional()
   @IsString()
@@ -100,4 +117,19 @@ export class UpsertPosterBrandingDto {
   @ValidateNested()
   @Type(() => PosterLayoutConfigDto)
   layoutConfig?: PosterLayoutConfigDto;
+
+  @IsOptional()
+  composedUrl?: string | null;
+
+  @IsOptional()
+  brandingHash?: string | null;
+
+  @IsOptional()
+  createdAt?: any;
+
+  @IsOptional()
+  updatedAt?: any;
+
+  @IsOptional()
+  sessionId?: string;
 }
