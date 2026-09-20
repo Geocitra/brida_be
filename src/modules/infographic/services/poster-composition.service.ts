@@ -114,7 +114,12 @@ export class PosterCompositionService {
     }
 
     const baseBuffer = readFileSync(baseFullPath);
-    const baseImageDataUri = `data:image/png;base64,${baseBuffer.toString('base64')}`;
+    // Deteksi MIME type dari ekstensi file (poster bisa PNG atau JPEG tergantung generator)
+    const baseExt = baseFullPath.toLowerCase();
+    const baseMime = baseExt.endsWith('.jpg') || baseExt.endsWith('.jpeg')
+      ? 'image/jpeg'
+      : 'image/png';
+    const baseImageDataUri = `data:${baseMime};base64,${baseBuffer.toString('base64')}`;
 
     // Baca berkas logo jika ada
     let logoDataUri: string | undefined = undefined;
@@ -139,6 +144,7 @@ export class PosterCompositionService {
       baseImageDataUri,
       width: dimensions.width,
       height: dimensions.height,
+      aspectRatio: poster.aspectRatio,
       headerEnabled: branding.headerEnabled,
       logoDataUri,
       institution: branding.institution,

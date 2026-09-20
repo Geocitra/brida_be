@@ -111,9 +111,9 @@ export function generatePosterBrandingHtml(options: RenderPosterOptions): string
   const headerFontSize = layoutConfig.headerFontSize || 'normal';
   const footerFontSize = layoutConfig.footerFontSize || 'normal';
   const logoSize = layoutConfig.logoSize || 'normal';
-  const headerHeight = (layoutConfig as any).headerHeight || 'normal';
-  const headerHeightPercent = (layoutConfig as any).headerHeightPercent;
-  const footerHeightPercent = (layoutConfig as any).footerHeightPercent;
+  const headerHeight = layoutConfig.headerHeight || 'normal';
+  const headerHeightPercent = layoutConfig.headerHeightPercent;
+  const footerHeightPercent = layoutConfig.footerHeightPercent;
 
   const footerBgColor = layoutConfig.footerBgColor || '#0F1E36';
   const footerTextColor = layoutConfig.footerTextColor || (isDarkColor(footerBgColor) ? '#F8FAFC' : '#0F1E36');
@@ -127,7 +127,7 @@ export function generatePosterBrandingHtml(options: RenderPosterOptions): string
     headerHeight,
     headerHeightPercent,
     footerHeightPercent,
-    aspectRatio: (options as any).aspectRatio,
+    aspectRatio: options.aspectRatio,
   });
   const {
     headerHeightPx,

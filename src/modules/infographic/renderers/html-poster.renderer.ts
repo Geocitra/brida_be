@@ -102,7 +102,28 @@ export class HtmlPosterRenderer implements IPosterRenderer, OnModuleDestroy {
         });
 
         const html = generatePosterBrandingHtml(options);
-        await page.setContent(html, { waitUntil: 'load' });
+        await page.setContent(html, { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+        // Tunggu sampai semua gambar selesai dimuat (termasuk data URI besar)
+        await page.evaluate(() => {
+          return new Promise<void>((resolve) => {
+            const images = Array.from(document.querySelectorAll('img'));
+            if (images.length === 0) return resolve();
+            let loaded = 0;
+            const check = () => {
+              loaded++;
+              if (loaded >= images.length) resolve();
+            };
+            for (const img of images) {
+              if (img.complete) {
+                check();
+              } else {
+                img.addEventListener('load', check);
+                img.addEventListener('error', check);
+              }
+            }
+          });
+        });
 
         const screenshotBuffer = await page.screenshot({
           type: 'png',

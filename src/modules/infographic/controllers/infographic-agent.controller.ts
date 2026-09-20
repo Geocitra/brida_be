@@ -5,6 +5,7 @@ import {
   Delete,
   Body,
   Param,
+  Query,
   Req,
   Res,
   UseGuards,
@@ -14,10 +15,11 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Response } from 'express';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { existsSync } from 'fs';
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard';
 import { InfographicAgentService } from '../services/infographic-agent.service';
+import { PosterCompositionService } from '../services/poster-composition.service';
 import {
   CreateInfographicSessionDto,
   ChatInfographicAgentDto,
@@ -25,7 +27,10 @@ import {
 
 @Controller('infographic/agent')
 export class InfographicAgentController {
-  constructor(private readonly agentService: InfographicAgentService) {}
+  constructor(
+    private readonly agentService: InfographicAgentService,
+    private readonly compositionService: PosterCompositionService,
+  ) {}
 
   /**
    * POST /infographic/agent/session
@@ -93,12 +98,15 @@ export class InfographicAgentController {
   }
 
   /**
-   * GET /infographic/agent/posters/:id/download
-   * Mengunduh berkas fisik poster PNG dengan header Content-Disposition: attachment
+   * GET /infographic/agent/posters/:id/download?branded=true|false
+   * Mengunduh berkas poster PNG — dengan branding (header/footer) jika branded=true.
+   * Jika branded=true DAN branding aktif, maka PosterCompositionService dipakai
+   * untuk mengomposisi header/footer via Puppeteer sebelum dikirim ke klien.
    */
   @Get('posters/:id/download')
   async downloadPoster(
     @Param('id', new ParseUUIDPipe({ version: '4' })) id: string,
+    @Query('branded') brandedParam: string,
     @Res() res: Response,
   ) {
     const poster = await this.agentService.getPosterById(id);
@@ -111,17 +119,32 @@ export class InfographicAgentController {
       .trim()
       .replace(/\s+/g, '_')
       .substring(0, 50);
-    const filename = `Infografis_BRIDA_${cleanTitle}_v${poster.versionNumber}.png`;
 
-    const relativePath = poster.imageUrl.startsWith('/')
-      ? poster.imageUrl.substring(1)
-      : poster.imageUrl;
-    const fullPath = join(process.cwd(), relativePath);
+    const wantsBranded = brandedParam === 'true';
+    const hasBranding = !!(poster.branding?.headerEnabled || poster.branding?.footerEnabled);
+
+    let finalImageUrl: string;
+
+    if (wantsBranded && hasBranding) {
+      // Jalankan Puppeteer untuk mengomposisi header/footer ke gambar final
+      finalImageUrl = await this.compositionService.composePoster(id);
+    } else {
+      finalImageUrl = poster.imageUrl;
+    }
+
+    const suffix = wantsBranded && hasBranding ? '_Resmi' : '';
+    const filename = `Infografis_BRIDA_${cleanTitle}_v${poster.versionNumber}${suffix}.png`;
+
+    const relativePath = finalImageUrl.startsWith('/')
+      ? finalImageUrl.substring(1)
+      : finalImageUrl;
+    const fullPath = resolve(process.cwd(), relativePath);
 
     if (!existsSync(fullPath)) {
       throw new NotFoundException('Berkas fisik poster tidak ditemukan pada disk server.');
     }
 
+    res.setHeader('Content-Type', 'image/png');
     return res.download(fullPath, filename);
   }
 

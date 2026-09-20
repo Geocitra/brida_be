@@ -4,6 +4,7 @@ export interface RenderPosterOptions {
   baseImageDataUri: string;
   width: number;
   height: number;
+  aspectRatio?: string;
   headerEnabled: boolean;
   logoDataUri?: string | null;
   institution?: string | null;
@@ -21,6 +22,9 @@ export interface RenderPosterOptions {
     footerFontSize?: 'compact' | 'normal' | 'large';
     logoPosition?: 'left' | 'right' | 'center';
     logoSize?: 'compact' | 'normal' | 'large';
+    headerHeight?: 'compact' | 'normal' | 'spacious';
+    headerHeightPercent?: number;
+    footerHeightPercent?: number;
   };
 }
 
