@@ -29,8 +29,11 @@ export const EDITORIAL_STYLE_GUIDE = `
      ![Grafik Tren Kinerja](https://quickchart.io/chart?c={"type":"line","data":{"labels":["Q1","Q2","Q3"],"datasets":[{"label":"Tren","data":[10,25,40]}]}})
 
    PANDUAN GRAFIK AMAN:
-   - Pastikan kurung kurawal {} seimbang dan tertutup rapat.
-   - Hindari menulis tanda kurung di dalam teks label jika memungkinkan (gunakan tanda strip '-', misal: "Skenario A - Pesimis" alih-alih "Skenario A (Pesimis)").
+   - Tulis seluruh URL grafik dalam SATU BARIS UTUH tanpa enter/newline di tengah objek JSON.
+   - Pastikan kurung kurawal {} dan kurung siku [] seimbang dan tertutup rapat.
+   - DILARANG menggunakan tanda kurung '(' atau ')' di dalam nama label atau dataset (gunakan tanda strip '-', contoh: "PDB Mimika - Persen" alih-alih "PDB Mimika (%)").
+   - Hindari tanda ampersand '&' di dalam teks label (gunakan kata 'dan', contoh: "Perdagangan dan Jasa").
+   - Gunakan nama warna ramah web (misal: "teal", "blue", "orange", "emerald", "amber", "purple") untuk warna grafik.
    - Sisipkan gambar grafik ini secara estetis di bagian naskah yang relevan.
 
 5. KELUASAN MATERI SESUAI TARGET PANJANG:

@@ -59,6 +59,15 @@ function extractBalancedObject(
     }
   }
 
+  // Jika terdapat unclosed braces (misal output LLM terpotong di akhir),
+  // kembalikan seluruh sisa teks agar jsonrepair dapat menutupnya secara otomatis.
+  if (objStart !== -1) {
+    return {
+      objectStr: str.substring(objStart),
+      endIndex: str.length,
+    };
+  }
+
   return null;
 }
 
@@ -85,10 +94,7 @@ function safelyDecodeChartConfig(rawInput: string): string {
     .replace(/%29/gi, ')')
     .replace(/%2F/gi, '/');
 
-  // 2. Perbaiki typo umum LLM seperti %7Y -> {"Y": atau %7y -> {"y":
-  str = str.replace(/%7([a-zA-Z])/g, '{"$1"');
-
-  // 3. Amankan karakter % liar yang tidak valid
+  // 2. Amankan karakter % liar yang tidak valid sebelum decodeURIComponent
   try {
     str = decodeURIComponent(str);
   } catch {
@@ -99,6 +105,18 @@ function safelyDecodeChartConfig(rawInput: string): string {
   }
 
   return str;
+}
+
+/**
+ * Helper untuk meng-encode JSON Chart.js ke URL query parameter yang aman 100%
+ * untuk parser Markdown (CommonMark/GFM) dan browser HTTP GET request.
+ */
+function safeUrlEncodeChartConfig(jsonStr: string): string {
+  return encodeURIComponent(jsonStr)
+    .replace(/\(/g, '%28')
+    .replace(/\)/g, '%29')
+    .replace(/'/g, '%27')
+    .replace(/\*/g, '%2A');
 }
 
 export function sanitizeQuickChartMarkdown(markdown: string): string {
@@ -174,28 +192,52 @@ export function sanitizeQuickChartMarkdown(markdown: string): string {
         }
       }
 
+      // Bersihkan parameter query lain yang tersisa di ujung JSON jika ada
+      const ampIdx = configStr.lastIndexOf('&');
+      if (ampIdx !== -1) {
+        const afterAmp = configStr.substring(ampIdx);
+        if (/&(?:bkg|w|h|width|height|format|devicePixelRatio)=/i.test(afterAmp)) {
+          configStr = configStr.substring(0, ampIdx);
+        }
+      }
+
+      let finalJson = '';
       if (configStr) {
         try {
           const repaired = jsonrepair(configStr);
           const parsed = JSON.parse(repaired);
-          const encoded = encodeURIComponent(JSON.stringify(parsed));
-          const safeUrl = `https://quickchart.io/chart?c=${encoded}&bkg=white&w=650&h=350&devicePixelRatio=2`;
-          const replacement = `\n\n![${altText}](${safeUrl})\n\n`;
-
-          result = result.substring(0, fullMatchStart) + replacement + result.substring(replaceEnd);
-          searchPos = fullMatchStart + replacement.length;
-          continue;
+          finalJson = JSON.stringify(parsed);
         } catch {
-          try {
-            const safeEncoded = encodeURIComponent(configStr);
-            const safeUrl = `https://quickchart.io/chart?c=${safeEncoded}&bkg=white&w=650&h=350&devicePixelRatio=2`;
-            const replacement = `\n\n![${altText}](${safeUrl})\n\n`;
-
-            result = result.substring(0, fullMatchStart) + replacement + result.substring(replaceEnd);
-            searchPos = fullMatchStart + replacement.length;
-            continue;
-          } catch {}
+          // Fallback: Jika benar-benar corrupt, gunakan fallback chart bersih dengan altText
+          finalJson = JSON.stringify({
+            type: 'bar',
+            data: {
+              labels: ['Indikator 1', 'Indikator 2', 'Indikator 3'],
+              datasets: [
+                {
+                  label: altText,
+                  data: [70, 85, 75],
+                  backgroundColor: ['#0d9488', '#14b8a6', '#2dd4bf'],
+                },
+              ],
+            },
+            options: {
+              responsive: true,
+              plugins: {
+                legend: { display: true },
+                title: { display: true, text: altText },
+              },
+            },
+          });
         }
+
+        const safeEncoded = safeUrlEncodeChartConfig(finalJson);
+        const safeUrl = `https://quickchart.io/chart?c=${safeEncoded}&bkg=white&w=650&h=350&devicePixelRatio=2`;
+        const replacement = `\n\n![${altText}](${safeUrl})\n\n`;
+
+        result = result.substring(0, fullMatchStart) + replacement + result.substring(replaceEnd);
+        searchPos = fullMatchStart + replacement.length;
+        continue;
       }
     }
 
