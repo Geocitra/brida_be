@@ -19,22 +19,28 @@ export const EDITORIAL_STYLE_GUIDE = `
    - Yang DILARANG hanyalah membuat bab kosong yang hanya berisi 1–2 baris kalimat pendek tanpa penjelasan substansi (Heading Inflation).
 
 4. VISUALISASI STATISTIK (QUICKCHART GENERATOR):
-   Jika Anda menyajikan data statistik (persentase, anggaran, komparasi tahunan, populasi), ANDA WAJIB MENGGAMBAR GRAFIK VISUAL (Pie Chart, Bar Chart, Line Chart, Doughnut Chart).
-   Gunakan sintaks Markdown Image ke API QuickChart dengan struktur Chart.js yang bersih:
+   Grafik visual HANYA DIGUNAKAN untuk data kuantitatif numerik (persentase, anggaran, komparasi tahunan, populasi, data per distrik).
+   ATURAN MUTLAK DIAGRAM ALUR & ROADMAP:
+   - DILARANG KERAS menggunakan gambar QuickChart untuk alur proses, peta tahapan, diagram alir, flowchart, atau matriks hubungan! QuickChart/Chart.js TIDAK MENDUKUNG flowchart/sankey/diagram proses.
+   - Untuk alur proses, tahapan program, roadmap, atau matriks hubungan sebab-akibat: ANDA WAJIB MENGGUNAKAN TABEL MARKDOWN (misal: Kolom Tahap, Kegiatan, OPD Penanggung Jawab, Target Waktu) atau DAFTAR LANGKAH TERSTRUKTUR (Numbered Lists). Ini wajib dipatuhi.
+   
+   Jika menyajikan data angka statistik kuantitatif, gunakan sintaks Markdown Image ke API QuickChart dengan Chart.js v3 resmi:
    - Contoh Bar Chart:
-     ![Grafik Batang Perbandingan](https://quickchart.io/chart?c={"type":"bar","data":{"labels":["2025","2026"],"datasets":[{"label":"Target","data":[50,80]}]}})
+     ![Grafik Batang Perbandingan](https://quickchart.io/chart?v=3&c={"type":"bar","data":{"labels":["2025","2026"],"datasets":[{"label":"Target","data":[50,80]}]}})
    - Contoh Pie Chart:
-     ![Grafik Pie Proporsi Sektor](https://quickchart.io/chart?c={"type":"pie","data":{"labels":["Pendidikan","Kesehatan"],"datasets":[{"data":[60,40]}]}})
+     ![Grafik Pie Proporsi Sektor](https://quickchart.io/chart?v=3&c={"type":"pie","data":{"labels":["Pendidikan","Kesehatan"],"datasets":[{"data":[60,40]}]}})
    - Contoh Line Chart:
-     ![Grafik Tren Kinerja](https://quickchart.io/chart?c={"type":"line","data":{"labels":["Q1","Q2","Q3"],"datasets":[{"label":"Tren","data":[10,25,40]}]}})
+     ![Grafik Tren Kinerja](https://quickchart.io/chart?v=3&c={"type":"line","data":{"labels":["Q1","Q2","Q3"],"datasets":[{"label":"Tren","data":[10,25,40]}]}})
 
-   PANDUAN GRAFIK AMAN:
+   PANDUAN GRAFIK AMAN (VALID CHART.JS ONLY):
+   - TIPE CHART YANG DIIZINKAN HANYA: "bar", "line", "pie", "doughnut", "radar".
+   - DILARANG KERAS menggunakan tipe "flowchart", "sankey", "diagram", "process", atau "tree".
+   - WAJIB sertakan "v=3" pada URL QuickChart (https://quickchart.io/chart?v=3&c=...).
+   - Jika ingin memetakan tahapan progres capaian numerik secara horizontal, gunakan tipe batang horizontal ("type": "bar", "options": {"indexAxis": "y"}).
    - Tulis seluruh URL grafik dalam SATU BARIS UTUH tanpa enter/newline di tengah objek JSON.
-   - Pastikan kurung kurawal {} dan kurung siku [] seimbang dan tertutup rapat.
    - DILARANG menggunakan tanda kurung '(' atau ')' di dalam nama label atau dataset (gunakan tanda strip '-', contoh: "PDB Mimika - Persen" alih-alih "PDB Mimika (%)").
    - Hindari tanda ampersand '&' di dalam teks label (gunakan kata 'dan', contoh: "Perdagangan dan Jasa").
-   - Gunakan nama warna ramah web (misal: "teal", "blue", "orange", "emerald", "amber", "purple") untuk warna grafik.
-   - Sisipkan gambar grafik ini secara estetis di bagian naskah yang relevan.
+   - Gunakan palet warna profesional bertema daerah Mimika: teal, emerald, slate, amber, blue.
 
 5. KELUASAN MATERI SESUAI TARGET PANJANG:
    Eksplorasi topik seluas dan semendalam mungkin sesuai target panjang naskah:

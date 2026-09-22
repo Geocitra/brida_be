@@ -50,7 +50,7 @@ const DUAL_PANE_COOPERATIVE_SCHEMA = {
           type: 'string',
           description:
             'Naskah dokumen formal utuh untuk Kanvas Cetak A4 TipTap (Saluran 2). DIBEBASKAN SEPENUHNYA menggunakan format struktur apa pun yang paling relevan. ' +
-            'BEBAS BEREKSPRESI DENGAN KEKAYAAN FORMAT: Sangat dianjurkan menggunakan tabel Markdown, poin analitis (bullet/numbered lists), grafik visual QuickChart (Pie/Bar Chart), dan narasi mengalir. ' +
+            'BEBAS BEREKSPRESI DENGAN KEKAYAAN FORMAT: Sangat dianjurkan menggunakan tabel Markdown, poin analitis (bullet/numbered lists), grafik visual QuickChart statistik numerik (Bar/Pie/Line/Doughnut Chart — DILARANG flowchart/sankey), dan narasi mengalir. ' +
             'Setiap bab utama (##) harus memiliki substansi minimal 150 kata (akumulasi teks, tabel, dan poin). ' +
             'DILARANG membuat sub-heading kecil yang hanya berisi 1-2 kalimat pendek tanpa elaborasi data. ' +
             'Eksplorasi materi seluas-luasnya sesuai target volume (SHORT: ~750 kata, MEDIUM: ~1.500 kata, LONG: MINIMAL 3.000 KATA PENUH). ' +

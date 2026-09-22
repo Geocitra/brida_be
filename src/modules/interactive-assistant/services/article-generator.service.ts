@@ -79,7 +79,9 @@ const OUTLINE_OUTPUT_SCHEMA = {
     },
     chartHints: {
       type: 'string',
-      description: 'Daftar judul/topik visualisasi data QuickChart yang relevan, dipisah koma. Kosongkan jika tidak ada data numerik.',
+      description:
+        'Daftar 1-2 judul visualisasi data statistik numerik (misal: tren alokasi anggaran, persentase capaian per distrik). ' +
+        'HANYA untuk topik berbasis angka kuantitatif. DILARANG memasukkan alur proses/flowchart/diagram. Kosongkan jika tidak ada data numerik.',
     },
   },
   required: ['judulUsulan', 'ringkasan', 'daftarBab', 'chartHints'],
@@ -130,8 +132,9 @@ const ARTICLE_OUTPUT_SCHEMA = {
     chartHints: {
       type: 'string',
       description:
-        'Daftar judul/topik chart yang sebaiknya disisipkan ke dalam naskah, dipisah koma. ' +
+        'Daftar 1-2 judul/topik visualisasi statistik numerik yang relevan, dipisah koma. ' +
         'Contoh: "Perbandingan Curah Hujan 2024-2026, Prevalensi Stunting per Distrik". ' +
+        'HANYA untuk topik berbasis angka kuantitatif. DILARANG memasukkan alur proses/flowchart/diagram. ' +
         'Kosongkan jika tidak ada data yang cocok untuk divisualisasikan.',
     },
   },
@@ -149,10 +152,12 @@ const CHART_GENERATION_SCHEMA = {
       type: 'string',
       description:
         'String Markdown berisi satu atau lebih gambar QuickChart dalam format: ' +
-        '![Judul Chart](https://quickchart.io/chart?c=...) ' +
+        '![Judul Chart](https://quickchart.io/chart?v=3&c=...) ' +
         'Setiap chart dipisahkan dengan newline ganda. ' +
-        'Hasilkan chart yang sesuai dengan topik yang diminta. ' +
-        'Gunakan data numerik nyata atau estimasi realistis.',
+        'ATURAN KETAT TIPE CHART: ' +
+        'HANYA gunakan tipe Chart.js yang sah: "bar", "line", "pie", "doughnut", atau "radar". ' +
+        'DILARANG KERAS menggunakan tipe "flowchart", "sankey", "diagram", "process", atau "graph" karena tidak didukung QuickChart! ' +
+        'Jika topik berkaitan dengan alur kerja atau tahapan, WAJIB disajikan sebagai grafik batang horizontal ("type": "bar", "options": {"indexAxis": "y"}) yang memetakan estimasi progres/distribusi per tahapan.',
     },
   },
   required: ['charts'],
@@ -440,11 +445,16 @@ Setelah selesai, isi field chartHints dengan topik chart yang relevan (jika ada)
               {
                 role: 'system',
                 content:
-                  'Anda adalah spesialis visualisasi data. Hasilkan chart QuickChart URL yang akurat, proporsional, dan rapi.',
+                  'Anda adalah spesialis visualisasi data statistik BRIDA. Anda menghasilkan grafik Chart.js resmi untuk QuickChart v3.\n' +
+                  'ATURAN KETAT:\n' +
+                  '1. Tipe chart HANYA boleh: "bar", "line", "pie", "doughnut", atau "radar".\n' +
+                  '2. DILARANG KERAS menggunakan tipe "flowchart", "sankey", "diagram", atau "process"!\n' +
+                  '3. Untuk grafik horizontal (alur tahapan proses), gunakan "type": "bar" dengan "options": {"indexAxis": "y"}.\n' +
+                  '4. Gunakan URL https://quickchart.io/chart?v=3&c={...} dengan konfigurasi Chart.js valid dan warna profesional (teal, slate, emerald).',
               },
               {
                 role: 'user',
-                content: `Topik naskah: "${normalizedTitle}"\n\nBuat chart QuickChart Markdown untuk topik berikut:\n${chartHints}\n\nGunakan data numerik estimasi realistis yang relevan. Format output: gambar Markdown QuickChart (![judul](url)).`,
+                content: `Topik naskah: "${normalizedTitle}"\n\nBuat grafik statistik QuickChart Markdown untuk topik berikut:\n${chartHints}\n\nGunakan data numerik estimasi realistis. Format output: Markdown QuickChart (![judul](url)).`,
               },
             ],
             CHART_GENERATION_SCHEMA,
@@ -486,6 +496,7 @@ Setelah selesai, isi field chartHints dengan topik chart yang relevan (jika ada)
         }
       }
 
+      fullArticleText = sanitizeQuickChartMarkdown(fullArticleText);
       fullArticleText = cleanArticleTitlePrefix(fullArticleText);
       fullArticleText = ensureCompleteText(fullArticleText);
       fullArticleText = ensureDocumentTitleHeader(fullArticleText, normalizedTitle);
@@ -936,9 +947,10 @@ ${EDITORIAL_STYLE_GUIDE}
         content = `## ${chapter.nomorBab}. ${chapter.judulBab}\n\n${content}`;
       }
 
-      const chapterWords = countWords(content);
+      const sanitizedContent = sanitizeQuickChartMarkdown(content);
+      const chapterWords = countWords(sanitizedContent);
       this.logger.log(`[ChapterGen] Bab ${chapter.nomorBab} selesai: ${chapterWords} kata riil.`);
-      return ensureCompleteText(content);
+      return ensureCompleteText(sanitizedContent);
     } catch (err: any) {
       this.logger.warn(`[ChapterGen Fallback] Bab ${chapter.nomorBab} fallback: ${err.message}`);
       return createFallbackChapterText(chapter, officialTitle);
