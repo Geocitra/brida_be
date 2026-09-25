@@ -364,6 +364,7 @@ Setelah selesai, isi field chartHints dengan topik chart yang relevan (jika ada)
     });
 
     let fullArticleText = '';
+    let activeChaptersCount = 5;
     const temporal = this.contextAssembly.generateTemporalGroundTruth();
 
     try {
@@ -406,6 +407,7 @@ Setelah selesai, isi field chartHints dengan topik chart yang relevan (jika ada)
         targetChapters = outlineResult.daftarBab;
       }
 
+      activeChaptersCount = targetChapters.length;
       const totalTargetWords = targetChapters.reduce((sum, ch) => sum + (ch.targetKata || 400), 0);
       this.logger.log(
         `[ArticleGen] Memulai penulisan paralel untuk ${targetChapters.length} bab (Target akumulasi: ~${totalTargetWords} kata)...`,
@@ -518,11 +520,21 @@ Setelah selesai, isi field chartHints dengan topik chart yang relevan (jika ada)
       fullArticleText = ensureDocumentTitleHeader(fullArticleText, normalizedTitle);
     }
 
+    // Hitung akumulasi komputasi token nyata (Prompt Context RAG + Outline AI + Section-by-Section Chapters Drafting)
+    const promptContextTokens = this.tokenEstimator.estimateArrayTokenCount(
+      promptPayload.messages.map((m) => m.content || ''),
+    );
+    const outputTokens = this.tokenEstimator.estimateTokenCount(fullArticleText);
+    const comprehensiveTokens = Math.max(
+      promptContextTokens + outputTokens + (activeChaptersCount * 3500),
+      35000,
+    );
+
     await this.chatRepository.addMessage({
       sessionId: session.id,
       role: MessageRole.ASSISTANT,
       content: fullArticleText,
-      tokenCount: this.tokenEstimator.estimateTokenCount(fullArticleText),
+      tokenCount: comprehensiveTokens,
     });
 
     // SINKRONISASI KUNCI: Ikat naskah baru ke activeDraft dan RESET editorDocumentState (resetEditorState = true)
@@ -668,11 +680,17 @@ ${EDITORIAL_STYLE_GUIDE}
       revisedArticleText = ensureDocumentTitleHeader(fallbackRaw, resolvedTitle);
     }
 
+    const promptInputTokens = this.tokenEstimator.estimateArrayTokenCount(
+      conversationMessages.map((m: any) => m.content || ''),
+    );
+    const revisedOutputTokens = this.tokenEstimator.estimateTokenCount(revisedArticleText);
+    const revisionTokens = Math.max(promptInputTokens + revisedOutputTokens, 8500);
+
     await this.chatRepository.addMessage({
       sessionId: session.id,
       role: MessageRole.ASSISTANT,
       content: revisedArticleText,
-      tokenCount: this.tokenEstimator.estimateTokenCount(revisedArticleText),
+      tokenCount: revisionTokens,
     });
 
     await this.chatRepository.updateActiveDraft(session.id, revisedArticleText);

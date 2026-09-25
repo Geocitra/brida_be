@@ -439,6 +439,7 @@ model InfographicPoster {
   aiCommentary      String?                   @db.Text
   imageUrl          String                    @db.VarChar(1024)
   aspectRatio       String                    @default("9:16")
+  tokenCount        Int                       @default(0)
   generationProfile PosterGenerationProfile   @default(V1_BAKED_FOOTER)
   createdAt         DateTime                  @default(now())
 

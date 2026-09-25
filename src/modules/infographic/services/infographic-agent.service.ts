@@ -22,6 +22,9 @@ import {
 export class InfographicAgentService {
   private readonly logger = new Logger(InfographicAgentService.name);
 
+  // Estimasi biaya komposit per render gambar poster DALL-E 3 + Art Director LLM (~$0.036 USD / 150.000 token)
+  public static readonly POSTER_GENERATION_TOKENS = 150000;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly artDirector: ArtDirectorPromptArchitect,
@@ -85,6 +88,7 @@ export class InfographicAgentService {
         aiCommentary: artConcept.aiCommentary,
         imageUrl: localImageUrl,
         aspectRatio,
+        tokenCount: InfographicAgentService.POSTER_GENERATION_TOKENS,
       },
     });
 
@@ -156,6 +160,7 @@ export class InfographicAgentService {
         aiCommentary: evolvedConcept.aiCommentary,
         imageUrl: localImageUrl,
         aspectRatio,
+        tokenCount: InfographicAgentService.POSTER_GENERATION_TOKENS,
       },
     });
 

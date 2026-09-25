@@ -66,6 +66,7 @@ export class AnalysisController {
         aiLogsSum,
         reportsSum,
         chatMessagesSum,
+        infographicPostersSum,
         recentChatsRaw,
         recentArticlesRaw
       ] = await Promise.all([
@@ -76,6 +77,9 @@ export class AnalysisController {
           _sum: { tokenCount: true }
         }),
         this.prisma.chatMessage.aggregate({
+          _sum: { tokenCount: true }
+        }),
+        this.prisma.infographicPoster.aggregate({
           _sum: { tokenCount: true }
         }),
         this.prisma.chatSession.findMany({
@@ -120,7 +124,8 @@ export class AnalysisController {
       const aiTokens = aiLogsSum._sum?.tokenCount || 0;
       const reportTokens = reportsSum._sum?.tokenCount || 0;
       const chatTokens = chatMessagesSum._sum?.tokenCount || 0;
-      const totalTokens = aiTokens + reportTokens + chatTokens;
+      const infographicTokens = (infographicPostersSum._sum as any)?.tokenCount || 0;
+      const totalTokens = aiTokens + reportTokens + chatTokens + infographicTokens;
       const tokenBudget = this.mathService.calculateTokenBudget(totalTokens);
 
       // 3. Mapping Riwayat Obrolan Aktif (AI Chat)
