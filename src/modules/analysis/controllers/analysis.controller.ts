@@ -81,7 +81,7 @@ export class AnalysisController {
         }),
         this.prisma.infographicPoster.aggregate({
           _sum: { tokenCount: true }
-        }),
+        }).catch(() => ({ _sum: { tokenCount: 0 } })),
         this.prisma.chatSession.findMany({
           where: { sessionType: SessionType.QA_CHAT },
           orderBy: { updatedAt: 'desc' },
